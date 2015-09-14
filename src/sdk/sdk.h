@@ -25,7 +25,7 @@ struct Index {
 struct StoreRequest {
     std::string db_name;
     std::string table_name;
-    std::string primary_key;
+    std::string primary_key; // key after encode
     uint64_t timestamp;
     std::vector<struct Index> index_list;
     std::string data;
@@ -72,14 +72,19 @@ struct SearchRequest {
     std::string db_name;
     std::string table_name;
     std::vector<struct IndexCondition> index_condition_list;
-    struct IndexCondition start_tm;
-    struct IndexCondition end_tm;
+    struct IndexCondition start_timestamp;
+    struct IndexCondition end_timestamp;
     int32_t limit;
 };
 
 // 查询结果
-struct SearchResponse {
+struct ResultStream {
+    std::string primary_key;
     std::vector<std::string> result_data_list;
+};
+
+struct SearchResponse {
+    std::vector<ResultStream> result_stream;
     void* user_ptr;
 };
 
@@ -143,7 +148,7 @@ void Create(const CreateRequest& request, CreateResponse* response);
 class Database {
 public:
     static int CreateDB(std::string db_name);
-    virtual int OpenTable(const CreateRequest& request, CreateResponse* response, table** table_ptr) = 0;
+    virtual int OpenTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr) = 0;
 private:
     Database(const Database&);
     void operator=(const Database&);
