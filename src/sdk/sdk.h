@@ -34,6 +34,7 @@ struct StoreRequest {
 // 写入结果
 struct StoreResponse {
     int error;
+    void* user_ptr;
 };
 
 // 异步写入回调
@@ -79,6 +80,7 @@ struct SearchRequest {
 // 查询结果
 struct SearchResponse {
     std::vector<std::string> result_data_list;
+    void* user_ptr;
 };
 
 // 异步查询回调
@@ -133,38 +135,27 @@ struct CreateResponse {
     int error;
 };
 
-// table in memory control structure
-struct tera_adapter {
-    tera::Client* client;
-    std::map<std::string, tera::table*> tera_table_map; // <table_name, table desc>
-};
+void Create(const CreateRequest& request, CreateResponse* response);
 
-struct fs_adapter {
-    std::string root_path;
-    // TODO:
-};
-
-class database {
+//////////////////////////////////
+//      c++ interface           //
+//////////////////////////////////
+class Database {
 public:
-    // create fs namespace
     static int CreateDB(std::string db_name);
-    // if db not exit, create it
-    static int OpenTable(const CreateRequest& request, CreateResponse* response, table** table_ptr);
-
+    virtual int OpenTable(const CreateRequest& request, CreateResponse* response, table** table_ptr) = 0;
 private:
-    std::string db_name;
-    std::map<std::string, table*> table_map; // <table_name, table ptr>
+    Database(const Database&);
+    void operator=(const Database&);
 };
 
-class table {
+class Table {
 public:
-    int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
-    int Put(const StoreRequest* request, StoreResponse* response);
-
+    virtual int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback) = 0;
+    virtual int Put(const StoreRequest* request, StoreResponse* response) = 0;
 private:
-    TableDescription table_desc;
-    tera_adapter _tera;
-    fs_adapter _fs;
+    Table(const Table&);
+    void operator=(const Table&);
 };
 
 } // namespace mdt
