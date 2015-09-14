@@ -18,22 +18,23 @@ namespace mdt {
 // 索引数据
 struct Index {
     std::string index_name;
-    std::string index_key;
+    std::string index_key;// key after encode
 };
 
 // 写入请求
 struct StoreRequest {
-    std::string product_name;
-    std::string class_name;
+    std::string db_name;
+    std::string table_name;
     std::string primary_key;
-    std::string data;
     uint64_t timestamp;
     std::vector<struct Index> index_list;
+    std::string data;
 };
 
 // 写入结果
 struct StoreResponse {
     int error;
+    void* user_ptr;
 };
 
 // 异步写入回调
@@ -63,20 +64,23 @@ enum COMPARATOR {
 struct IndexCondition {
     std::string index_name;
     enum COMPARATOR comparator;
-    std::string compare_value;
+    std::string compare_value; // value after enconde
 };
 
 // 查询请求
 struct SearchRequest {
-    std::string product_name;
-    std::string class_name;
+    std::string db_name;
+    std::string table_name;
     std::vector<struct IndexCondition> index_condition_list;
+    struct IndexCondition start_tm;
+    struct IndexCondition end_tm;
     int32_t limit;
 };
 
 // 查询结果
 struct SearchResponse {
     std::vector<std::string> result_data_list;
+    void* user_ptr;
 };
 
 // 异步查询回调
@@ -113,17 +117,17 @@ struct IndexDescription {
     std::string index_name;
     enum TYPE index_key_type;
 };
-
 // 数据类描述
-struct ClassDescription {
+struct TableDescription {
+    std::string table_name;
     enum TYPE primary_key_type;
     std::vector<struct IndexDescription> index_descriptor_list;
 };
 
 // 建表请求
 struct CreateRequest {
-    std::string product_name;
-    std::vector<struct ClassDescription> class_descriptor_list;
+    std::string db_name;
+    std::vector<struct TableDescription> table_descriptor_list;
 };
 
 // 建表结果
@@ -131,8 +135,28 @@ struct CreateResponse {
     int error;
 };
 
-// 建表接口
 void Create(const CreateRequest& request, CreateResponse* response);
+
+//////////////////////////////////
+//      c++ interface           //
+//////////////////////////////////
+class Database {
+public:
+    static int CreateDB(std::string db_name);
+    virtual int OpenTable(const CreateRequest& request, CreateResponse* response, table** table_ptr) = 0;
+private:
+    Database(const Database&);
+    void operator=(const Database&);
+};
+
+class Table {
+public:
+    virtual int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback) = 0;
+    virtual int Put(const StoreRequest* request, StoreResponse* response) = 0;
+private:
+    Table(const Table&);
+    void operator=(const Table&);
+};
 
 } // namespace mdt
 
