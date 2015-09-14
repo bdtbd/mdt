@@ -23,12 +23,12 @@ struct Index {
 
 // 写入请求
 struct StoreRequest {
-    std::string product_name;
-    std::string class_name;
+    std::string db_name;
+    std::string table_name;
     std::string primary_key;
-    std::string data;
     uint64_t timestamp;
     std::vector<struct Index> index_list;
+    std::string data;
 };
 
 // 写入结果
@@ -68,8 +68,8 @@ struct IndexCondition {
 
 // 查询请求
 struct SearchRequest {
-    std::string product_name;
-    std::string class_name;
+    std::string db_name;
+    std::string table_name;
     std::vector<struct IndexCondition> index_condition_list;
     int32_t limit;
 };
@@ -113,17 +113,17 @@ struct IndexDescription {
     std::string index_name;
     enum TYPE index_key_type;
 };
-
 // 数据类描述
-struct ClassDescription {
+struct TableDescription {
+    std::string table_name;
     enum TYPE primary_key_type;
     std::vector<struct IndexDescription> index_descriptor_list;
 };
 
 // 建表请求
 struct CreateRequest {
-    std::string product_name;
-    std::vector<struct ClassDescription> class_descriptor_list;
+    std::string db_name;
+    std::vector<struct TableDescription> table_descriptor_list;
 };
 
 // 建表结果
