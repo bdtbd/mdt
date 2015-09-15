@@ -11,11 +11,9 @@ namespace mdt {
 
 class SdkImpl {
 public:
-    // 同步写入接口
-    static void Put(const StoreRequest& request, StoreResponse* response);
-
-    // 异步写入接口
-    static void Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
+    // 写入接口
+    static void Put(const StoreRequest* request, StoreResponse* response,
+                    StoreCallback callback = NULL);
 
     // 同步查询接口
     static void Get(const SearchRequest& request, SearchResponse* response);

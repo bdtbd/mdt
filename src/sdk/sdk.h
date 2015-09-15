@@ -40,11 +40,8 @@ struct StoreResponse {
 // 异步写入回调
 typedef void (*StoreCallback)(const StoreRequest* request, const StoreResponse* response);
 
-// 同步写入接口
-void Put(const StoreRequest& request, StoreResponse* response);
-
-// 异步写入接口
-void Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
+// 写入接口。callback != NULL时，是异步调用。
+void Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback = NULL);
 
 //////////////////////////////////////////////
 // 查询
@@ -136,27 +133,6 @@ struct CreateResponse {
 };
 
 void Create(const CreateRequest& request, CreateResponse* response);
-
-//////////////////////////////////
-//      c++ interface           //
-//////////////////////////////////
-class Database {
-public:
-    static int CreateDB(std::string db_name);
-    virtual int OpenTable(const CreateRequest& request, CreateResponse* response, table** table_ptr) = 0;
-private:
-    Database(const Database&);
-    void operator=(const Database&);
-};
-
-class Table {
-public:
-    virtual int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback) = 0;
-    virtual int Put(const StoreRequest* request, StoreResponse* response) = 0;
-private:
-    Table(const Table&);
-    void operator=(const Table&);
-};
 
 } // namespace mdt
 

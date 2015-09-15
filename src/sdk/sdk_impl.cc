@@ -6,12 +6,7 @@
 
 namespace mdt {
 
-// 同步写入接口
-void SdkImpl::Put(const StoreRequest& request, StoreResponse* response) {
-
-}
-
-// 异步写入接口
+// 写入接口
 void SdkImpl::Put(const StoreRequest* request, StoreResponse* response,
                   StoreCallback callback) {
 
