@@ -3,8 +3,10 @@
 
 namespace mdt {
 // table in memory control structure
+struct TeraOptions;
 struct TeraAdapter {
-    tera::Client* client_;
+    std::string table_prefix_; // db_name
+    TeraOptions opt_;
     std::map<std::string, tera::Table*> tera_table_map_; // <table_name, table desc>
 };
 
@@ -24,16 +26,22 @@ public:
     int Put(const StoreRequest* request, StoreResponse* response);
 
 private:
-    std::string db_name_;
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
 };
 
+struct FilesystemOptions {
+    std::string fs_path_; // db_name + FileSystem
+};
+
 struct TeraOptions {
-    std::string root_path_;
-    std::string tera_flag_;
+    std::string root_path_; // path of tera dir
+    std::string tera_flag_; // path of tera.flag
     tera::Client* client_;
+
+    // schema table(kv), key = table_name, value = BigQueryTableSchema (define in kv.proto)
+    std::string schema_table_name_;
     tera::Table* schema_table_;
 };
 
@@ -47,6 +55,7 @@ public:
 private:
     std::string db_name_;
     const Options options_;
+    FilesystemOptions fs_opt_;
     TeraOptions tera_opt_;
     std::map<std::string, TableImpl*> table_map_; // <table_name, table ptr>
 };
