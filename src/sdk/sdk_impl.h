@@ -5,6 +5,10 @@
 #ifndef  MDT_SDK_SDK_IMPL_H_
 #define  MDT_SDK_SDK_IMPL_H_
 
+#include <map>
+
+#include "common/mutex.h"
+#include "common/thread_pool.h"
 #include "sdk/sdk.h"
 
 namespace mdt {
@@ -23,6 +27,24 @@ public:
 
     // 建表接口
     static void Create(const CreateRequest& request, CreateResponse* response);
+
+private:
+    static Status FindTable(const std::string& db_name, const std::string& table_name,
+                            Table** table_ptr);
+    static Status FindDatabase(const std::string& db_name, Database** db_ptr);
+
+    static void RunStoreCallback(StoreCallback callback, const StoreRequest* request,
+                                 const StoreResponse* response);
+    static void RunSearchCallback(SearchCallback callback, const SearchRequest* request,
+                                  const SearchResponse* response);
+
+private:
+    static std::map<std::string, Database*> db_map_;
+    static Database* cur_db_;
+    static Table* cur_table_;
+    static Mutex mutex_;
+
+    ThreadPool thread_pool_;
 
 }; // class SdkImpl
 

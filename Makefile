@@ -16,13 +16,16 @@ CXXFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 LDFLAGS += -rdynamic $(DEPS_LDPATH) $(DEPS_LDFLAGS) -lpthread -lrt -lz -ldl
 
 SDK_SRC := $(wildcard src/sdk/*.cc)
+COMMON_SRC := $(wildcard src/common/*.cc)
+UTIL_SRC := src/util/*.cc
 VERSION_SRC := src/version.cc
-OTHER_SRC := $(VERSION_SRC)
 
 SDK_OBJ := $(SDK_SRC:.cc=.o)
-OTHER_OBJ := $(OTHER_SRC:.cc=.o)
+COMMON_OBJ := $(COMMON_SRC:.cc=.o)
+UTIL_OBJ := $(UTIL_SRC:.cc=.o)
+VERSION_OBJ := $(VERSION_SRC:.cc=.o)
 
-ALL_OBJ := $(SDK_OBJ) $(OTHER_OBJ)
+ALL_OBJ := $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(VERSION_OBJ)
 
 PROGRAM = 
 LIBRARY = libmdt.a
@@ -45,8 +48,8 @@ cleanall:
 	$(MAKE) clean
 	rm -rf build
 
-libmdt.a: $(SDK_OBJ) $(OTHER_OBJ)
-	$(AR) -rs $@ $(SDK_OBJ) $(OTHER_OBJ)
+libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(VERSION_OBJ)
+	$(AR) -rs $@ $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(VERSION_OBJ)
 
 $(VERSION_SRC): FORCE
 	sh build_version.sh

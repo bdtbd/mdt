@@ -25,7 +25,7 @@ class Inserter {
     Status status;
 };
 
-class Table {
+class TableImpl {
 public:
     virtual void Insert(const SearchRequest* request, SearchResponse* response,
                         SearchCallback callback = NULL, void* callback_param = NULL);
