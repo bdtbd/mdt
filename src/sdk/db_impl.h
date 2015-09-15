@@ -3,7 +3,7 @@
 
 namespace mdt {
 // table in memory control structure
-struct TeraOptions;
+struct TeraOptions; 
 struct TeraAdapter {
     std::string table_prefix_; // db_name
     TeraOptions opt_;
@@ -39,7 +39,7 @@ struct TeraOptions {
     std::string root_path_; // path of tera dir
     std::string tera_flag_; // path of tera.flag
     tera::Client* client_;
-
+    
     // schema table(kv), key = table_name, value = BigQueryTableSchema (define in kv.proto)
     std::string schema_table_name_;
     tera::Table* schema_table_;

@@ -42,7 +42,7 @@ int DatabaseImpl::CreateDB(const Options& options,
     return 0;
 }
 
-int DatabaseImpl::OpenTable(const CreateRequest* req, 
+int DatabaseImpl::CreateTable(const CreateRequest* req, 
                              CreateResponse* resp) {
     assert(db_name_ == req->db_name);
     std::vector<TableDescription>::iterator it;
@@ -54,13 +54,13 @@ int DatabaseImpl::OpenTable(const CreateRequest* req,
         }
         // construct memory structure
         TableImpl* table_ptr;
-        assert(InternalOpenTable(*it, &table_ptr));
+        assert(InternalCreateTable(*it, &table_ptr));
         table_map_[it->table_name] = table_ptr;
     }
     return 0; 
 }
 
-int DatabaseImpl::InternalOpenTable(const TableDescription& table_desc, TableImpl** table) {
+int DatabaseImpl::InternalCreateTable(const TableDescription& table_desc, TableImpl** table) {
     std::string& table_name = table_desc.table_name; 
     // init fs adapter
     FilesystemAdapter fs_adapter;
@@ -102,8 +102,11 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     tera::LocalityGroupDescriptor* lg = primary_table_desc.AddLocalityGroup("lg"); 
     lg->SetBlockSize(32 * 1024);
     lg->SetCompress(tera::kSnappyCompress);
-    tera::ColumnFamilyDescriptor* cf = primary_table_desc.AddColumnFamily("location", "lg");
+    tera::ColumnFamilyDescriptor* cf = primary_table_desc.AddColumnFamily("Location", "lg");
     tera_.opt_.client_->CreateTable(primary_table_desc, &error_code);
+    
+    tera::Table* primary_table = tera_.opt_.client_->OpenTable(primary_table_name, &error_code);
+    tera_.tera_table_map_[primary_table_name] = primary_table;
 
     // create index key table
     std::vector<IndexDescription>::iterator it; 
@@ -112,13 +115,30 @@ TableImpl::TableImpl(const TableDescription& table_desc,
          ++it) {
         std::string index_table_name = tera_.table_prefix_ + "#" + it->index_name;
         tera::TableDescriptor index_table_desc(index_table_name);
-        
-        //tera_.opt_.client_->
+        tera::LocalityGroupDescriptor* index_lg = index_tablet_desc.AddLocalityGroup("lg");
+        lg->SetBlockSize(32 * 1024);
+        lg->SetCompress(tera::kSnappyCompress);
+        tera::ColumnFamilyDescriptor* index_cf = index_table_desc.AddColumnFamily("PrimaryKey", "lg");
+        tera_.op_.client_->CreateTable(index_table_desc, &error_code);
+
+        tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
+        tera_.tera_table_map_[index_table_name] = index_table;
     }
 }
 
-int TableImpl::AssembleTableSchema(const TableDescripton& table_desc, 
-                                      BigQueryTableSchema* schema) {
+int TableImpl::AssembleTableSchema(const TableDescription& table_desc, 
+                                   BigQueryTableSchema* schema) {
+    schema->set_table_name(table_desc.table_name); 
+    schema->set_primary_key_type(table_desc.primary_key_type);
+    std::vector<IndexDescription>::iterator it;
+    for (it = table_desc.index_descriptor_list.begin();
+         it != table_desc.index_descriptor_list.end();
+         ++it) {
+        IndexSchema index;
+        index.set_index_name(it->index_name);
+        index.set_index_key_type(it->index_key_type);
+        schema->add_index_descriptor_list(index);
+    }
     return 0;
 }
 
