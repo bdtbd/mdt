@@ -156,15 +156,15 @@ private:
 
 class Table {
 public:
-    virtual int Put(const StoreRequest* request,
-                    StoreResponse* response,
+    virtual int Put(const StoreRequest* request, 
+                    StoreResponse* response, 
                     StoreCallback callback) = 0;
-    virtual int Put(const StoreRequest* request,
+    virtual int Put(const StoreRequest* request, 
                     StoreResponse* response) = 0;
-    virtual int Get(const SearchRequest* request,
-                    SearchResponse* response,
+    virtual int Get(const SearchRequest* request, 
+                    SearchResponse* response, 
                     SearchCallback callback) = 0;
-    virtual int Get(const SearchRequest& request,
+    virtual int Get(const SearchRequest& request, 
                     SearchResponse* response) = 0;
 
 private:
