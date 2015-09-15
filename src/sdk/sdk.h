@@ -40,11 +40,8 @@ struct StoreResponse {
 // 异步写入回调
 typedef void (*StoreCallback)(const StoreRequest* request, const StoreResponse* response);
 
-// 同步写入接口
-void Put(const StoreRequest& request, StoreResponse* response);
-
-// 异步写入接口
-void Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
+// 写入接口。callback != NULL时，是异步调用。
+void Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback = NULL);
 
 //////////////////////////////////////////////
 // 查询
