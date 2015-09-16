@@ -15,7 +15,7 @@
 #include "util/string_ext.h"
 #include "../utils/counter.h"
 
-namespace leveldb {
+namespace mdt {
 
 static const char* (*printVersion)();
 static int (*nfsInit)(const char* mountpoint, const char* config_file_path);
@@ -335,5 +335,4 @@ int32_t Nfs::ListDirectory(const std::string& path,
   return 0;
 }
 
-}
-/* vim: set expandtab ts=2 sw=2 sts=2 tw=100: */
+} // namespace mdt

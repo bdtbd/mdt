@@ -2,47 +2,87 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef  MDT_SDK_TABLE_H_
-#define  MDT_SDK_TABLE_H_
+#ifndef  MDT_SDK_TABLE_IMPL_H_
+#define  MDT_SDK_TABLE_IMPL_H_
 
 #include "sdk/sdk_impl.h"
 
 namespace mdt {
 
-class Selector {
-    SearchRequest* request;
-    SearchResponse* response;
-    SearchCallback* callback;
-    void* user_param;
-    Status status;
+///////////////////////////////
+//      TableImpl class      //
+///////////////////////////////
+// table in memory control structure
+struct TeraOptions;
+struct TeraAdapter {
+    std::string table_prefix_; // db_name
+    TeraOptions opt_;
+    std::map<std::string, tera::Table*> tera_table_map_; // <table_name, table desc>
 };
 
-class Inserter {
-    StoreRequest* request;
-    StoreResponse* response;
-    StoreCallback* callback;
-    void* user_param;
-    Status status;
+struct FileLocation {
+    std::string fname_;
+    int32_t offset_;
+    int32_t size_;
+
+    std::string& SerializeToString();
 };
 
-class TableImpl {
+class DataWriter {
 public:
-    virtual void Insert(const SearchRequest* request, SearchResponse* response,
-                        SearchCallback callback = NULL, void* callback_param = NULL);
-    virtual void Select(const StoreRequest* request, StoreResponse* response,
-                        StoreCallback callback = NULL, void* callback_param = NULL);
+    DataWriter(const std::string& fname, WritableFile* file)
+        : fname_(fname), file_(file), offset_(0) {}
+
+    AddRecord(const std::string& data, FileLocation* location);
 
 private:
-    void InsertCallback(const SearchRequest* request, const SearchResponse* response,
-                        void* user_param, const Status& status);
-    void SelectCallback(const StoreRequest* request, const StoreResponse* response,
-                        void* user_param, const Status& status);
+    // write data to filesystem
+    std::string fname_;
+    WritableFile* file_;
+    int32_t offset_; // TODO: no more than 4G per file
+};
+
+struct FilesystemAdapter {
+    std::string root_path_; // data file dir
+    Env* env_;
+
+    DataWriter writer_;
+};
+
+struct Options {
+    std::string tera_flag_file_path_; // tera.flag's path
+    Env* env_;
+};
+
+class TableImpl;
+struct PutContext {
+    const StoreRequest* req_;
+    StoreResponse* resp_;
+    StoreCallback callback_;
+    TableImpl* table_;
+    Counter counter_; // atomic counter
+
+    PutContext(TableImpl* table,
+               const StoreRequest* request,
+               StoreResponse* response,
+               StoreCallback callback)
+        : table_(table), req_(request),
+        resp_(response), callback_(callback) {}
+};
+
+class TableImpl : public Table {
+public:
+    int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
+    int Put(const StoreRequest* request, StoreResponse* response);
+    int Get(const SearchRequest* request, SearchResponse* response, SearchCallback callback);
+    int Get(const SearchRequest& request, SearchResponse* response);
 
 private:
-    Table(const Table&);
-    void operator=(const Table&);
+    TableDescription table_desc_;
+    TeraAdapter tera_;
+    FilesystemAdapter fs_;
 };
 
 } // namespace mdt
 
-#endif  //MDT_SDK_DB_H_
+#endif  // MDT_SDK_TABLE_IMPL_H_

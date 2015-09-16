@@ -24,7 +24,7 @@
 #include "util/mutexlock.h"
 #include "../utils/counter.h"
 
-namespace leveldb {
+namespace mdt {
 
 tera::Counter dfs_read_size_counter;
 tera::Counter dfs_write_size_counter;
@@ -573,4 +573,4 @@ Env* EnvDfs()
     return dfs_env;
 }
 
-}  // namespace leveldb
+}  // namespace mdt

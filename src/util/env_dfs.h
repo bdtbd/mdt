@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef  TERA_LEVELDB_ENV_DFS_H_
-#define  TERA_LEVELDB_ENV_DFS_H_
+#ifndef  MDT_UTIL_ENV_DFS_H_
+#define  MDT_UTIL_ENV_DFS_H_
 
 #include <stdio.h>
 #include <sys/syscall.h>
@@ -19,7 +19,7 @@
 #include "leveldb/status.h"
 #include "../../../utils/counter.h"
 
-namespace leveldb {
+namespace mdt {
 
 class DfsEnv : public EnvWrapper {
 public:
@@ -78,6 +78,6 @@ Env* EnvDfs();
 /// new dfs env
 Env* NewDfsEnv(Dfs*);
 
-}  // namespace leveldb
+}  // namespace mdt
 
-#endif  // TERA_LEVELDB_ENV_DFS_H_
+#endif  // MDT_UTIL_ENV_DFS_H_
