@@ -70,6 +70,21 @@ struct PutContext {
         resp_(response), callback_(callback) {}
 };
 
+struct GetContext {
+    const SearchRequest* req_;
+    SearchResponse* resp_;
+    SearchCallback callback_;
+    TableImpl* table_;
+    Counter counter_; // atomic counter
+
+    GetContext(TableImpl* table,
+               const SearchRequest* request,
+               SearchResponse* response,
+               SearchCallback callback)
+        : table_(table), req_(request),
+        resp_(response), callback_(callback) {}
+};
+
 class TableImpl : public Table {
 public:
     int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);

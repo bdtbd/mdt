@@ -5,6 +5,7 @@
 #ifndef  MDT_SDK_DB_IMPL_H_
 #define  MDT_SDK_DB_IMPL_H_
 
+#include "sdk/db.h"
 #include "sdk/table_impl.h"
 
 namespace mdt {

@@ -126,6 +126,119 @@ void PutCallback(tera::RowMutation* row) {
     }
 }
 
+enum COMPARATOR_EXTEND {
+    kBetween = 100
+};
+
+struct IndexConditionExtend {
+    std::string index_name;
+    enum COMPARATOR comparator;
+    std::string compare_value1;
+    std::string compare_value2;
+    bool flag1;
+    bool flag2;
+};
+
+int TableImpl::Get(const SearchRequest& req, SearchResponse* resp, SearchCallback callback) {
+    typedef std::map<std::string, IndexConditionExtend> IndexConditionExtendMap;
+    IndexConditionExtendMap dedup_map;
+    std::vector<IndexCondition>::iterator it = req.index_condition_list.begin();
+    for (; it != req.index_condition_list.end(); ++it) {
+        const IndexCondition& index_cond = *it;
+        IndexConditionExtendMap::iterator ex_it = dedup_map.find(index_cond.index_name);
+        if (ex_it == dedup_map.end()) {
+            IndexConditionExtend index_cond_ex;
+            ExtendIndexCondition(index_cond, &index_cond_ex);
+            dedup_map[index_cond.index_name] = index_cond_ex;
+            continue;
+        }
+
+        IndexConditionExtend& index_cond_ex = it->second;
+        if (index_cond_ex.comparator == kBetween) {
+            // invalid param
+            return;
+        }
+
+        if (index_cond.comparator == kLess || index_cond.comparator == kLessEqual) {
+            if (index_cond_ex.comparator != kGreater && index_cond_ex.comparator != kGreaterEqual) {
+                return;
+            }
+            index_cond_ex.comparator = kBetween;
+            index_cond_ex.compare_value2 = index_cond.compare_value;
+            index_cond_ex.flag1 = (index_cond_ex.comparator == kGreaterEqual);
+            index_cond_ex.flag2 = (index_cond.comparator == kLessEqual);
+        } else if (index_cond.comparator == kGreater || index_cond.comparator == kGreaterEqual) {
+            if (index_cond_ex.comparator != kLess && index_cond_ex.comparator != kLessEqual) {
+                return;
+            }
+            index_cond_ex.comparator = kBetween;
+            index_cond_ex.compare_value1 = index_cond.compare_value;
+            index_cond_ex.flag1 = (index_cond.comparator == kGreaterEqual);
+            index_cond_ex.flag2 = (index_cond_ex.comparator == kLessEqual);
+        } else {
+            // invalid param
+            return
+        }
+    }
+
+    std::vector<std::string> primary_key_list;
+    IndexConditionExtendMap::iterator ex_it = dedup_map.begin();
+    for (; ex_it != dedup_map.end(); ++ex_it) {
+        const std::string& index_name = ex_it->first;
+        const IndexConditionExtend& index_cond_ex = ex_it->second;
+        tera::Table* index_table = GetTable(index_name);
+        if (index_cond_ex.comparator == kBetween) {
+            tera::ScanDescriptor scan_desc(index_cond_ex.compare_value1);
+            scan_desc.SetEnd(index_cond_ex.compare_value2);
+            scan_desc.AddColumnFamily("PrimaryKey");
+
+            // scan_desc.AddColumnFamily("Location");
+            scan_desc.SetTimeRange(req.start_timestamp, req.end_timestamp);
+            tera::ErrorCode err;
+            tera::ResultStream* result = index_table->Scan(scan_desc, &err);
+            while (!result->Done()) {
+                const std::string& primary_key = result->Qualifier();
+                primary_key_list.push_back(primary_key);
+                result->Next();
+            }
+        } else {
+            tera::RowReader* reader = index_table->NewRowReader(index_cond_ex.compare_value1);
+            reader->AddColumnFamily("PrimaryKey");
+            reader->SetTimeRange(req.start_timestamp, req.end_timestamp);
+
+            index_table->Get(reader);
+            while (!reader->Done()) {
+                const std::string& primary_key = reader->Qualifier();
+                primary_key_list.push_back(primary_key);
+                reader->Next();
+            }
+        }
+    }
+
+    for (uint32_t i = 0; i < primary_key_list.size(); i++) {
+        const std::string& primary_key = primary_key_list[i];
+        tera::Table* primary_table = GetTable(req.table_name);
+        tera::RowReader* reader = primary_table->NewRowReader(primary_key);
+        reader->AddColumnFamily("Location");
+        primary_table->Get(reader);
+        while (!reader->Done()) {
+            const std::string& location_buffer = reader->Qualifier();
+            FileLocation location;
+            location.DeserializeFromString(location_buffer);
+            reader->Next();
+        }
+    }
+    return 0;
+}
+
+void PutCallback(tera::RowMutation* row) {
+    PutContext* context = (PutContext*)row->GetContext();
+    if (context->counter_.Dec() == 0) {
+        context->callback_(context->req_, context->resp_);
+        delete context;
+    }
+}
+
 tera::Table* TableImpl::GetTable(const std::string& table_name) {
     std::string index_table_name = tera_.table_prefix_ + "#" + table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
@@ -155,7 +268,7 @@ std::string& TableImpl::TimeToString() {
 }
 
 DataWriter* TableImpl::GetDataWriter() {
-    DateWriter* writer = NULL;
+    DataWriter* writer = NULL;
     if (fs_.writer_ == NULL) {
         std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
         WritableFile* file;
