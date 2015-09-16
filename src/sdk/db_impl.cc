@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "sdk/sdk.h"
 #include "sdk/db_impl.h"
 
 namespace mdt {
@@ -14,17 +15,18 @@ Options InitDefaultOptions(const Options& options, const std::string& db_name) {
 }
 
 DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
-    : options_(InitDefaultOptions(options, db_name)),
-      db_name_(db_name) {
+    : db_name_(db_name),
+    options_(InitDefaultOptions(options, db_name)) {
     // create fs's dir
+    fs_opt_.env_ = options.env_;
     fs_opt_.fs_path_ = db_name + "/Filesystem/";
-    options.env_->CreateDir(fs_opt.fs_path_);
+    fs_opt_.env_->CreateDir(fs_opt_.fs_path_);
 
     // create tera client
     tera::ErrorCode error_code;
     std::string tera_log_prefix = db_name;
     tera_opt_.root_path_ = db_name + "/Tera/";
-    options.env->CreateDir(tera_opt_.root_path_);
+    options.env_->CreateDir(tera_opt_.root_path_);
     tera_opt_.tera_flag_ = options.tera_flag_file_path_;
     tera_opt_.client_ = tera::Client::NewClient(tera_opt_.tera_flag_, tera_log_prefix, &error_code);
     assert(tera_opt_.client_);
@@ -32,54 +34,41 @@ DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
     // create db schema table (kv mode)
     std::string schema_table_name = db_name + "#schema";
     tera::TableDescriptor schema_desc(schema_table_name);
-    assert(tera_opt_.client_->CreateTable(schema_desc));
+    assert(tera_opt_.client_->CreateTable(schema_desc, &error_code));
 
     tera_opt_.schema_table_ = tera_opt_.client_->OpenTable(schema_table_name, &error_code);
     assert(tera_opt_.schema_table_);
 }
 
-int DatabaseImpl::CreateDB(const Options& options,
-                           const std::string& db_name,
-                           Database** db) {
-    DatabaseImpl* db_ptr = new DatabaseImpl(options, db_name);
-    assert(db_ptr);
-    *db = db_ptr;
-    return 0;
+Status DatabaseImpl::CreateDB(const Options& options,
+                              const std::string& db_name,
+                              Database** db_ptr) {
+    DatabaseImpl* db_impl = new DatabaseImpl(options, db_name);
+    assert(db_impl);
+    *db_ptr = db_impl;
+    return Status::OK();
 }
 
-int DatabaseImpl::CreateTable(const CreateRequest* req,
-                             CreateResponse* resp) {
-    assert(db_name_ == req->db_name);
-    std::vector<TableDescription>::iterator it;
-    for (it = req->table_descriptor_list.begin();
-         it != req->table_descriptor_list.end();
+Status DatabaseImpl::CreateTable(const CreateRequest& req,
+                                 CreateResponse* resp,
+                                 Table** table_ptr) {
+    assert(db_name_ == req.db_name);
+    std::vector<TableDescription>::const_iterator it;
+    for (it = req.table_descriptor_list.begin();
+         it != req.table_descriptor_list.end();
          ++it) {
         if (table_map_.find(it->table_name) != table_map_.end()) {
             continue;
         }
         // construct memory structure
-        TableImpl* table_ptr;
-        assert(InternalCreateTable(*it, &table_ptr));
-        table_map_[it->table_name] = table_ptr;
+        assert(InternalCreateTable(*it, table_ptr));
+        table_map_[it->table_name] = *table_ptr;
     }
-    return 0;
+    return Status::OK();
 }
 
-int DatabaseImpl::InternalCreateTable(const TableDescription& table_desc, TableImpl** table) {
-    std::string& table_name = table_desc.table_name;
-    // init fs adapter
-    FilesystemAdapter fs_adapter;
-    fs_adapter.root_path_ = fs_opt_.fs_path_ + "/" + table_name + "/";
-    fs_adapter.env_ = options_.env_;
-
-    //init tera adapter
-    TeraAdapter tera_adapter;
-    tera_adapter.opt_ = tera_opt_;
-    tera_adapter.table_prefix_ = db_name_;
-
-    TableImpl* table_ptr = new TableImpl(table_desc, tera_adapter, fs_adapter);
-    assert(table_ptr);
-    *table = table_ptr;
+int DatabaseImpl::InternalCreateTable(const TableDescription& table_desc, Table** table_ptr) {
+    Table::OpenTable(db_name_, tera_opt_, fs_opt_, table_desc, table_ptr);
     return 0;
 }
 

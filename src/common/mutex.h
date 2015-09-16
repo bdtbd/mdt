@@ -4,8 +4,8 @@
 //
 // Author: yanshiguang02@baidu.com
 
-#ifndef  TERA_COMMON_MUTEX_H_
-#define  TERA_COMMON_MUTEX_H_
+#ifndef  MDT_COMMON_MUTEX_H_
+#define  MDT_COMMON_MUTEX_H_
 
 #include <pthread.h>
 #include <stdint.h>
@@ -161,4 +161,4 @@ using common::Mutex;
 using common::MutexLock;
 using common::CondVar;
 
-#endif  // TERA_COMMON_MUTEX_H_
+#endif  // MDT_COMMON_MUTEX_H_
