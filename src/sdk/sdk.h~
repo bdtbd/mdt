@@ -69,8 +69,8 @@ struct SearchRequest {
     std::string db_name;
     std::string table_name;
     std::vector<struct IndexCondition> index_condition_list;
-    int64_t start_timestamp;
-    int64_t end_timestamp;
+    struct IndexCondition start_timestamp;
+    struct IndexCondition end_timestamp;
     int32_t limit;
 };
 

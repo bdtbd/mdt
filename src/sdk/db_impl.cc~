@@ -173,6 +173,7 @@ int TableImpl::Put(const StoreRequest& req, StoreResponse* resp, StoreCallback c
          it != req.index_list.end();
          ++it) {
         tera::Table* index_table = GetTable(it->index_name);
+        // TODO: index key right?
         std::string index_key = it->index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
         index_row->Put("PrimaryKey", primary_key, req.timestamp, null_value);
