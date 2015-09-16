@@ -18,6 +18,7 @@ static inline int atomic_add(volatile int *mem, int add)
     return add;
 }
 
+// Get old value and Add
 static inline int64_t atomic_add64(volatile int64_t* mem, int64_t add)
 {
     asm volatile(
