@@ -105,7 +105,7 @@ struct GetContext {
     const SearchRequest* req_;
     SearchResponse* resp_;
     SearchCallback callback_;
-    Counter counter_; // atomic counter
+    common::Counter counter_; // atomic counter
 
     GetContext(TableImpl* table,
                const SearchRequest* request,

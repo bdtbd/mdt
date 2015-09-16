@@ -51,14 +51,9 @@ private:
     static Table* cur_table_;
     static common::Mutex mutex_;
 
-<<<<<<< HEAD
     static common::ThreadPool thread_pool_;
 
 }; // class SdkImpl
-=======
-    common::ThreadPool thread_pool_;
-};
->>>>>>> a03918527b53299b3aa16e0530f4436fc05c0d7d
 
 } // namespace mdt
 

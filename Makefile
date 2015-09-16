@@ -10,7 +10,7 @@ CXX = g++
 SHARED_CFLAGS = -fPIC
 SHARED_LDFLAGS = -shared -Wl,-soname -Wl,
 
-INCPATH += -I./src -I./include $(DEPS_INCPATH) 
+INCPATH += -I./src -I./thirdparty/include -I./include $(DEPS_INCPATH) 
 CFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 CXXFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 LDFLAGS += -rdynamic $(DEPS_LDPATH) $(DEPS_LDFLAGS) -lpthread -lrt -lz -ldl
@@ -53,6 +53,9 @@ libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(VERSION_OBJ)
 
 $(VERSION_SRC): FORCE
 	sh build_version.sh
+
+proto:
+	./thirdparty/bin/protoc --proto_path=./src/proto --proto_path=./thirdparty/include --cpp_out=./src/proto ./src/proto/kv.proto
 
 .PHONY: FORCE
 FORCE:

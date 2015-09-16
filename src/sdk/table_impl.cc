@@ -164,11 +164,11 @@ struct IndexConditionExtend {
     bool flag2;
 };
 
-int TableImpl::Get(const SearchRequest& req, SearchResponse* resp, SearchCallback callback) {
+int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback) {
     typedef std::map<std::string, IndexConditionExtend> IndexConditionExtendMap;
     IndexConditionExtendMap dedup_map;
-    std::vector<IndexCondition>::iterator it = req.index_condition_list.begin();
-    for (; it != req.index_condition_list.end(); ++it) {
+    std::vector<IndexCondition>::const_iterator it = req->index_condition_list.begin();
+    for (; it != req->index_condition_list.end(); ++it) {
         const IndexCondition& index_cond = *it;
         IndexConditionExtendMap::iterator ex_it = dedup_map.find(index_cond.index_name);
         if (ex_it == dedup_map.end()) {
@@ -218,7 +218,7 @@ int TableImpl::Get(const SearchRequest& req, SearchResponse* resp, SearchCallbac
             scan_desc.AddColumnFamily("PrimaryKey");
 
             // scan_desc.AddColumnFamily("Location");
-            scan_desc.SetTimeRange(req.start_timestamp, req.end_timestamp);
+            scan_desc.SetTimeRange(req->start_timestamp, req->end_timestamp);
             tera::ErrorCode err;
             tera::ResultStream* result = index_table->Scan(scan_desc, &err);
             while (!result->Done()) {
@@ -229,7 +229,7 @@ int TableImpl::Get(const SearchRequest& req, SearchResponse* resp, SearchCallbac
         } else {
             tera::RowReader* reader = index_table->NewRowReader(index_cond_ex.compare_value1);
             reader->AddColumnFamily("PrimaryKey");
-            reader->SetTimeRange(req.start_timestamp, req.end_timestamp);
+            reader->SetTimeRange(req->start_timestamp, req->end_timestamp);
 
             index_table->Get(reader);
             while (!reader->Done()) {
@@ -242,7 +242,7 @@ int TableImpl::Get(const SearchRequest& req, SearchResponse* resp, SearchCallbac
 
     for (uint32_t i = 0; i < primary_key_list.size(); i++) {
         const std::string& primary_key = primary_key_list[i];
-        tera::Table* primary_table = GetTable(req.table_name);
+        tera::Table* primary_table = GetTable(req->table_name);
         tera::RowReader* reader = primary_table->NewRowReader(primary_key);
         reader->AddColumnFamily("Location");
         primary_table->Get(reader);
