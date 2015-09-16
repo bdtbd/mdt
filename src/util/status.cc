@@ -7,7 +7,6 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include <stdio.h>
-
 #include "status.h"
 
 namespace mdt {

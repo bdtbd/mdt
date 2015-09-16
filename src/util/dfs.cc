@@ -1,16 +1,13 @@
 // Copyright (c) 2015, Baidu.com, Inc. All Rights Reserved
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// Author: yanshiguang02@baidu.com
-
-#include "leveldb/dfs.h"
 
 #include <dlfcn.h>
 #include <stdio.h>
 #include <string>
+#include "util/dfs.h"
 
-namespace leveldb {
+namespace mdt {
 
 Dfs* Dfs::NewDfs(const std::string& so_path, const std::string& conf) {
     dlerror();
@@ -32,6 +29,6 @@ Dfs* Dfs::NewDfs(const std::string& so_path, const std::string& conf) {
     return (*creator)(conf.c_str());
 }
 
-}
+} // namespace mdt
 
 /* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */

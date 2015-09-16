@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef  TERA_LEVELDB_NFS_H_
-#define  TERA_LEVELDB_NFS_H_
+#ifndef  MDT_UTIL_NFS_H_
+#define  MDT_UTIL_NFS_H_
 
 #include <string>
 #include <vector>
@@ -15,7 +15,7 @@ namespace nfs {
   typedef int (*AssignNamespaceIdFunc)(const char* path, int max_namespaces);
 }
 
-namespace leveldb {
+namespace mdt {
 
 class NFile : public DfsFile {
 public:
@@ -56,8 +56,6 @@ private:
   static bool dl_init_;
 };
 
-}
+} // namespace mdt
 
-#endif  //TERA_LEVELDB_NFS_H_
-
-/* vim: set expandtab ts=2 sw=2 sts=2 tw=100: */
+#endif  // MDT_UTIL_NFS_H_

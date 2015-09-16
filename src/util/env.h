@@ -14,8 +14,8 @@
 // All Env implementations are safe for concurrent access from
 // multiple threads without any external synchronization.
 
-#ifndef STORAGE_LEVELDB_INCLUDE_ENV_H_
-#define STORAGE_LEVELDB_INCLUDE_ENV_H_
+#ifndef MDT_UTIL_ENV_H_
+#define MDT_UTIL_ENV_H_
 
 #include <cstdarg>
 #include <string>
@@ -23,7 +23,7 @@
 #include <stdint.h>
 #include "leveldb/status.h"
 
-namespace leveldb {
+namespace mdt {
 
 class FileLock;
 class Logger;
@@ -380,6 +380,7 @@ class EnvWrapper : public Env {
 };
 
 Env* NewPosixEnv();
-}  // namespace leveldb
 
-#endif  // STORAGE_LEVELDB_INCLUDE_ENV_H_
+}  // namespace mdt
+
+#endif  // MDT_UTIL_ENV_H_

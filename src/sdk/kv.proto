@@ -1,8 +1,10 @@
+package mdt;
 
 message IndexSchema {
     optional string index_name  = 1;
     optional uint32 index_key_type = 2;
 }
+
 message BigQueryTableSchema {
     optional string table_name = 1;
     optional uint32 primary_key_type = 2;

@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef  TERA_LEVELDB_DFS_H_
-#define  TERA_LEVELDB_DFS_H_
+#ifndef  MDT_UTIL_DFS_H_
+#define  MDT_UTIL_DFS_H_
 
 #include <stdint.h>
 #include <string>
 #include <vector>
 
-namespace leveldb {
+namespace mdt {
 
 class DfsFile {
 public:
@@ -93,7 +93,6 @@ typedef Dfs* (*DfsCreator)(const char*);
 /// }
 /// }
 
-} // namespace leveldb
-#endif  //TERA_LEVELDB_DFS_H_
+} // namespace mdt
 
-/* vim: set expandtab ts=4 sw=4 sts=4 tw=100: */
+#endif  // MDT_UTIL_DFS_H_

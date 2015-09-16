@@ -14,8 +14,8 @@
 // non-const method, all threads accessing the same Status must use
 // external synchronization.
 
-#ifndef MDT_STATUS_H_
-#define MDT_STATUS_H_
+#ifndef MDT_UTIL_STATUS_H_
+#define MDT_UTIL_STATUS_H_
 
 #include <string>
 
@@ -108,4 +108,4 @@ inline void Status::operator=(const Status& s) {
 
 }  // namespace mdt
 
-#endif  // MDT_STATUS_H_
+#endif  // MDT_UTIL_STATUS_H_
