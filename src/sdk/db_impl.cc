@@ -160,10 +160,9 @@ int TableImpl::Put(const StoreRequest& req, StoreResponse* resp, StoreCallback c
 
     // update primary table
     tera::Table* primary_table = GetTable(req.table_name);
-    // TODO: primary key right?
-    std::string primary_key = req.primary_key + req.timestamp;
+    std::string primary_key = req.primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
-    primary_row->Put("Location", location.SerializeToString(), null_value);
+    primary_row->Put("Location", location.SerializeToString(), req.timestamp, null_value);
     primary_row->SetContext(context);
     context->counter_.Inc();
     primary_row->SetCallback(PutCallback);
@@ -174,10 +173,9 @@ int TableImpl::Put(const StoreRequest& req, StoreResponse* resp, StoreCallback c
          it != req.index_list.end();
          ++it) {
         tera::Table* index_table = GetTable(it->index_name);
-        // TODO: index key right?
-        std::string index_key = it->index_key + req.timestamp;
+        std::string index_key = it->index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
-        index_row->Put("PrimaryKey", primary_key, null_value);
+        index_row->Put("PrimaryKey", primary_key, req.timestamp, null_value);
         index_row->SetContext(context);
         context->counter_.Inc();
         index_row->SetCallback(PutCallback);
