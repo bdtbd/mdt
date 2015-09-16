@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 #include <stdint.h>
-#include "leveldb/status.h"
+#include "util/status.h"
 
 namespace mdt {
 

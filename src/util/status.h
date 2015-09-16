@@ -18,6 +18,7 @@
 #define MDT_UTIL_STATUS_H_
 
 #include <string>
+#include "util/slice.h"
 
 namespace mdt {
 
@@ -90,7 +91,7 @@ class Status {
   }
 
  private:
-  Status(Code code, const std::string& msg, const std::string& msg2);
+  Status(Code code, const Slice& msg, const Slice& msg2);
   static const char* CopyState(const char* s);
 };
 

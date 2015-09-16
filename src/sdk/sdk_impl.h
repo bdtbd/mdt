@@ -9,8 +9,11 @@
 
 #include "common/mutex.h"
 #include "common/thread_pool.h"
-#include "sdk/sdk.h"
+
 #include "util/status.h"
+#include "sdk/sdk.h"
+#include "sdk/db.h"
+#include "sdk/table_impl.h"
 
 namespace mdt {
 
@@ -46,10 +49,16 @@ private:
     static std::map<std::string, Database*> db_map_;
     static Database* cur_db_;
     static Table* cur_table_;
-    static Mutex mutex_;
+    static common::Mutex mutex_;
 
+<<<<<<< HEAD
+    static common::ThreadPool thread_pool_;
+
+}; // class SdkImpl
+=======
     common::ThreadPool thread_pool_;
 };
+>>>>>>> a03918527b53299b3aa16e0530f4436fc05c0d7d
 
 } // namespace mdt
 
