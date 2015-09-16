@@ -139,36 +139,6 @@ struct CreateResponse {
 
 void Create(const CreateRequest& request, CreateResponse* response);
 
-//////////////////////////////////
-//      c++ interface           //
-//////////////////////////////////
-class Database {
-public:
-    static int CreateDB(std::string db_name);
-    virtual int OpenTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr) = 0;
-private:
-    Database(const Database&);
-    void operator=(const Database&);
-};
-
-class Table {
-public:
-    virtual int Put(const StoreRequest* request,
-                    StoreResponse* response,
-                    StoreCallback callback) = 0;
-    virtual int Put(const StoreRequest* request,
-                    StoreResponse* response) = 0;
-    virtual int Get(const SearchRequest* request,
-                    SearchResponse* response,
-                    SearchCallback callback) = 0;
-    virtual int Get(const SearchRequest& request,
-                    SearchResponse* response) = 0;
-
-private:
-    Table(const Table&);
-    void operator=(const Table&);
-};
-
 } // namespace mdt
 
 #endif  //MDT_SDK_SDK_H_

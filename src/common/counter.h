@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef  TERA_COMMON_COUNTER_H_
-#define  TERA_COMMON_COUNTER_H_
+#ifndef  MDT_COMMON_COUNTER_H_
+#define  MDT_COMMON_COUNTER_H_
 
 #include <stdio.h>
 
@@ -73,4 +73,4 @@ private:
 };
 } // namespace common
 
-#endif  // TERA_COMMON_COUNTER_H_
+#endif  // MDT_COMMON_COUNTER_H_

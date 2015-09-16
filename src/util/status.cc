@@ -19,7 +19,7 @@ const char* Status::CopyState(const char* state) {
   return result;
 }
 
-Status::Status(Code code, const std::string& msg, const std::string& msg2) {
+Status::Status(Code code, const Slice& msg, const Slice& msg2) {
   assert(code != kOk);
   const uint32_t len1 = msg.size();
   const uint32_t len2 = msg2.size();

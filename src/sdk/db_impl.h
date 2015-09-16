@@ -5,41 +5,45 @@
 #ifndef  MDT_SDK_DB_IMPL_H_
 #define  MDT_SDK_DB_IMPL_H_
 
-#include "sdk/table_impl.h"
+#include "util/tera.h"
+#include "util/env.h"
+#include "sdk/db.h"
 
 namespace mdt {
 
 ///////////////////////////////////
 //      DatabaseImpl class       //
 ///////////////////////////////////
-struct FilesystemOptions {
-    std::string fs_path_; // db_name + FileSystem
-};
-
-struct TeraOptions {
-    std::string root_path_; // path of tera dir
-    std::string tera_flag_; // path of tera.flag
-    tera::Client* client_;
-
-    // schema table(kv), key = table_name, value = BigQueryTableSchema (define in kv.proto)
-    std::string schema_table_name_;
-    tera::Table* schema_table_;
-};
-
 class DatabaseImpl : public Database {
 public:
+    DatabaseImpl(const Options& options, const std::string& db_name);
+    ~DatabaseImpl();
+
     // create fs namespace
-    static int CreateDB(const Options& options, std::string db_name, Database** db);
+    static Status CreateDB(const Options& options, const std::string& db_name, Database** db_ptr);
+    static Status OpenDB(const std::string& db_name, Database** db_ptr);
+
     // if db not exit, create it
-    int CreateTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr);
+    Status CreateTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr);
+    Status CreateTable(const TableDescription& table_desc);
+    Status OpenTable(const std::string& table_name, Table** table_ptr);
+
+    std::string& DatabaseName() {return db_name_;}
+
+private:
+    int InternalCreateTable(const TableDescription& table_desc, Table** table_ptr);
+    DatabaseImpl(const DatabaseImpl&);
+    void operator=(const DatabaseImpl&);
 
 private:
     std::string db_name_;
     const Options options_;
     FilesystemOptions fs_opt_;
     TeraOptions tera_opt_;
-    std::map<std::string, TableImpl*> table_map_; // <table_name, table ptr>
+    std::map<std::string, Table*> table_map_; // <table_name, table ptr>
 };
+
+// TableImpl relative
 
 } // namespace mdt
 

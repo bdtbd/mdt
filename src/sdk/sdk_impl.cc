@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <boost/function.hpp>
+#include <boost/bind.hpp>
+
 #include "common/mutex.h"
 #include "sdk/sdk_impl.h"
 
 namespace mdt {
-
+#if 0
 // 写入接口
 void SdkImpl::Put(const StoreRequest* request, StoreResponse* response,
                   StoreCallback callback) {
@@ -87,5 +90,5 @@ Status SdkImpl::FindDatabase(const std::string& db_name, Database** db_ptr) {
     }
     return s;
 }
-
+#endif
 } // namespace mdt
