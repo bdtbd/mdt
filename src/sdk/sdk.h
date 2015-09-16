@@ -17,7 +17,7 @@ namespace mdt {
 
 // 索引数据
 struct Index {
-    std::string index_name;
+    std::string index_name;// index table name
     std::string index_key;// key after encode
 };
 
@@ -26,7 +26,7 @@ struct StoreRequest {
     std::string db_name;
     std::string table_name;
     std::string primary_key; // key after encode
-    uint64_t timestamp;
+    std::string timestamp; // uint64 encode
     std::vector<struct Index> index_list;
     std::string data;
 };
@@ -34,7 +34,7 @@ struct StoreRequest {
 // 写入结果
 struct StoreResponse {
     int error;
-    void* user_ptr;
+    void* user_ptr; // user define
 };
 
 // 异步写入回调
@@ -82,7 +82,7 @@ struct ResultStream {
 
 struct SearchResponse {
     std::vector<ResultStream> result_stream;
-    void* user_ptr;
+    void* user_ptr; // user define
 };
 
 // 异步查询回调
