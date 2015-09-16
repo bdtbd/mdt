@@ -26,7 +26,7 @@ struct StoreRequest {
     std::string db_name;
     std::string table_name;
     std::string primary_key; // key after encode
-    std::string timestamp; // uint64 encode
+    int64_t timestamp;
     std::vector<struct Index> index_list;
     std::string data;
 };
@@ -69,8 +69,8 @@ struct SearchRequest {
     std::string db_name;
     std::string table_name;
     std::vector<struct IndexCondition> index_condition_list;
-    struct IndexCondition start_timestamp;
-    struct IndexCondition end_timestamp;
+    int64_t start_timestamp;
+    int64_t end_timestamp;
     int32_t limit;
 };
 
