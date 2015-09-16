@@ -10,8 +10,12 @@
 #include "common/mutex.h"
 #include "common/thread_pool.h"
 #include "sdk/sdk.h"
+#include "util/status.h"
 
 namespace mdt {
+
+class Database;
+class Table;
 
 class SdkImpl {
 public:
@@ -44,9 +48,8 @@ private:
     static Table* cur_table_;
     static Mutex mutex_;
 
-    ThreadPool thread_pool_;
-
-}; // class SdkImpl
+    common::ThreadPool thread_pool_;
+};
 
 } // namespace mdt
 
