@@ -100,6 +100,21 @@ struct PutContext {
         resp_(response), callback_(callback) {}
 };
 
+struct GetContext {
+    TableImpl* table_;
+    const SearchRequest* req_;
+    SearchResponse* resp_;
+    SearchCallback callback_;
+    Counter counter_; // atomic counter
+
+    GetContext(TableImpl* table,
+               const SearchRequest* request,
+               SearchResponse* response,
+               SearchCallback callback)
+        : table_(table), req_(request),
+        resp_(response), callback_(callback) {}
+};
+
 } // namespace mdt
 
 #endif  // MDT_SDK_TABLE_IMPL_H_
