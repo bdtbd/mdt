@@ -4,6 +4,7 @@
 
 #include "sdk/sdk.h"
 #include "sdk/db_impl.h"
+#include "util/tera.h"
 
 namespace mdt {
 
@@ -23,7 +24,7 @@ DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
     fs_opt_.env_->CreateDir(fs_opt_.fs_path_);
 
     // create tera client
-    tera::ErrorCode error_code;
+    ::tera::ErrorCode error_code;
     std::string tera_log_prefix = db_name;
     tera_opt_.root_path_ = db_name + "/Tera/";
     options.env_->CreateDir(tera_opt_.root_path_);
