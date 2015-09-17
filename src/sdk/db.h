@@ -8,8 +8,17 @@
 #include "sdk/sdk.h"
 #include "sdk/option.h"
 #include "sdk/table.h"
+#include "util/env.h"
 
 namespace mdt {
+
+struct Options {
+    std::string tera_flag_file_path_; // tera.flag's path
+    Env* env_;
+
+public:
+    Options() : env_(Env::Default()) {}
+};
 
 class Database {
 public:

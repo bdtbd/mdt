@@ -8,12 +8,12 @@
 #include <stdlib.h>
 #include <limits>
 
-#include "nfs.h"
-#include "nfs_wrapper.h"
+#include "util/nfs.h"
+#include "util/nfs_wrapper.h"
 #include "util/hash.h"
-#include "util/mutexlock.h"
 #include "util/string_ext.h"
-#include "../utils/counter.h"
+#include "common/mutex.h"
+#include "common/counter.h"
 
 namespace mdt {
 
@@ -169,7 +169,7 @@ int32_t NFile::CloseFile() {
 }
 
 bool Nfs::dl_init_ = false;
-port::Mutex Nfs::mu_;
+common::Mutex Nfs::mu_;
 static Nfs* instance = NULL;
 
 int Nfs::CalcNamespaceId(const char* c_path, int max_namespaces) {
