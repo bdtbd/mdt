@@ -29,16 +29,13 @@ public:
 
 class Database {
 public:
-    // create fs namespace
-    static Status CreateDB(const Options& options, std::string& db_name, Database** db_ptr);
-    // static Status OpenDB(const std::string& db_name, Database** db_ptr);
+    static Status OpenDB(const std::string& db_name, Database** db_ptr);
+
     Database() {}
     virtual ~Database();
 
-    // if db not exit, create it
-    virtual Status CreateTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr) = 0;
-    // virtual Status CreateTable(const TableDescription& table_desc) {}
-    // virtual Status OpenTable(const std::string& table_name, Table** table_ptr) {}
+    virtual Status CreateTable(const TableDescription& table_desc) = 0;
+    virtual Status OpenTable(const std::string& table_name, Table** table_ptr) = 0;
 
     virtual std::string& DatabaseName() = 0;
 

@@ -11,6 +11,21 @@
 
 namespace mdt {
 
+class Database;
+class Table;
+
+// 打开数据库
+Database* OpenDatabase(const std::string& db_name);
+
+// 关闭数据库
+void CloseDatabase(Database* db);
+
+// 打开表格
+Table* OpenTable(Database* db, const std::string& table_name);
+
+// 关闭表格
+void CloseTable(Table* table);
+
 //////////////////////////////////////////////
 // 写入
 //////////////////////////////////////////////
@@ -23,25 +38,26 @@ struct Index {
 
 // 写入请求
 struct StoreRequest {
-    std::string db_name;
-    std::string table_name;
     std::string primary_key; // key after encode
     int64_t timestamp;
     std::vector<struct Index> index_list;
     std::string data;
+    // std::vector<std::string> data_list;
 };
 
 // 写入结果
 struct StoreResponse {
     int error;
-    void* user_ptr; // user define
 };
 
 // 异步写入回调
-typedef void (*StoreCallback)(const StoreRequest* request, const StoreResponse* response);
+typedef void (*StoreCallback)(Table* table, const StoreRequest* request,
+                              const StoreResponse* response,
+                              void* callback_param);
 
 // 写入接口。callback != NULL时，是异步调用。
-void Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback = NULL);
+void Put(Table* table, const StoreRequest* request, StoreResponse* response,
+         StoreCallback callback = NULL, void* callback_param = NULL);
 
 //////////////////////////////////////////////
 // 查询
@@ -66,8 +82,6 @@ struct IndexCondition {
 
 // 查询请求
 struct SearchRequest {
-    std::string db_name;
-    std::string table_name;
     std::vector<struct IndexCondition> index_condition_list;
     int64_t start_timestamp;
     int64_t end_timestamp;
@@ -82,17 +96,16 @@ struct ResultStream {
 
 struct SearchResponse {
     std::vector<ResultStream> result_stream;
-    void* user_ptr; // user define
 };
 
 // 异步查询回调
-typedef void (*SearchCallback)(const SearchRequest* request, const SearchResponse* response);
+typedef void (*SearchCallback)(Table* table, const SearchRequest* request,
+                               const SearchResponse* response,
+                               void* callback_param);
 
-// 同步查询接口
-void Get(const SearchRequest& request, SearchResponse* response);
-
-// 异步查询接口
-void Get(const SearchRequest* request, SearchResponse* response, SearchCallback callback);
+// 查询接口
+void Get(Table* table, const SearchRequest* request, SearchResponse* response,
+         SearchCallback callback = 0, void* callback_param = 0);
 
 //////////////////////////////////////////////
 // 建表
@@ -119,6 +132,7 @@ struct IndexDescription {
     std::string index_name;
     enum TYPE index_key_type;
 };
+
 // 数据类描述
 struct TableDescription {
     std::string table_name;
@@ -126,18 +140,8 @@ struct TableDescription {
     std::vector<struct IndexDescription> index_descriptor_list;
 };
 
-// 建表请求
-struct CreateRequest {
-    std::string db_name;
-    std::vector<struct TableDescription> table_descriptor_list;
-};
-
-// 建表结果
-struct CreateResponse {
-    int error;
-};
-
-void Create(const CreateRequest& request, CreateResponse* response);
+// 建表
+int CreateTable(Database* db, const TableDescription& table_desc);
 
 } // namespace mdt
 

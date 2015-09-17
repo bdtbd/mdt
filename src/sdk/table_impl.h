@@ -66,24 +66,22 @@ struct FilesystemAdapter {
 
 class TableImpl : public Table {
 public:
-    static int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
-                  const FilesystemOptions& fs_opt, const TableDescription& table_desc,
-                  Table** table_ptr);
     TableImpl(const TableDescription& table_desc,
               const TeraAdapter& tera_adapter,
               const FilesystemAdapter& fs_adapter);
-    int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
-    int Put(const StoreRequest& request, StoreResponse* response);
-    int Get(const SearchRequest* request, SearchResponse* response, SearchCallback callback);
-    int Get(const SearchRequest& request, SearchResponse* response);
+    virtual int Put(const StoreRequest* request, StoreResponse* response,
+                    StoreCallback callback = NULL, void* callback_param = NULL);
+    virtual int Get(const SearchRequest* request, SearchResponse* response,
+                    SearchCallback callback = NULL, void* callback_param = NULL);
 
-    std::string& TableName() {return table_desc_.table_name;}
+    virtual const std::string& TableName() {return table_desc_.table_name;}
+
+public:
+    static int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
+                         const FilesystemOptions& fs_opt, const TableDescription& table_desc,
+                         Table** table_ptr);
 
 private:
-    int AssembleTableSchema(const TableDescription& table_desc,
-                            BigQueryTableSchema* schema);
-    int DisassembleTableSchema(const BigQueryTableSchema& schema,
-                               TableDescription* table_desc);
     DataWriter* GetDataWriter();
     tera::Table* GetTable(const std::string& table_name);
     std::string TimeToString();
@@ -99,14 +97,17 @@ struct PutContext {
     const StoreRequest* req_;
     StoreResponse* resp_;
     StoreCallback callback_;
+    void* callback_param_;
     common::Counter counter_; // atomic counter
 
     PutContext(TableImpl* table,
                const StoreRequest* request,
                StoreResponse* response,
-               StoreCallback callback)
+               StoreCallback callback = NULL,
+               void* callback_param = NULL)
         : table_(table), req_(request),
-        resp_(response), callback_(callback) {}
+        resp_(response), callback_(callback),
+        callback_param_(callback_param) {}
 };
 
 struct GetContext {
