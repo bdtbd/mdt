@@ -8,6 +8,7 @@
 #include "util/tera.h"
 #include "util/env.h"
 #include "sdk/db.h"
+#include "sdk/table_impl.h"
 
 namespace mdt {
 
@@ -19,19 +20,23 @@ public:
     DatabaseImpl(const Options& options, const std::string& db_name);
     ~DatabaseImpl() {}
 
-    // create fs namespace
-    static Status CreateDB(const Options& options, const std::string& db_name, Database** db_ptr);
-    // static Status OpenDB(const std::string& db_name, Database** db_ptr);
+    static Status OpenDB(const std::string& db_name, Database** db_ptr);
 
-    // if db not exit, create it
-    Status CreateTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr);
-    // Status CreateTable(const TableDescription& table_desc);
-    // Status OpenTable(const std::string& table_name, Table** table_ptr);
+    virtual Status CreateTable(const TableDescription& table_desc);
+    virtual Status OpenTable(const std::string& table_name, Table** table_ptr);
 
     std::string& DatabaseName() {return db_name_;}
 
 private:
+    static Status CreateDB(const Options& options, const std::string& db_name, Database** db_ptr);
+
     int InternalCreateTable(const TableDescription& table_desc, Table** table_ptr);
+
+    static int AssembleTableSchema(const TableDescription& table_desc,
+                                   BigQueryTableSchema* schema);
+    static int DisassembleTableSchema(const BigQueryTableSchema& schema,
+                                      TableDescription* table_desc);
+
     DatabaseImpl(const DatabaseImpl&);
     void operator=(const DatabaseImpl&);
 
@@ -40,6 +45,7 @@ private:
     const Options options_;
     FilesystemOptions fs_opt_;
     TeraOptions tera_opt_;
+    TeraAdapter tera_adapter_;
     std::map<std::string, Table*> table_map_; // <table_name, table ptr>
 };
 

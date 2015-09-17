@@ -10,8 +10,8 @@
 namespace mdt {
 
 int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
-                     const FilesystemOptions& fs_opt, const TableDescription& table_desc,
-                     Table** table_ptr) {
+                         const FilesystemOptions& fs_opt, const TableDescription& table_desc,
+                         Table** table_ptr) {
     const std::string& table_name = table_desc.table_name;
     // init fs adapter
     FilesystemAdapter fs_adapter;
@@ -39,76 +39,35 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
 
-    // insert schema into schema table
     tera::ErrorCode error_code;
-    BigQueryTableSchema schema;
-    AssembleTableSchema(table_desc, &schema);
-    std::string schema_value;
-    schema.SerializeToString(&schema_value);
-    tera_.opt_.schema_table_->Put(schema.table_name(), "", "", schema_value, &error_code);
 
-    // create primary key table
-    std::string primary_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name;
-    tera::TableDescriptor primary_table_desc(primary_table_name);
-    tera::LocalityGroupDescriptor* lg = primary_table_desc.AddLocalityGroup("lg");
-    lg->SetBlockSize(32 * 1024);
-    lg->SetCompress(tera::kSnappyCompress);
-    tera::ColumnFamilyDescriptor* cf = primary_table_desc.AddColumnFamily("Location", "lg");
-    cf->SetTimeToLive(0);
-    tera_.opt_.client_->CreateTable(primary_table_desc, &error_code);
-
+    // open primary key table
+    std::string primary_table_name = tera_.table_prefix_ + "#" + table_desc.table_name;
     tera::Table* primary_table = tera_.opt_.client_->OpenTable(primary_table_name, &error_code);
     tera_.tera_table_map_[primary_table_name] = primary_table;
 
-    // create index key table
+    // open index key table
     std::vector<IndexDescription>::iterator it;
     for (it = table_desc_.index_descriptor_list.begin();
          it != table_desc_.index_descriptor_list.end();
          ++it) {
         std::string index_table_name = tera_.table_prefix_ + "#" + it->index_name;
-        tera::TableDescriptor index_table_desc(index_table_name);
-        tera::LocalityGroupDescriptor* index_lg = index_table_desc.AddLocalityGroup("lg");
-        index_lg->SetBlockSize(32 * 1024);
-        index_lg->SetCompress(tera::kSnappyCompress);
-        tera::ColumnFamilyDescriptor* index_cf = index_table_desc.AddColumnFamily("PrimaryKey", "lg");
-        index_cf->SetTimeToLive(0);
-        tera_.opt_.client_->CreateTable(index_table_desc, &error_code);
-
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
         tera_.tera_table_map_[index_table_name] = index_table;
     }
 }
 
-int TableImpl::AssembleTableSchema(const TableDescription& table_desc,
-                                   BigQueryTableSchema* schema) {
-    schema->set_table_name(table_desc.table_name);
-    schema->set_primary_key_type(table_desc.primary_key_type);
-    std::vector<IndexDescription>::const_iterator it;
-    for (it = table_desc.index_descriptor_list.begin();
-         it != table_desc.index_descriptor_list.end();
-         ++it) {
-        IndexSchema* index;
-        index = schema->add_index_descriptor_list();
-        index->set_index_name(it->index_name);
-        index->set_index_key_type(it->index_key_type);
-    }
-    return 0;
-}
-
-int TableImpl::DisassembleTableSchema(const BigQueryTableSchema& schema,
-                                         TableDescription* table_desc) {
-    return 0;
-}
-
 void PutCallback(tera::RowMutation* row) {
     PutContext* context = (PutContext*)row->GetContext();
     if (context->counter_.Dec() == 0) {
-        context->callback_(context->req_, context->resp_);
+        context->callback_(context->table_, context->req_, context->resp_,
+                           context->callback_param_);
         delete context;
     }
 }
 
-int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback callback) {
+int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback callback,
+                   void* callback_param) {
     // add data into fs
     FileLocation location;
     DataWriter* writer = GetDataWriter();
@@ -116,11 +75,11 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
 
     std::string null_value;
     null_value.clear();
-    PutContext* context = new PutContext(this, req, resp, callback);
+    PutContext* context = new PutContext(this, req, resp, callback, callback_param);
     context->counter_.Inc();
 
     // update primary table
-    tera::Table* primary_table = GetTable(req->table_name);
+    tera::Table* primary_table = GetTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put("Location", location.SerializeToString(), req->timestamp, null_value);
@@ -145,7 +104,8 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
 
     if (context->counter_.Dec() == 0) {
         // last one, do something
-        context->callback_(context->req_, context->resp_);
+        context->callback_(context->table_, context->req_, context->resp_,
+                           context->callback_param_);
         delete context;
     }
     return 0;
@@ -173,7 +133,8 @@ void TableImpl::ExtendIndexCondition(const IndexCondition& index_cond,
 }
 
 #endif
-int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback) {
+int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
+                   void* callback_param) {
 #if 0
     typedef std::map<std::string, IndexConditionExtend> IndexConditionExtendMap;
     IndexConditionExtendMap dedup_map;
