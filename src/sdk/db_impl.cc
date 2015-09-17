@@ -4,7 +4,6 @@
 
 #include "sdk/sdk.h"
 #include "sdk/db_impl.h"
-#include "util/tera.h"
 
 #include <gflags/gflags.h>
 DECLARE_string(tera_root_dir);

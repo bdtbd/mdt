@@ -8,11 +8,11 @@
 #include "common/counter.h"
 #include "proto/kv.pb.h"
 #include "util/env.h"
-#include "util/tera.h"
 #include "util/coding.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
 #include "sdk/option.h"
+#include "tera.h"
 
 namespace mdt {
 
