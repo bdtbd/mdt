@@ -6,7 +6,7 @@
 
 namespace mdt{
 
-tatus Database::OpenDB(const std::string& db_name, Database** db_ptr) {
+Status Database::OpenDB(const std::string& db_name, Database** db_ptr) {
     return DatabaseImpl::OpenDB(db_name, db_ptr);
 }
 
