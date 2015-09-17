@@ -17,16 +17,16 @@ namespace mdt {
 class DatabaseImpl : public Database {
 public:
     DatabaseImpl(const Options& options, const std::string& db_name);
-    ~DatabaseImpl();
+    ~DatabaseImpl() {}
 
     // create fs namespace
     static Status CreateDB(const Options& options, const std::string& db_name, Database** db_ptr);
-    static Status OpenDB(const std::string& db_name, Database** db_ptr);
+    // static Status OpenDB(const std::string& db_name, Database** db_ptr);
 
     // if db not exit, create it
     Status CreateTable(const CreateRequest& request, CreateResponse* response, Table** table_ptr);
-    Status CreateTable(const TableDescription& table_desc);
-    Status OpenTable(const std::string& table_name, Table** table_ptr);
+    // Status CreateTable(const TableDescription& table_desc);
+    // Status OpenTable(const std::string& table_name, Table** table_ptr);
 
     std::string& DatabaseName() {return db_name_;}
 

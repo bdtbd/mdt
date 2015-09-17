@@ -151,6 +151,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
     return 0;
 }
 
+#if 0
 enum COMPARATOR_EXTEND {
     kBetween = 100
 };
@@ -171,6 +172,7 @@ void TableImpl::ExtendIndexCondition(const IndexCondition& index_cond,
     index_cond_ex->compare_value1 = index_cond.compare_value;
 }
 
+#endif
 int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback) {
 #if 0
     typedef std::map<std::string, IndexConditionExtend> IndexConditionExtendMap;
