@@ -36,8 +36,7 @@ class WritableFile;
 class Env {
  public:
   Env() { }
-  //virtual ~Env();
-  ~Env() {}
+  virtual ~Env();
 
   // Return a default environment suitable for the current operating
   // system.  Sophisticated users may wish to provide their own Env
@@ -245,7 +244,7 @@ class RandomAccessFile {
 class WritableFile {
  public:
   WritableFile() { }
-   ~WritableFile() {}
+  virtual ~WritableFile();
 
   virtual Status Append(const Slice& data, int32_t *res) = 0;
   virtual Status Append(const Slice& data) = 0;

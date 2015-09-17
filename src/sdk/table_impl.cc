@@ -151,6 +151,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
     return 0;
 }
 
+#if 0
 enum COMPARATOR_EXTEND {
     kBetween = 100
 };
@@ -164,6 +165,14 @@ struct IndexConditionExtend {
     bool flag2;
 };
 
+void TableImpl::ExtendIndexCondition(const IndexCondition& index_cond,
+                                     IndexConditionExtend* index_cond_ex) {
+    index_cond_ex->index_name = index_cond.index_name;
+    index_cond_ex->comparator = index_cond.comparator;
+    index_cond_ex->compare_value1 = index_cond.compare_value;
+}
+
+#endif
 int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback) {
 #if 0
     typedef std::map<std::string, IndexConditionExtend> IndexConditionExtendMap;
@@ -173,21 +182,19 @@ int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallbac
         const IndexCondition& index_cond = *it;
         IndexConditionExtendMap::iterator ex_it = dedup_map.find(index_cond.index_name);
         if (ex_it == dedup_map.end()) {
-            IndexConditionExtend index_cond_ex;
-            ExtendIndexCondition(index_cond, &index_cond_ex);
-            dedup_map[index_cond.index_name] = index_cond_ex;
+            ExtendIndexCondition(index_cond, &dedup_map[index_cond.index_name]);
             continue;
         }
 
         IndexConditionExtend& index_cond_ex = it->second;
         if (index_cond_ex.comparator == kBetween) {
             // invalid param
-            return;
+            return -1;
         }
 
         if (index_cond.comparator == kLess || index_cond.comparator == kLessEqual) {
             if (index_cond_ex.comparator != kGreater && index_cond_ex.comparator != kGreaterEqual) {
-                return;
+                return -1;
             }
             index_cond_ex.comparator = kBetween;
             index_cond_ex.compare_value2 = index_cond.compare_value;
@@ -195,15 +202,16 @@ int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallbac
             index_cond_ex.flag2 = (index_cond.comparator == kLessEqual);
         } else if (index_cond.comparator == kGreater || index_cond.comparator == kGreaterEqual) {
             if (index_cond_ex.comparator != kLess && index_cond_ex.comparator != kLessEqual) {
-                return;
+                return -1;
             }
             index_cond_ex.comparator = kBetween;
+            index_cond_ex.compare_value2 = index_cond_ex.compare_value1;
             index_cond_ex.compare_value1 = index_cond.compare_value;
             index_cond_ex.flag1 = (index_cond.comparator == kGreaterEqual);
             index_cond_ex.flag2 = (index_cond_ex.comparator == kLessEqual);
         } else {
             // invalid param
-            return
+            return -1;
         }
     }
 
@@ -213,9 +221,50 @@ int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallbac
         const std::string& index_name = ex_it->first;
         const IndexConditionExtend& index_cond_ex = ex_it->second;
         tera::Table* index_table = GetTable(index_name);
+        tera::ScanDescriptor* scan_desc = NULL;
+        switch (index_cond_ex.comparator) {
+        case kEqualTo:
+            scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1);
+            scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            break;
+        case kNotEqualTo:
+            abort();
+            break;
+        case kLess:
+            scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1);
+            scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            break;
+        case kLessEqual:
+            scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1);
+            scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            break;
+        case kGreater:
+            scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1);
+            scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            break;
+        case kGreaterEqual:
+            scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1);
+            scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            break;
+        case kBetween:
+            if (index_cond_ex.flag1) {
+                scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1);
+            } else {
+                scan_desc = tera::ScanDescriptor(index_cond_ex.compare_value1 + '\0');
+            }
+            if (index_cond_ex.flag2) {
+                scan_desc->SetEnd(index_cond_ex.compare_value2 + '\0');
+            } else {
+                scan_desc->SetEnd(index_cond_ex.compare_value2);
+            }
+            break;
+        default:
+            break;
+        }
         if (index_cond_ex.comparator == kBetween) {
-            tera::ScanDescriptor scan_desc(index_cond_ex.compare_value1);
+            scan_desc = new tera::ScanDescriptor(index_cond_ex.compare_value1);
             scan_desc.SetEnd(index_cond_ex.compare_value2);
+        } else if ()
             scan_desc.AddColumnFamily("PrimaryKey");
 
             // scan_desc.AddColumnFamily("Location");

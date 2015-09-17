@@ -13,12 +13,12 @@ public:
                          Table** table_ptr);
     Table() {}
     virtual ~Table() {}
-    virtual int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback);
-    virtual int Put(const StoreRequest* request, StoreResponse* response);
-    virtual int Get(const SearchRequest* request, SearchResponse* response, SearchCallback callback);
-    virtual int Get(const SearchRequest& request, SearchResponse* response);
+    virtual int Put(const StoreRequest* request, StoreResponse* response, StoreCallback callback) = 0;
+ //   virtual int Put(const StoreRequest* request, StoreResponse* response);
+    virtual int Get(const SearchRequest* request, SearchResponse* response, SearchCallback callback) = 0;
+ //   virtual int Get(const SearchRequest& request, SearchResponse* response);
 
-    virtual std::string& TableName();
+    virtual std::string& TableName() = 0;
 
 private:
     Table(const Table&);

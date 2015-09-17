@@ -25,7 +25,7 @@ struct FileLocation {
     int32_t size_;
 
 public:
-    std::string& SerializeToString();
+    std::string SerializeToString() {return std::string("123");}
 };
 
 struct TeraAdapter {
@@ -57,7 +57,7 @@ struct FilesystemAdapter {
 
 class TableImpl : public Table {
 public:
-    int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
+    static int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                   const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                   Table** table_ptr);
     TableImpl(const TableDescription& table_desc,

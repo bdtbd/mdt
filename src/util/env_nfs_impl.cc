@@ -26,7 +26,7 @@ public:
         assert(file_);
     }
 
-    ~DfsWritableFile() {
+    virtual ~DfsWritableFile() {
         if (file_) {
             file_->CloseFile();
             delete file_;
@@ -89,16 +89,12 @@ private:
 
 class EnvNfsImpl : public Env {
 public:
-    EnvNfsImpl() {
-        env_name_ = "NfsImpl";
-    }
-
     EnvNfsImpl(Dfs* dfs) {
         env_name_ = "NfsImpl";
         dfs_ = dfs;
     }
 
-    ~EnvNfsImpl() {}
+    virtual ~EnvNfsImpl() {}
 
     //static Env* Default();
 
