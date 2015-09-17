@@ -172,6 +172,7 @@ void TableImpl::ExtendIndexCondition(const IndexCondition& index_cond,
 }
 
 int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback) {
+#if 0
     typedef std::map<std::string, IndexConditionExtend> IndexConditionExtendMap;
     IndexConditionExtendMap dedup_map;
     std::vector<IndexCondition>::const_iterator it = req->index_condition_list.begin();
@@ -300,6 +301,7 @@ int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallbac
             reader->Next();
         }
     }
+#endif
     return 0;
 }
 
@@ -344,6 +346,9 @@ DataWriter* TableImpl::GetDataWriter() {
 
 // data writer impl
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
+    file_->Append(data, &location->size_);
+    location->offset_ = offset_;
+    offset_ += location->size_;
     return 0;
 }
 

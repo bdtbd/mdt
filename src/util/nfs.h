@@ -7,8 +7,8 @@
 
 #include <string>
 #include <vector>
-#include "leveldb/dfs.h"
-#include "port/port_posix.h"
+#include "common/mutex.h"
+#include "util/dfs.h"
 
 namespace nfs {
   struct NFSFILE;
@@ -51,7 +51,7 @@ public:
   DfsFile* OpenFile(const std::string& filename, int32_t flags);
 private:
   Nfs();
-  static port::Mutex mu_;
+  static common::Mutex mu_;
   static void LoadSymbol();
   static bool dl_init_;
 };

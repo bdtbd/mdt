@@ -6,11 +6,6 @@
 
 namespace mdt {
 
-struct Options {
-    std::string tera_flag_file_path_; // tera.flag's path
-    Env* env_;
-};
-
 struct FilesystemOptions {
     std::string fs_path_; // db_name + FileSystem
     Env* env_;
