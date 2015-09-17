@@ -1,17 +1,15 @@
-#include "sdk/db.h"
+// Copyright (c) 2015, Baidu.com, Inc. All Rights Reserved
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "sdk/db_impl.h"
 
 namespace mdt{
 
-Status Database::CreateDB(const Options& options,
-                             std::string& db_name,
-                         Database** db_ptr) {
-        DatabaseImpl* db_impl = new DatabaseImpl(options, db_name);
-        assert(db_impl);
-         *db_ptr = db_impl;
-       return Status::OK();
-     }
+Status Database::OpenDB(const std::string& db_name, Database** db_ptr) {
+    return DatabaseImpl::OpenDB(db_name, db_ptr);
+}
 
 Database::~Database() {}
 
-}
+} // namespace mdt

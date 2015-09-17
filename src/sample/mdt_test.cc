@@ -48,16 +48,18 @@ int main(int ac, char* av[]) {
     SetupLog(log_prefix);
     LOG(INFO) << "start loging...";
 
-    mdt::Options options;
     mdt::Database* db;
     std::string db_name = "mdt-test";
-    mdt::Database::CreateDB(options, db_name, &db);
-    mdt::Table* table;
-    const mdt::CreateRequest req;
-    mdt::CreateResponse resp;
-    db->CreateTable(req, &resp, &table);
+    db = mdt::OpenDatabase(db_name);
 
-    const mdt::StoreRequest store_req;
+    mdt::TableDescription table_desc;
+    CreateTable(db, table_desc);
+
+    mdt::Table* table;
+    std::string table_name = "table";
+    table = OpenTable(db, table_name);
+
+    mdt::StoreRequest store_req;
     mdt::StoreResponse store_resp;
     mdt::StoreCallback callback;
     table->Put(&store_req, &store_resp, callback);
