@@ -4,13 +4,10 @@
 namespace mdt{
 
 Status Database::CreateDB(const Options& options,
-                             std::string& db_name,
-                         Database** db_ptr) {
-        DatabaseImpl* db_impl = new DatabaseImpl(options, db_name);
-        assert(db_impl);
-         *db_ptr = db_impl;
-       return Status::OK();
-     }
+                          std::string& db_name,
+                          Database** db_ptr) {
+    return DatabaseImpl::CreateDB(options, db_name, db_ptr);
+}
 
 Database::~Database() {}
 
