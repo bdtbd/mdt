@@ -9,7 +9,7 @@
 
 #include "mutex.h"
 
-namespace common {
+namespace mdt {
 
 class AutoResetEvent {
 public:
@@ -46,7 +46,7 @@ private:
     bool signaled_;
 };
 
-} // namespace common
+} // namespace mdt
 
 using common::AutoResetEvent;
 

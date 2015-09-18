@@ -8,6 +8,7 @@
 #include "sdk/table.h"
 
 #include "util/env.h"
+#include "util/coding.h"
 
 DECLARE_string(flagfile);
 DECLARE_string(log_file);
@@ -39,19 +40,40 @@ void SetupLog(const std::string& name) {
     google::SetLogSymlink(google::FATAL, "");
 }
 
+void LocationSerialToStringTest() {
+    // location.SerialToString test
+    std::string s = "90-10:89:10-87";
+    uint32_t offset = 100;
+    uint32_t size = 40;
+    char buf[8];
+    char* p = buf;
+    mdt::EncodeBigEndian32(p, offset);
+    mdt::EncodeBigEndian32(p + 4, size);
+    std::string ss(buf, 8);
+    std::string res = s + ss;
+    LOG(INFO) << "location serial test : " << res;
+}
 
-int main(int ac, char* av[]) {
+void SetupGoogleLog() {
     // init param, setup log
-    ::google::ParseCommandLineFlags(&ac, &av, true);
     std::string log_prefix = "mdt";
     ::google::InitGoogleLogging(log_prefix.c_str());
     SetupLog(log_prefix);
     LOG(INFO) << "start loging...";
+}
 
+int main(int ac, char* av[]) {
+    ::google::ParseCommandLineFlags(&ac, &av, true);
+    SetupGoogleLog();
+
+    LocationSerialToStringTest();
+
+    // create db
     mdt::Database* db;
     std::string db_name = "mdt-test";
     db = mdt::OpenDatabase(db_name);
 
+    // create table
     mdt::TableDescription table_desc;
     CreateTable(db, table_desc);
 
@@ -59,6 +81,7 @@ int main(int ac, char* av[]) {
     std::string table_name = "table";
     table = OpenTable(db, table_name);
 
+    // insert data
     mdt::StoreRequest store_req;
     mdt::StoreResponse store_resp;
     mdt::StoreCallback callback;

@@ -308,7 +308,11 @@ DataWriter* TableImpl::GetDataWriter() {
 
 // data writer impl
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
-    file_->Append(data, &location->size_);
+    Status s = file_->Append(data);
+    if (!s.ok()) {
+        return -1;
+    }
+    location->size_ = data.size();
     location->offset_ = offset_;
     offset_ += location->size_;
     return 0;

@@ -6,7 +6,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <gflags/gflags.h>
 #include "util/env.h"
+
+DECLARE_string(env_fs_type);
 
 namespace mdt {
 
@@ -22,19 +25,7 @@ RandomAccessFile::~RandomAccessFile() {
 WritableFile::~WritableFile() {
 }
 
-Logger::~Logger() {
-}
-
 FileLock::~FileLock() {
-}
-
-void Log(Logger* info_log, const char* format, ...) {
-  if (info_log != NULL) {
-    va_list ap;
-    va_start(ap, format);
-    info_log->Logv(format, ap);
-    va_end(ap);
-  }
 }
 
 static Status DoWriteStringToFile(Env* env, const Slice& data,
@@ -95,6 +86,25 @@ Status ReadFileToString(Env* env, const std::string& fname, std::string* data) {
 }
 
 EnvWrapper::~EnvWrapper() {
+}
+
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+static Env* default_env;
+
+Env* EnvNfs();
+Env* EnvPosix();
+
+static void InitDefaultEnv() {
+    if (FLAGS_env_fs_type == "local") {
+        default_env = EnvPosix();
+    } else if (FLAGS_env_fs_type == "dfs") {
+        default_env = EnvNfs();
+    }
+}
+
+Env* Env::Default() {
+    pthread_once(&once, InitDefaultEnv);
+    return default_env;
 }
 
 }  // namespace mdt

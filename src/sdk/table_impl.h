@@ -5,13 +5,14 @@
 #ifndef  MDT_SDK_TABLE_IMPL_H_
 #define  MDT_SDK_TABLE_IMPL_H_
 
-#include "common/counter.h"
 #include "proto/kv.pb.h"
+#include "util/counter.h"
 #include "util/env.h"
+#include "util/coding.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
 #include "sdk/option.h"
-#include "tera.h"
+#include <tera.h>
 
 namespace mdt {
 
@@ -21,11 +22,19 @@ namespace mdt {
 // table in memory control structure
 struct FileLocation {
     std::string fname_;
-    int32_t offset_;
+    uint32_t offset_;
     int32_t size_;
 
 public:
-    std::string SerializeToString() {return std::string("123");}
+    std::string SerializeToString() {
+        char buf[8];
+        char* p = buf;
+        EncodeBigEndian32(p, offset_);
+        EncodeBigEndian32(p + 4, size_);
+        std::string offset_size(buf, 8);
+        std::string s = fname_ + offset_size;
+        return s;
+    }
     void ParseFromString(const std::string& str) {};
 };
 
@@ -115,7 +124,7 @@ struct PutContext {
     StoreResponse* resp_;
     StoreCallback callback_;
     void* callback_param_;
-    common::Counter counter_; // atomic counter
+    Counter counter_; // atomic counter
 
     PutContext(TableImpl* table,
                const StoreRequest* request,
@@ -132,7 +141,7 @@ struct GetContext {
     const SearchRequest* req_;
     SearchResponse* resp_;
     SearchCallback callback_;
-    common::Counter counter_; // atomic counter
+    Counter counter_; // atomic counter
 
     GetContext(TableImpl* table,
                const SearchRequest* request,

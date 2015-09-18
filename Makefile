@@ -22,7 +22,7 @@ PROTO_OUT_H := $(PROTO_FILES:.proto=.pb.h)
 SDK_SRC := $(wildcard src/sdk/*.cc)
 COMMON_SRC := $(wildcard src/common/*.cc)
 UTIL_SRC := $(wildcard src/util/*.cc)
-PROTO_SRC := $(wildcard src/proto/*.cc)
+PROTO_SRC := $(filter-out %.pb.cc, $(wildcard src/proto/*.cc)) $(PROTO_OUT_CC)
 VERSION_SRC := src/version.cc
 SAMPLE_SRC := $(wildcard src/sample/*.cc)
 

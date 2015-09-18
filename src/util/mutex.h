@@ -14,7 +14,7 @@
 #include <sys/time.h>
 #include "timer.h"
 
-namespace common {
+namespace mdt {
 
 // #define MUTEX_DEBUG
 
@@ -155,10 +155,7 @@ private:
     Mutex* mu_;
     pthread_cond_t cond_;
 };
-}  // namespace common
 
-using common::Mutex;
-using common::MutexLock;
-using common::CondVar;
+}  // namespace mdt
 
 #endif  // MDT_COMMON_MUTEX_H_
