@@ -5,10 +5,15 @@
 #ifndef  MDT_SDK_DB_H_
 #define  MDT_SDK_DB_H_
 
+#include <gflags/gflags.h>
+#include <glog/logging.h>
+
 #include "sdk/sdk.h"
 #include "sdk/option.h"
 #include "sdk/table.h"
 #include "util/env.h"
+
+DECLARE_string(tera_flag_file_path);
 
 namespace mdt {
 
@@ -17,7 +22,9 @@ struct Options {
     Env* env_;
 
 public:
-    Options() : env_(Env::Default()) {}
+    Options()
+        : tera_flag_file_path_(FLAGS_tera_flag_file_path),
+        env_(Env::Default()) {}
 };
 
 class Database {

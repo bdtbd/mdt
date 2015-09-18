@@ -5,6 +5,9 @@
 #include "sdk/sdk.h"
 #include "sdk/db_impl.h"
 
+#include <gflags/gflags.h>
+DECLARE_string(tera_root_dir);
+
 namespace mdt {
 
 Status DatabaseImpl::OpenDB(const std::string& db_name, Database** db_ptr) {
@@ -41,7 +44,7 @@ DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
     // create tera client
     ::tera::ErrorCode error_code;
     std::string tera_log_prefix = db_name;
-    tera_opt_.root_path_ = db_name + "/Tera/";
+    tera_opt_.root_path_ = FLAGS_tera_root_dir;
     options.env_->CreateDir(tera_opt_.root_path_);
     tera_opt_.tera_flag_ = options.tera_flag_file_path_;
     tera_opt_.client_ = tera::Client::NewClient(tera_opt_.tera_flag_, tera_log_prefix, &error_code);
