@@ -143,7 +143,7 @@ int main(int ac, char* av[]) {
         mdt::StoreRequest* req = new mdt::StoreRequest();
         char buf[12];
         char* p = buf;
-        p += snprintf(p, 11, "%11llu", i);
+        p += snprintf(p, 11, "%11lu", i);
         std::string str(buf, 11);
         req->primary_key = buf;
         req->timestamp = time(NULL);
