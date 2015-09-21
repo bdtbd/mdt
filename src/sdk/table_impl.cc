@@ -8,6 +8,8 @@
 #include "sdk/table_impl.h"
 #include "proto/kv.pb.h"
 
+#include <glog/logging.h>
+
 namespace mdt {
 
 std::ostream& operator << (std::ostream& o, const FileLocation& location) {
@@ -24,6 +26,7 @@ int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt
     // init fs adapter
     FilesystemAdapter fs_adapter;
     fs_adapter.root_path_ = fs_opt.fs_path_ + "/" + table_name + "/";
+    LOG(INFO) << "data file dir: " << fs_adapter.root_path_;
     fs_adapter.env_ = fs_opt.env_;
     fs_adapter.writer_ = NULL;
 
@@ -52,7 +55,9 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     // open primary key table
     std::string primary_table_name = tera_.table_prefix_ + "#pri#" + table_desc.table_name;
     //std::string primary_table_name = GetPrimaryTable(table_desc.table_name);
+    LOG(INFO) << "open primary table: " << primary_table_name;
     tera::Table* primary_table = tera_.opt_.client_->OpenTable(primary_table_name, &error_code);
+    assert(primary_table);
     tera_.tera_table_map_[primary_table_name] = primary_table;
 
     // open index key table
@@ -62,7 +67,9 @@ TableImpl::TableImpl(const TableDescription& table_desc,
          ++it) {
         std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + it->index_name;
         //std::string index_table_name = GetIndexTable(it->index_name);
+        LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
+        assert(index_table);
         tera_.tera_table_map_[index_table_name] = index_table;
     }
 }
@@ -72,6 +79,7 @@ void PutCallback(tera::RowMutation* row) {
     if (context->counter_.Dec() == 0) {
         context->callback_(context->table_, context->req_, context->resp_,
                            context->callback_param_);
+        LOG(INFO) << "put callback";
         delete context;
     }
 }

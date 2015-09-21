@@ -80,7 +80,7 @@ int main(int ac, char* av[]) {
     // create db
     std::cout << "open db ..." << std::endl;
     mdt::Database* db;
-    std::string db_name = "mdt-test";
+    std::string db_name = "mdt-test005";
     db = mdt::OpenDatabase(db_name);
 
     // create table
@@ -104,7 +104,7 @@ int main(int ac, char* av[]) {
 
     std::cout << "open table ..." << std::endl;
     mdt::Table* table;
-    std::string table_name = "table-kepler001";
+    std::string table_name = table_desc.table_name;
     table = OpenTable(db, table_name);
 
     // insert data
@@ -169,4 +169,3 @@ int main(int ac, char* av[]) {
     std::cout << "done" << std::endl;
     return 0;
 }
-
