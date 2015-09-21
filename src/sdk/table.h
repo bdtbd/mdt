@@ -12,8 +12,8 @@ public:
     virtual ~Table() {}
     virtual int Put(const StoreRequest* request, StoreResponse* response,
                     StoreCallback callback = NULL, void* callback_param = NULL) = 0;
-    virtual int Get(const SearchRequest* request, SearchResponse* response,
-                    SearchCallback callback = NULL, void* callback_param = NULL) = 0;
+    virtual Status Get(const SearchRequest* request, SearchResponse* response,
+                       SearchCallback callback = NULL, void* callback_param = NULL) = 0;
 
     virtual const std::string& TableName() = 0;
 

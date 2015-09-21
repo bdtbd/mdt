@@ -1,3 +1,4 @@
+#include <iostream>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <unistd.h>
@@ -66,6 +67,8 @@ void StoreCallback_Test(mdt::Table* table, const mdt::StoreRequest* request,
                               mdt::StoreResponse* response,
                               void* callback_param) {
     LOG(INFO) << "<<< callabck test >>>";
+    bool* store_finish = (bool*)callback_param;
+    *store_finish = true;
 }
 
 int main(int ac, char* av[]) {
@@ -75,11 +78,13 @@ int main(int ac, char* av[]) {
     //LocationSerialToStringTest();
 
     // create db
+    std::cout << "open db ..." << std::endl;
     mdt::Database* db;
     std::string db_name = "mdt-test005";
     db = mdt::OpenDatabase(db_name);
 
     // create table
+    std::cout << "create table ..." << std::endl;
     mdt::TableDescription table_desc;
     table_desc.table_name = "table-kepler001";
     table_desc.primary_key_type = mdt::kBytes;
@@ -97,6 +102,7 @@ int main(int ac, char* av[]) {
     table_desc.index_descriptor_list.push_back(index_table3);
     CreateTable(db, table_desc);
 
+    std::cout << "open table ..." << std::endl;
     mdt::Table* table;
     std::string table_name = table_desc.table_name;
     table = OpenTable(db, table_name);
@@ -123,6 +129,43 @@ int main(int ac, char* av[]) {
 
     mdt::StoreResponse* store_resp = new mdt::StoreResponse();
     mdt::StoreCallback callback = StoreCallback_Test;
-    table->Put(store_req, store_resp, callback);
+    bool store_finish = false;
+
+    std::cout << "put ..." << std::endl;
+    table->Put(store_req, store_resp, callback, &store_finish);
+
+    while (!store_finish) {
+        usleep(1000);
+    }
+
+    mdt::SearchRequest* search_req = new mdt::SearchRequest;
+    search_req->start_timestamp = 638239413;
+    search_req->end_timestamp = 638239415;
+
+    mdt::IndexCondition query_index_cond1, query_index_cond2;
+    query_index_cond1.index_name = "Query";
+    query_index_cond1.comparator = mdt::kGreater;
+    query_index_cond1.compare_value = "apple";
+
+    query_index_cond2.index_name = "Query";
+    query_index_cond2.comparator = mdt::kLess;
+    query_index_cond2.compare_value = "car";
+
+    search_req->index_condition_list.push_back(query_index_cond1);
+    search_req->index_condition_list.push_back(query_index_cond2);
+
+    mdt::SearchResponse* search_resp = new mdt::SearchResponse;
+
+    std::cout << "get ..." << std::endl;
+    table->Get(search_req, search_resp);
+    for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
+        const mdt::ResultStream& result = search_resp->result_stream[i];
+        std::cout << "primary key: " << result.primary_key << std::endl;
+        for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
+            std::cout << "        data: " << result.result_data_list[j] << std::endl;
+        }
+    }
+
+    std::cout << "done" << std::endl;
     return 0;
 }
