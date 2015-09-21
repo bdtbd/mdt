@@ -63,6 +63,9 @@ sample: $(SAMPLE_OBJ) $(LIBRARY)
 libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 	$(AR) -rs $@ $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 
+$(ALL_OBJ): %.o: %.cc $(PROTO_OUT_H)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(VERSION_SRC): FORCE
 	sh build_version.sh
 

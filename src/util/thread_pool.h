@@ -16,7 +16,7 @@
 #include "mutex.h"
 #include "timer.h"
 
-namespace common {
+namespace mdt {
 
 // An unscalable thread pool implimention.
 class ThreadPool {
@@ -270,7 +270,7 @@ private:
     int64_t task_count_;
 };
 
-} // namespace common
+} // namespace mdt
 
 using common::ThreadPool;
 

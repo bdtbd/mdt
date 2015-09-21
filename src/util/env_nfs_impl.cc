@@ -6,7 +6,6 @@
 #include "util/dfs.h"
 #include "util/nfs.h"
 
-DECLARE_string(env_fs_type);
 DECLARE_string(env_nfs_mountpoint);
 DECLARE_string(env_nfs_conf_path);
 DECLARE_string(env_nfs_so_path);
@@ -35,19 +34,6 @@ public:
 
     bool isValid() {
         return file_ != NULL;
-    }
-
-    Status Append(const Slice& data, int32_t* nr_written) {
-        const char* src = data.data();
-        size_t size = data.size();
-        *nr_written = 0;
-
-        int32_t ret = file_->Write(src, size);
-        if (ret != static_cast<int32_t>(size)) {
-            return IOError(filename_, errno);
-        }
-        *nr_written = ret;
-        return Status::OK();
     }
 
     Status Append(const Slice& data) {
@@ -188,28 +174,6 @@ public:
         return NULL;
     }
 
-    virtual int64_t Schedule(
-            void (*function)(void* arg),
-            void* arg,
-            double prio = 0.0,
-            int64_t wait_time_millisec = 0) {return 0;}
-
-    virtual void ReSchedule(int64_t id, double prio, int64_t millisec = 0) {return;}
-
-    virtual void StartThread(void (*function)(void* arg), void* arg) {return;}
-
-    virtual Status GetTestDirectory(std::string* path) {return Status::OK();}
-
-    virtual Status NewLogger(const std::string& fname,
-                             Logger** result) {return Status::OK();}
-    virtual void SetLogger(Logger* logger) {return;}
-
-    virtual uint64_t NowMicros() {return 0;}
-
-    virtual void SleepForMicroseconds(int micros) {return;}
-
-    virtual int SetBackgroundThreads(int number) {return 0;}
-
 private:
     EnvNfsImpl(const EnvNfsImpl&);
     void operator=(const EnvNfsImpl&);
@@ -220,21 +184,17 @@ private:
 };
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
-static Env* default_env;
-static void InitNfsEnv(const std::string& mountpoint,
-                       const std::string& conf_path) {
-    Nfs::Init(mountpoint, conf_path);
+static Env* nfs_env;
+
+static void InitNfsEnv() {
+    Nfs::Init(FLAGS_env_nfs_mountpoint, FLAGS_env_nfs_conf_path);
     Dfs* dfs = Nfs::GetInstance();
-    default_env = new EnvNfsImpl(dfs);
-}
-static void InitDefaultEnv() {
-    InitNfsEnv(FLAGS_env_nfs_mountpoint, FLAGS_env_nfs_conf_path);
+    nfs_env = new EnvNfsImpl(dfs);
 }
 
-// default nfs
-Env* Env::Default() {
-      pthread_once(&once, InitDefaultEnv);
-      return default_env;
+Env* EnvNfs() {
+  pthread_once(&once, InitNfsEnv);
+  return nfs_env;
 }
 
 }

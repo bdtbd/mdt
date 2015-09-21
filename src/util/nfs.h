@@ -7,11 +7,12 @@
 
 #include <string>
 #include <vector>
-#include "common/mutex.h"
+#include "util/mutex.h"
 #include "util/dfs.h"
 
 namespace nfs {
   struct NFSFILE;
+  struct NFSDIR;
   typedef int (*AssignNamespaceIdFunc)(const char* path, int max_namespaces);
 }
 
@@ -51,7 +52,7 @@ public:
   DfsFile* OpenFile(const std::string& filename, int32_t flags);
 private:
   Nfs();
-  static common::Mutex mu_;
+  static Mutex mu_;
   static void LoadSymbol();
   static bool dl_init_;
 };
