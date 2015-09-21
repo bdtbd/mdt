@@ -52,7 +52,7 @@ struct StoreResponse {
 
 // 异步写入回调
 typedef void (*StoreCallback)(Table* table, const StoreRequest* request,
-                              const StoreResponse* response,
+                              StoreResponse* response,
                               void* callback_param);
 
 // 写入接口。callback != NULL时，是异步调用。

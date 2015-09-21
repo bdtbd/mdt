@@ -1,2 +1,6 @@
-
 --log_dir=./log
+--env_fs_type=nfs
+--env_fs_mountpoint=/disk/tera/mdt-test
+--env_fs_conf_path=./conf/nfs.conf
+--env_fs_so_path=/home/tera/tera/lib
+
