@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <tera.h>
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
 #include "proto/kv.pb.h"
@@ -41,7 +42,8 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     tera::ErrorCode error_code;
 
     // open primary key table
-    std::string primary_table_name = tera_.table_prefix_ + "#" + table_desc.table_name;
+    std::string primary_table_name = tera_.table_prefix_ + "#pri#" + table_desc.table_name;
+    //std::string primary_table_name = GetPrimaryTable(table_desc.table_name);
     tera::Table* primary_table = tera_.opt_.client_->OpenTable(primary_table_name, &error_code);
     tera_.tera_table_map_[primary_table_name] = primary_table;
 
@@ -50,7 +52,8 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     for (it = table_desc_.index_descriptor_list.begin();
          it != table_desc_.index_descriptor_list.end();
          ++it) {
-        std::string index_table_name = tera_.table_prefix_ + "#" + it->index_name;
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + it->index_name;
+        //std::string index_table_name = GetIndexTable(it->index_name);
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
         tera_.tera_table_map_[index_table_name] = index_table;
     }
@@ -78,7 +81,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
     context->counter_.Inc();
 
     // update primary table
-    tera::Table* primary_table = GetTable(table_desc_.table_name);
+    tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put("Location", location.SerializeToString(), req->timestamp, null_value);
@@ -91,7 +94,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
     for (it = req->index_list.begin();
          it != req->index_list.end();
          ++it) {
-        tera::Table* index_table = GetTable(it->index_name);
+        tera::Table* index_table = GetIndexTable(it->index_name);
         std::string index_key = it->index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
         index_row->Put("PrimaryKey", primary_key, req->timestamp, null_value);
@@ -183,7 +186,7 @@ void TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_co
     for (size_t i = 0; i < index_condition_ex_list.size(); i++) {
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
-        tera::Table* index_table = GetTable(index_name);
+        tera::Table* index_table = GetIndexTable(index_name);
         tera::ScanDescriptor* scan_desc = NULL;
         switch (index_cond_ex.comparator) {
         case kEqualTo:
@@ -254,7 +257,7 @@ Status TableImpl::GetRows(const std::vector<std::string>& primary_key_list,
 }
 
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result) {
-    tera::Table* primary_table = GetTable(table_desc_.table_name);
+    tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     tera::RowReader* reader = primary_table->NewRowReader(primary_key);
     reader->AddColumnFamily("Location");
     primary_table->Get(reader);
@@ -267,8 +270,14 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     return Status::OK();
 }
 
-tera::Table* TableImpl::GetTable(const std::string& table_name) {
-    std::string index_table_name = tera_.table_prefix_ + "#" + table_name;
+tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
+    std::string index_table_name = tera_.table_prefix_ + "#pri#" + table_name;
+    tera::Table* table = tera_.tera_table_map_[index_table_name];
+    return table;
+}
+
+tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
+    std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + index_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
@@ -279,9 +288,9 @@ std::string TableImpl::TimeToString() {
     const time_t seconds = now_tv.tv_sec;
     struct tm t;
     localtime_r(&seconds, &t);
-    char buf[64];
+    char buf[27];
     char* p = buf;
-    p += snprintf(p, 64,
+    p += snprintf(p, 27,
             "%04d-%02d-%02d-%02d:%02d:%02d.%06d",
             t.tm_year + 1900,
             t.tm_mon + 1,
@@ -290,7 +299,7 @@ std::string TableImpl::TimeToString() {
             t.tm_min,
             t.tm_sec,
             static_cast<int>(now_tv.tv_usec));
-    std::string time_buf(p);
+    std::string time_buf(buf, 26);
     return time_buf;
 }
 
@@ -313,8 +322,10 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
         return -1;
     }
     location->size_ = data.size();
+    file_->Sync();
     location->offset_ = offset_;
     offset_ += location->size_;
+    location->fname_ = fname_;
     return 0;
 }
 

@@ -1,8 +1,8 @@
 #ifndef MDT_SDK_OPTION_H_
 #define MDT_SDK_OPTION_H_
 
-#include "tera.h"
 #include "util/env.h"
+#include <tera.h>
 
 namespace mdt {
 

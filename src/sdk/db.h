@@ -13,18 +13,11 @@
 #include "sdk/table.h"
 #include "util/env.h"
 
-DECLARE_string(tera_flag_file_path);
-
 namespace mdt {
 
 struct Options {
     std::string tera_flag_file_path_; // tera.flag's path
     Env* env_;
-
-public:
-    Options()
-        : tera_flag_file_path_(FLAGS_tera_flag_file_path),
-        env_(Env::Default()) {}
 };
 
 class Database {

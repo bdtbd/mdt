@@ -8,11 +8,11 @@
 #include "proto/kv.pb.h"
 #include "util/counter.h"
 #include "util/env.h"
+#include <tera.h>
 #include "util/coding.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
 #include "sdk/option.h"
-#include <tera.h>
 
 namespace mdt {
 
@@ -109,7 +109,8 @@ public:
 
 private:
     DataWriter* GetDataWriter();
-    tera::Table* GetTable(const std::string& table_name);
+    tera::Table* GetPrimaryTable(const std::string& table_name);
+    tera::Table* GetIndexTable(const std::string& index_name);
     std::string TimeToString();
 
 private:

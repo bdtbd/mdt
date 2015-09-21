@@ -62,11 +62,17 @@ void SetupGoogleLog() {
     LOG(INFO) << "start loging...";
 }
 
+void StoreCallback_Test(mdt::Table* table, const mdt::StoreRequest* request,
+                              mdt::StoreResponse* response,
+                              void* callback_param) {
+    LOG(INFO) << "<<< callabck test >>>";
+}
+
 int main(int ac, char* av[]) {
     ::google::ParseCommandLineFlags(&ac, &av, true);
-    SetupGoogleLog();
+    //SetupGoogleLog();
 
-    LocationSerialToStringTest();
+    //LocationSerialToStringTest();
 
     // create db
     mdt::Database* db;
@@ -75,17 +81,49 @@ int main(int ac, char* av[]) {
 
     // create table
     mdt::TableDescription table_desc;
+    table_desc.table_name = "table-kepler001";
+    table_desc.primary_key_type = mdt::kBytes;
+
+    mdt::IndexDescription index_table1, index_table2, index_table3;
+    index_table1.index_name = "Query";
+    index_table1.index_key_type = mdt::kBytes;
+    index_table2.index_name = "Costtime";
+    index_table2.index_key_type = mdt::kBytes;
+    index_table3.index_name = "Service";
+    index_table3.index_key_type = mdt::kBytes;
+
+    table_desc.index_descriptor_list.push_back(index_table1);
+    table_desc.index_descriptor_list.push_back(index_table2);
+    table_desc.index_descriptor_list.push_back(index_table3);
     CreateTable(db, table_desc);
 
     mdt::Table* table;
-    std::string table_name = "table";
+    std::string table_name = "table-kepler001";
     table = OpenTable(db, table_name);
 
     // insert data
-    mdt::StoreRequest store_req;
-    mdt::StoreResponse store_resp;
-    mdt::StoreCallback callback;
-    table->Put(&store_req, &store_resp, callback);
+    mdt::StoreRequest* store_req = new mdt::StoreRequest();
+    store_req->primary_key = "20150920";
+    store_req->timestamp = 638239414;
+    mdt::Index query_index, costtime_index, service_index;
+
+    query_index.index_name = "Query";
+    query_index.index_key = "beauty girl";
+    store_req->index_list.push_back(query_index);
+
+    costtime_index.index_name = "Costtime";
+    costtime_index.index_key = "5ms";
+    store_req->index_list.push_back(costtime_index);
+
+    service_index.index_name = "Service";
+    service_index.index_key = "bs module";
+    store_req->index_list.push_back(service_index);
+
+    store_req->data = "this s a test, Query: beauty girl, Costtime: 5ms, Service: bs module";
+
+    mdt::StoreResponse* store_resp = new mdt::StoreResponse();
+    mdt::StoreCallback callback = StoreCallback_Test;
+    table->Put(store_req, store_resp, callback);
     return 0;
 }
 
