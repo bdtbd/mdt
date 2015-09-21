@@ -56,12 +56,14 @@ DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
     // create db schema table (kv mode)
     std::string schema_table_name = db_name + "#SchemaTable#";
     tera::TableDescriptor schema_desc(schema_table_name, true);
-    schema_desc.SetRawKey(tera::kBinary);
+    //schema_desc.SetRawKey(tera::kBinary);
     tera::LocalityGroupDescriptor* schema_lg = schema_desc.AddLocalityGroup("lg");
     schema_lg->SetBlockSize(32 * 1024);
     tera_opt_.client_->CreateTable(schema_desc, &error_code);
 
     tera_opt_.schema_table_ = tera_opt_.client_->OpenTable(schema_table_name, &error_code);
+    LOG(INFO) << "open schema table, table name " << schema_table_name <<
+        ", error code " << tera::strerr(error_code);
     assert(tera_opt_.schema_table_);
 
     tera_adapter_.opt_ = tera_opt_;
@@ -76,10 +78,13 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
     std::string schema_value;
     schema.SerializeToString(&schema_value);
     tera_adapter_.opt_.schema_table_->Put(schema.table_name(), "", "", schema_value, &error_code);
+    LOG(INFO) << "Put Schema: table name " << schema.table_name() << ", size " << schema_value.size()
+        << ", error code " << tera::strerr(error_code);
 
     // create primary key table
     std::string primary_table_name = tera_adapter_.table_prefix_ + "#pri#" + schema.table_name();
     tera::TableDescriptor primary_table_desc(primary_table_name);
+    LOG(INFO) << "Create primary table name " << primary_table_name;
     primary_table_desc.SetRawKey(tera::kBinary);
     tera::LocalityGroupDescriptor* lg = primary_table_desc.AddLocalityGroup("lg");
     lg->SetBlockSize(32 * 1024);
@@ -94,6 +99,7 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
          it != table_desc.index_descriptor_list.end();
          ++it) {
         std::string index_table_name = tera_adapter_.table_prefix_ + "#" + schema.table_name() + "#" + it->index_name;
+        LOG(INFO) << "Create index table name " << index_table_name;
         tera::TableDescriptor index_table_desc(index_table_name);
         index_table_desc.SetRawKey(tera::kBinary);
         tera::LocalityGroupDescriptor* index_lg = index_table_desc.AddLocalityGroup("lg");
@@ -113,6 +119,9 @@ Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr)
     std::string schema_value;
     TableDescription table_desc;
     tera_adapter_.opt_.schema_table_->Get(table_name, "", "", &schema_value, &error_code);
+    LOG(INFO) << "OpenTable: get table schema, table name " << table_name <<
+        ", error code " << tera::strerr(error_code);
+
     // assemble TableDescription
     BigQueryTableSchema schema;
     schema.ParseFromString(schema_value);
@@ -133,6 +142,7 @@ int DatabaseImpl::AssembleTableSchema(const TableDescription& table_desc,
                                       BigQueryTableSchema* schema) {
     schema->set_table_name(table_desc.table_name);
     schema->set_primary_key_type(table_desc.primary_key_type);
+    LOG(INFO) << "Assemble: table name " << schema->table_name();
     std::vector<IndexDescription>::const_iterator it;
     for (it = table_desc.index_descriptor_list.begin();
          it != table_desc.index_descriptor_list.end();
@@ -141,6 +151,7 @@ int DatabaseImpl::AssembleTableSchema(const TableDescription& table_desc,
         index = schema->add_index_descriptor_list();
         index->set_index_name(it->index_name);
         index->set_index_key_type(it->index_key_type);
+        LOG(INFO) << "Assemble: index table name " << index->index_name();
     }
     return 0;
 }
@@ -149,12 +160,14 @@ int DatabaseImpl::DisassembleTableSchema(const BigQueryTableSchema& schema,
                                          TableDescription* table_desc) {
     table_desc->table_name = schema.table_name();
     table_desc->primary_key_type = (TYPE)schema.primary_key_type();
+    LOG(INFO) << "Disassemble: table name" << table_desc->table_name;
     for (int32_t i = 0; i < schema.index_descriptor_list_size(); i++) {
         const IndexSchema& index_schema = schema.index_descriptor_list(i);
         IndexDescription index_desc;
         index_desc.index_name = index_schema.index_name();
         index_desc.index_key_type = (TYPE)index_schema.index_key_type();
         table_desc->index_descriptor_list.push_back(index_desc);
+        LOG(INFO) << "Disassemble: index table name " << index_desc.index_name;
     }
     return 0;
 }
