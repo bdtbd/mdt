@@ -10,11 +10,15 @@
 #include "util/env.h"
 #include <tera.h>
 #include "util/coding.h"
+#include "util/mutex.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
 #include "sdk/option.h"
 
 namespace mdt {
+
+const std::string kPrimaryTableColumnFamily = "Location";
+const std::string kIndexTableColumnFamily = "PrimaryKey";
 
 ///////////////////////////////
 //      TableImpl class      //
@@ -35,7 +39,12 @@ public:
         std::string s = fname_ + offset_size;
         return s;
     }
-    void ParseFromString(const std::string& str) {};
+    void ParseFromString(const std::string& str) {
+        fname_.assign(str.data(), str.size() - 8);
+        offset_ = DecodeBigEndain32(str.data() + str.size() - 8);
+        size_ = DecodeBigEndain32(str.data() + str.size() - 4);
+    }
+    friend std::ostream& operator << (std::ostream& o, const FileLocation& file_location);
 };
 
 struct TeraAdapter {
@@ -85,8 +94,8 @@ public:
               const FilesystemAdapter& fs_adapter);
     virtual int Put(const StoreRequest* request, StoreResponse* response,
                     StoreCallback callback = NULL, void* callback_param = NULL);
-    virtual int Get(const SearchRequest* request, SearchResponse* response,
-                    SearchCallback callback = NULL, void* callback_param = NULL);
+    virtual Status Get(const SearchRequest* request, SearchResponse* response,
+                       SearchCallback callback = NULL, void* callback_param = NULL);
 
     virtual const std::string& TableName() {return table_desc_.table_name;}
 
@@ -98,14 +107,18 @@ public:
     Status ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
                                 std::vector<IndexConditionExtend>* index_condition_ex_list);
 
-    void GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                        int64_t start_timestamp, int64_t end_timestamp,
-                        std::vector<std::string>* primary_key_list);
+    Status GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
+                          int64_t start_timestamp, int64_t end_timestamp,
+                          std::vector<std::string>* primary_key_list);
 
     Status GetRows(const std::vector<std::string>& primary_key_list,
                    std::vector<ResultStream>* row_list);
 
     Status GetSingleRow(const std::string& primary_key, ResultStream* result);
+
+    Status ReadDataFromFile(const FileLocation& location, std::string* data);
+
+    RandomAccessFile* OpenFileForRead(const std::string& filename) ;
 
 private:
     DataWriter* GetDataWriter();
@@ -117,6 +130,9 @@ private:
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
+
+    mutable Mutex file_mutex_;
+    std::map<std::string, RandomAccessFile*> file_map_;
 };
 
 struct PutContext {
