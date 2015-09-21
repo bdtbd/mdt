@@ -5,8 +5,8 @@
 #ifndef  MDT_SDK_TABLE_IMPL_H_
 #define  MDT_SDK_TABLE_IMPL_H_
 
-#include "common/counter.h"
 #include "proto/kv.pb.h"
+#include "util/counter.h"
 #include "util/env.h"
 #include <tera.h>
 #include "util/coding.h"
@@ -35,6 +35,7 @@ public:
         std::string s = fname_ + offset_size;
         return s;
     }
+    void ParseFromString(const std::string& str) {};
 };
 
 struct TeraAdapter {
@@ -64,6 +65,19 @@ struct FilesystemAdapter {
     DataWriter* writer_;
 };
 
+enum COMPARATOR_EXTEND {
+    kBetween = 100
+};
+
+struct IndexConditionExtend {
+    std::string index_name;
+    enum COMPARATOR comparator;
+    std::string compare_value1;
+    std::string compare_value2;
+    bool flag1;
+    bool flag2;
+};
+
 class TableImpl : public Table {
 public:
     TableImpl(const TableDescription& table_desc,
@@ -80,6 +94,18 @@ public:
     static int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                          Table** table_ptr);
+
+    Status ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
+                                std::vector<IndexConditionExtend>* index_condition_ex_list);
+
+    void GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
+                        int64_t start_timestamp, int64_t end_timestamp,
+                        std::vector<std::string>* primary_key_list);
+
+    Status GetRows(const std::vector<std::string>& primary_key_list,
+                   std::vector<ResultStream>* row_list);
+
+    Status GetSingleRow(const std::string& primary_key, ResultStream* result);
 
 private:
     DataWriter* GetDataWriter();
@@ -99,7 +125,7 @@ struct PutContext {
     StoreResponse* resp_;
     StoreCallback callback_;
     void* callback_param_;
-    common::Counter counter_; // atomic counter
+    Counter counter_; // atomic counter
 
     PutContext(TableImpl* table,
                const StoreRequest* request,
@@ -116,7 +142,7 @@ struct GetContext {
     const SearchRequest* req_;
     SearchResponse* resp_;
     SearchCallback callback_;
-    common::Counter counter_; // atomic counter
+    Counter counter_; // atomic counter
 
     GetContext(TableImpl* table,
                const SearchRequest* request,

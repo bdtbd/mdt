@@ -173,6 +173,6 @@ inline bool GetHeapProfile(void (*func)(void*, const char*, int), void* arg) {
 }
 
 } // namespace port
-} // namespace leveldb
+} // namespace mdt
 
 #endif  // STORAGE_LEVELDB_PORT_PORT_POSIX_H_

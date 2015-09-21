@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <limits>
+#include <sys/types.h>
 
 #include "util/nfs.h"
-#include "util/nfs_wrapper.h"
 #include "util/hash.h"
 #include "util/string_ext.h"
-#include "common/mutex.h"
-#include "common/counter.h"
+#include "util/counter.h"
 
 namespace mdt {
 
@@ -25,7 +25,7 @@ static int (*nfsGetErrno)();
 static int (*nfsMkdir)(const char* path);
 static int (*nfsRmdir)(const char* path);
 static nfs::NFSDIR* (*nfsOpendir)(const char* path);
-static struct ::dirent* (*nfsReaddir)(nfs::NFSDIR* dir);
+static struct dirent* (*nfsReaddir)(nfs::NFSDIR* dir);
 static int (*nfsClosedir)(nfs::NFSDIR* dir);
 
 static int (*nfsStat)(const char* path, struct ::stat* stat);
@@ -169,7 +169,7 @@ int32_t NFile::CloseFile() {
 }
 
 bool Nfs::dl_init_ = false;
-common::Mutex Nfs::mu_;
+Mutex Nfs::mu_;
 static Nfs* instance = NULL;
 
 int Nfs::CalcNamespaceId(const char* c_path, int max_namespaces) {
@@ -309,7 +309,7 @@ int32_t Nfs::ListDirectory(const std::string& path,
     errno = (*nfsGetErrno)();
     return -1;
   }
-  struct ::dirent* dir_info = NULL;
+  struct dirent* dir_info = NULL;
   struct stat stat_buf;
   while (NULL != (dir_info = (*nfsReaddir)(dir))) {
     const char* pathname = dir_info->d_name;

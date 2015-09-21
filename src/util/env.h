@@ -138,45 +138,6 @@ class Env {
   // Return the cache env, e.g. MemEnv in InMemoryEnv, PosixEnv in FlashEnv
   virtual Env* CacheEnv() = 0;
 
-  // Arrange to run "(*function)(arg)" once in a background thread.
-  // Return a schedule id
-  // "function" may run in an unspecified thread.  Multiple functions
-  // added to the same Env may run concurrently in different threads.
-  // I.e., the caller may not assume that background work items are
-  // serialized.
-  virtual int64_t Schedule(
-      void (*function)(void* arg),
-      void* arg,
-      double prio = 0.0,
-      int64_t wait_time_millisec = 0) = 0;
-
-  // Update background task priority with the schedule id return by Schedule
-  virtual void ReSchedule(int64_t id, double prio, int64_t millisec = 0) = 0;
-
-  // Start a new thread, invoking "function(arg)" within the new thread.
-  // When "function(arg)" returns, the thread will be destroyed.
-  virtual void StartThread(void (*function)(void* arg), void* arg) = 0;
-
-  // *path is set to a temporary directory that can be used for testing. It may
-  // or many not have just been created. The directory may or may not differ
-  // between runs of the same process, but subsequent calls will return the
-  // same directory.
-  virtual Status GetTestDirectory(std::string* path) = 0;
-
-  // Create and return a log file for storing informational messages.
-  virtual Status NewLogger(const std::string& fname, Logger** result) = 0;
-  virtual void SetLogger(Logger* logger) = 0;
-
-  // Returns the number of micro-seconds since some fixed point in time. Only
-  // useful for computing deltas of time.
-  virtual uint64_t NowMicros() = 0;
-
-  // Sleep/delay the thread for the perscribed number of micro-seconds.
-  virtual void SleepForMicroseconds(int micros) = 0;
-
-  // Set background thread number
-  virtual int SetBackgroundThreads(int number) = 0;
-
  private:
   // No copying allowed
   Env(const Env&);
@@ -246,7 +207,6 @@ class WritableFile {
   WritableFile() { }
   virtual ~WritableFile();
 
-  virtual Status Append(const Slice& data, int32_t *res) = 0;
   virtual Status Append(const Slice& data) = 0;
   virtual Status Close() = 0;
   virtual Status Flush() = 0;
@@ -256,21 +216,6 @@ class WritableFile {
   // No copying allowed
   WritableFile(const WritableFile&);
   void operator=(const WritableFile&);
-};
-
-// An interface for writing log messages.
-class Logger {
- public:
-  Logger() { }
-  virtual ~Logger();
-
-  // Write an entry to the log file with the specified format.
-  virtual void Logv(const char* format, va_list ap) = 0;
-
- private:
-  // No copying allowed
-  Logger(const Logger&);
-  void operator=(const Logger&);
 };
 
 
@@ -348,34 +293,7 @@ class EnvWrapper : public Env {
     return target_->LockFile(f, l);
   }
   Status UnlockFile(FileLock* l) { return target_->UnlockFile(l); }
-  int64_t Schedule(void (*f)(void*), void* a, double prio, int64_t wait_time_millisec = 0) {
-    return target_->Schedule(f, a, prio, wait_time_millisec);
-  }
   Env* CacheEnv() { return target_->CacheEnv(); };
-  void ReSchedule(int64_t id, double prio, int64_t millisec = 0) {
-    return target_->ReSchedule(id, prio, millisec);
-  }
-  void StartThread(void (*f)(void*), void* a) {
-    return target_->StartThread(f, a);
-  }
-  virtual Status GetTestDirectory(std::string* path) {
-    return target_->GetTestDirectory(path);
-  }
-  virtual Status NewLogger(const std::string& fname, Logger** result) {
-    return target_->NewLogger(fname, result);
-  }
-  virtual void SetLogger(Logger* logger) {
-    return target_->SetLogger(logger);
-  }
-  uint64_t NowMicros() {
-    return target_->NowMicros();
-  }
-  void SleepForMicroseconds(int micros) {
-    target_->SleepForMicroseconds(micros);
-  }
-  int SetBackgroundThreads(int number) {
-    return target_->SetBackgroundThreads(number);
-  }
  private:
   Env* target_;
 };

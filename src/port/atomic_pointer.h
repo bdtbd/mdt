@@ -44,7 +44,7 @@
 #define ARCH_CPU_PPC_FAMILY 1
 #endif
 
-namespace leveldb {
+namespace mdt {
 namespace port {
 
 // Define MemoryBarrier() if available
@@ -223,6 +223,6 @@ class AtomicPointer {
 #undef ARCH_CPU_PPC_FAMILY
 
 }  // namespace port
-}  // namespace leveldb
+}  // namespace mdt
 
 #endif  // PORT_ATOMIC_POINTER_H_

@@ -11,7 +11,7 @@
 #include <sys/time.h>
 #include <string>
 
-namespace common {
+namespace mdt {
 namespace timer {
 
 static inline std::string get_curtime_str() {
@@ -39,6 +39,6 @@ static inline int64_t get_unique_micros(int64_t ref) {
 }
 
 }  // namespace timer
-}  // namespace common
+}  // namespace mdt
 
 #endif  // TERA_COMMON_TIMER_H_

@@ -5,7 +5,7 @@
 #ifndef  TERA_COUNTER_ATOMIC_H_
 #define  TERA_COUNTER_ATOMIC_H_
 
-namespace common {
+namespace mdt {
 
 static inline int atomic_add(volatile int *mem, int add)
 {
@@ -107,5 +107,6 @@ static inline int64_t atomic_comp_swap64(volatile void *mem, int64_t xchg, int64
     return cmp;
 }
 
-} // namespace common
+} // namespace mdt
+
 #endif  // TERA_COMMON_ATOMIC_H_

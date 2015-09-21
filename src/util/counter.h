@@ -10,7 +10,7 @@
 #include "atomic.h"
 #include "timer.h"
 
-namespace common {
+namespace mdt {
 
 class Counter {
 public:
@@ -71,6 +71,6 @@ private:
     const char* msg1_;
     const char* msg2_;
 };
-} // namespace common
+} // namespace mdt
 
 #endif  // MDT_COMMON_COUNTER_H_

@@ -24,7 +24,7 @@
 bmz::BmzCodec bmc;
 #endif
 
-namespace leveldb {
+namespace mdt {
 namespace port {
 
 static void PthreadCall(const char* label, int result) {
@@ -133,4 +133,4 @@ bool Lz4_Uncompress(const char* input, size_t input_size,
 //////////////////////////////
 
 }  // namespace port
-}  // namespace leveldb
+}  // namespace mdt
