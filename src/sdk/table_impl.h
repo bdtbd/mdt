@@ -39,7 +39,11 @@ public:
         std::string s = fname_ + offset_size;
         return s;
     }
-    void ParseFromString(const std::string& str) {};
+    void ParseFromString(const std::string& str) {
+        fname_.assign(str.data(), str.size() - 8);
+        offset_ = DecodeBigEndain32(str.data() + str.size() - 8);
+        size_ = DecodeBigEndain32(str.data() + str.size() - 4);
+    }
     friend std::ostream& operator << (std::ostream& o, const FileLocation& file_location);
 };
 

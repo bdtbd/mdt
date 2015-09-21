@@ -243,7 +243,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         }
 
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-        scan_desc->SetTimeRange(start_timestamp, end_timestamp);
+        scan_desc->SetTimeRange(end_timestamp, start_timestamp);
         tera::ErrorCode err;
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
         while (!result->Done()) {
@@ -252,6 +252,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             result->Next();
         }
 
+        delete result;
         delete scan_desc;
     }
 
