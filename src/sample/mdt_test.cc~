@@ -129,7 +129,7 @@ int main(int ac, char* av[]) {
     struct timeval now;
     gettimeofday(&now, NULL);
 
-    for (uint64_t i = 0; i < 1000000; i++) {
+    for (uint64_t i = 0; i < 1000; i++) {
         mdt::StoreRequest* req = new mdt::StoreRequest();
         char buf[12];
         char* p = buf;
