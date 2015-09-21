@@ -66,6 +66,8 @@ void StoreCallback_Test(mdt::Table* table, const mdt::StoreRequest* request,
                               mdt::StoreResponse* response,
                               void* callback_param) {
     LOG(INFO) << "<<< callabck test >>>";
+    bool* store_finish = (bool*)callback_param;
+    *store_finish = true;
 }
 
 int main(int ac, char* av[]) {
@@ -123,7 +125,38 @@ int main(int ac, char* av[]) {
 
     mdt::StoreResponse* store_resp = new mdt::StoreResponse();
     mdt::StoreCallback callback = StoreCallback_Test;
-    table->Put(store_req, store_resp, callback);
+    bool store_finish = false;
+    table->Put(store_req, store_resp, callback, &store_finish);
+
+    while (!store_finish) {
+        usleep(1000);
+    }
+
+    mdt::SearchRequest* search_req = new mdt::SearchRequest;
+    search_req->start_timestamp = 638239413;
+    search_req->end_timestamp = 638239415;
+
+    mdt::IndexCondition query_index_cond1, query_index_cond2;
+    query_index_cond1.index_name = "Query";
+    query_index_cond1.comparator = mdt::kGreater;
+    query_index_cond1.compare_value = "apple";
+
+    query_index_cond2.index_name = "Query";
+    query_index_cond2.comparator = mdt::kLess;
+    query_index_cond2.compare_value = "car";
+
+    search_req->index_condition_list.push_back(query_index_cond1);
+    search_req->index_condition_list.push_back(query_index_cond2);
+
+    mdt::SearchResponse* search_resp = new mdt::SearchResponse;
+    table->Get(search_req, search_resp);
+    for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
+        const mdt::ResultStream& result = search_resp->result_stream[i];
+        LOG(INFO) << "primary key: " << result.primary_key;
+        for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
+            LOG(INFO) << "data: " << result.result_data_list[j];
+        }
+    }
     return 0;
 }
 

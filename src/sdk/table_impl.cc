@@ -2,12 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <glog/logging.h>
 #include <tera.h>
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
 #include "proto/kv.pb.h"
 
 namespace mdt {
+
+std::ostream& operator << (std::ostream& o, const FileLocation& location) {
+    o << "file: " << location.fname_
+      << " offset: " << location.offset_
+      << " size: " << location.size_;
+    return o;
+}
 
 int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
@@ -84,7 +92,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
-    primary_row->Put("Location", location.SerializeToString(), req->timestamp, null_value);
+    primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
     primary_row->SetContext(context);
     context->counter_.Inc();
     primary_row->SetCallBack(PutCallback);
@@ -97,7 +105,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
         tera::Table* index_table = GetIndexTable(it->index_name);
         std::string index_key = it->index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
-        index_row->Put("PrimaryKey", primary_key, req->timestamp, null_value);
+        index_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
         index_row->SetContext(context);
         context->counter_.Inc();
         index_row->SetCallBack(PutCallback);
@@ -113,18 +121,23 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
     return 0;
 }
 
-int TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
-                   void* callback_param) {
-    std::vector<IndexConditionExtend> index_cond_ex_list;
-    ExtendIndexCondition(req->index_condition_list, &index_cond_ex_list);
+Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
+                      void* callback_param) {
+    Status s;
 
+    std::vector<IndexConditionExtend> index_cond_ex_list;
+    s = ExtendIndexCondition(req->index_condition_list, &index_cond_ex_list);
 
     std::vector<std::string> primary_key_list;
-    GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
-                   req->end_timestamp, &primary_key_list);
+    if (s.ok()) {
+        s = GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
+                           req->end_timestamp, &primary_key_list);
+    }
 
-    GetRows(primary_key_list, &resp->result_stream);
-    return 0;
+    if (s.ok()) {
+        s = GetRows(primary_key_list, &resp->result_stream);
+    }
+    return s;
 }
 
 Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
@@ -180,15 +193,15 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
     return Status::OK();
 }
 
-void TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                               int64_t start_timestamp, int64_t end_timestamp,
-                               std::vector<std::string>* primary_key_list) {
+Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
+                                 int64_t start_timestamp, int64_t end_timestamp,
+                                 std::vector<std::string>* primary_key_list) {
     for (size_t i = 0; i < index_condition_ex_list.size(); i++) {
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
         tera::ScanDescriptor* scan_desc = NULL;
-        switch (index_cond_ex.comparator) {
+        switch ((int)index_cond_ex.comparator) {
         case kEqualTo:
             scan_desc = new tera::ScanDescriptor(index_cond_ex.compare_value1);
             scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
@@ -229,7 +242,7 @@ void TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_co
             break;
         }
 
-        scan_desc->AddColumnFamily("PrimaryKey");
+        scan_desc->AddColumnFamily(kIndexTableColumnFamily);
         scan_desc->SetTimeRange(start_timestamp, end_timestamp);
         tera::ErrorCode err;
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
@@ -241,17 +254,27 @@ void TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_co
 
         delete scan_desc;
     }
+
+    return Status::OK();
 }
 
 Status TableImpl::GetRows(const std::vector<std::string>& primary_key_list,
                           std::vector<ResultStream>* row_list) {
+    Status s;
     for (uint32_t i = 0; i < primary_key_list.size(); i++) {
         const std::string& primary_key = primary_key_list[i];
         ResultStream result;
-        if (!GetSingleRow(primary_key, &result).ok()) {
-            // TODO
+        s = GetSingleRow(primary_key, &result);
+        if (s.ok()) {
+            VLOG(5) << "get primary data: " << primary_key;
+            row_list->push_back(result);
+        } else {
+            LOG(WARNING) << "fail to get primary data: " << primary_key;
         }
-        row_list->push_back(result);
+    }
+
+    if (primary_key_list.size() > 0 && row_list->size() == 0) {
+        return Status::NotFound("row list not found");
     }
     return Status::OK();
 }
@@ -259,15 +282,42 @@ Status TableImpl::GetRows(const std::vector<std::string>& primary_key_list,
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result) {
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     tera::RowReader* reader = primary_table->NewRowReader(primary_key);
-    reader->AddColumnFamily("Location");
+    reader->AddColumnFamily(kPrimaryTableColumnFamily);
     primary_table->Get(reader);
     while (!reader->Done()) {
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
         location.ParseFromString(location_buffer);
+        std::string data;
+        Status s = ReadDataFromFile(location, &data);
+        if (s.ok()) {
+            VLOG(5) << "read data from " << location;
+            result->result_data_list.push_back(data);
+        } else {
+            LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
+        }
         reader->Next();
     }
+
+    if (result->result_data_list.size() == 0) {
+        return Status::NotFound("row not found");
+    }
+    result->primary_key = primary_key;
     return Status::OK();
+}
+
+Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* data) {
+    RandomAccessFile* file = OpenFileForRead(location.fname_);
+    if (file == NULL) {
+        return Status::NotFound("file not found");
+    }
+    char* scratch = new char[location.size_];
+    Slice result;
+    Status s = file->Read(location.offset_, location.size_, &result, scratch);
+    if (s.ok()) {
+        data->assign(result.data(), result.size());
+    }
+    return s;
 }
 
 tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
@@ -327,6 +377,38 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     offset_ += location->size_;
     location->fname_ = fname_;
     return 0;
+}
+
+RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
+    MutexLock l(&file_mutex_);
+
+    // get file from cache
+    std::map<std::string, RandomAccessFile*>::iterator it = file_map_.find(filename);
+    if (it != file_map_.end()) {
+        VLOG(5) << "find file in cache: " << filename;
+        return it->second;
+    }
+
+    // open file
+    file_mutex_.Unlock();
+    RandomAccessFile* file = NULL;
+    Status s = fs_.env_->NewRandomAccessFile(filename, &file);
+    file_mutex_.Lock();
+    if (!s.ok()) {
+        LOG(WARNING) << "fail to open file: " << filename << " error: " << s.ToString();
+        return NULL;
+    }
+
+    // insert into cache
+    VLOG(5) << "open file: " << filename;
+    it = file_map_.find(filename);
+    if (file_map_.find(filename) == file_map_.end()) {
+        file_map_[filename] = file;
+    } else {
+        delete file;
+        file = it->second;
+    }
+    return file;
 }
 
 } // namespace mdt
