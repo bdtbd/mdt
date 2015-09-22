@@ -134,7 +134,7 @@ int main(int ac, char* av[]) {
 
     bool store_finish = false;
     std::cout << "put ..." << std::endl;
-    table->Put(store_req, store_resp, callback);
+    table->Put(store_req, store_resp, callback, &store_finish);
 
     struct timeval now;
     gettimeofday(&now, NULL);
@@ -163,7 +163,7 @@ int main(int ac, char* av[]) {
 
         mdt::StoreResponse* resp = new mdt::StoreResponse();
         mdt::StoreCallback TestCallback = StoreCallback_Test;
-        table->Put(req, resp, TestCallback);
+        table->Put(req, resp, TestCallback, &store_finish);
     }
 
     while (!store_finish) {
