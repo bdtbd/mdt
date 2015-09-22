@@ -3,6 +3,7 @@
 #include <glog/logging.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "sdk/sdk.h"
 #include "sdk/db.h"
@@ -129,15 +130,52 @@ int main(int ac, char* av[]) {
 
     mdt::StoreResponse* store_resp = new mdt::StoreResponse();
     mdt::StoreCallback callback = StoreCallback_Test;
-    bool store_finish = false;
 
+
+    bool store_finish = false;
     std::cout << "put ..." << std::endl;
     table->Put(store_req, store_resp, callback, &store_finish);
+
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    for (uint64_t i = 0; i < 1000000; i++) {
+        mdt::StoreRequest* req = new mdt::StoreRequest();
+        char buf[12];
+        char* p = buf;
+        p += snprintf(p, 11, "%11lu", i);
+        std::string str(buf, 11);
+        req->primary_key = buf;
+        req->timestamp = time(NULL);
+
+        mdt::Index query, costtime, service;
+        query.index_name = "Query";
+        query.index_key = "beauty girl";
+        costtime.index_name = "Costtime";
+        costtime.index_key = "5ms";
+        service.index_name = "Service";
+        service.index_key = "bs module";
+
+        req->index_list.push_back(query);
+        req->index_list.push_back(costtime);
+        req->index_list.push_back(service);
+        req->data = "this s a TEST, Query: beauty girl, Costtime: 5ms, Service: bs module";
+
+        mdt::StoreResponse* resp = new mdt::StoreResponse();
+        mdt::StoreCallback TestCallback = StoreCallback_Test;
+        table->Put(req, resp, TestCallback, &store_finish);
+    }
 
     while (!store_finish) {
         usleep(1000);
     }
 
+    struct timeval finish;
+    gettimeofday(&finish, NULL);
+    LOG(INFO) << "BIGQUERY: begin: tv_sec " << now.tv_sec << ", tv_usec " << now.tv_usec
+        << ", now: tv_sec " << finish.tv_sec << ", tv_usec " << finish.tv_usec;
+
+    // search test
     mdt::SearchRequest* search_req = new mdt::SearchRequest;
     search_req->start_timestamp = 638239413;
     search_req->end_timestamp = 638239415;

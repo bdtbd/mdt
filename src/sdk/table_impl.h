@@ -5,6 +5,7 @@
 #ifndef  MDT_SDK_TABLE_IMPL_H_
 #define  MDT_SDK_TABLE_IMPL_H_
 
+#include <deque>
 #include "proto/kv.pb.h"
 #include "util/counter.h"
 #include "util/env.h"
@@ -51,6 +52,35 @@ struct TeraAdapter {
     std::string table_prefix_; // db_name
     TeraOptions opt_;
     std::map<std::string, tera::Table*> tera_table_map_; // <table_name, table desc>
+};
+
+struct WriteContext {
+    // write param field
+    const StoreRequest* req_;
+    StoreResponse* resp_;
+    StoreCallback callback_;
+    void* callback_param_;
+
+    // control field
+    bool sync_;
+    bool done_;
+    CondVar cv_;
+
+    // result field, WriteBatch response for it
+    Status status_;
+    uint32_t offset_; // offset in file
+
+public:
+    explicit WriteContext(Mutex* mu) : cv_(mu), offset_(0) {}
+};
+
+struct WriteBatch {
+    // add red_zone magic code in the end of value
+    int Append(WriteContext* context);
+    //const std::string* GetData() { return &rep_;}
+
+    std::vector<WriteContext*> context_list_;
+    std::string rep_;
 };
 
 class DataWriter {
@@ -120,6 +150,10 @@ public:
 
     RandomAccessFile* OpenFileForRead(const std::string& filename) ;
 
+    int WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
+                        StoreCallback callback, void* callback_param,
+                        FileLocation& location);
+
 private:
     DataWriter* GetDataWriter();
     tera::Table* GetPrimaryTable(const std::string& table_name);
@@ -133,6 +167,10 @@ private:
 
     mutable Mutex file_mutex_;
     std::map<std::string, RandomAccessFile*> file_map_;
+
+    // use for put
+    mutable Mutex write_mutex_;
+    std::deque<WriteContext*> write_queue_;
 };
 
 struct PutContext {

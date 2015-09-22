@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <deque>
 #include <glog/logging.h>
 #include <tera.h>
 #include "sdk/sdk.h"
@@ -84,17 +85,85 @@ void PutCallback(tera::RowMutation* row) {
     }
 }
 
-int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback callback,
-                   void* callback_param) {
-    // add data into fs
+// Concurrence Put interface:
+//      1. wait and lock
+//      2. merge request while wait
+//      3. unlock, write batch
+//      4. for each raw write: PutIndex()
+//      5. lock, resume other write
+int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
+                   StoreCallback callback, void* callback_param) {
+    // construct WriteContext
+    WriteContext context(&write_mutex_);
+    context.req_ = req;
+    context.resp_ = resp;
+    context.callback_ = callback;
+    context.callback_param_ = callback_param;
+    context.sync_ = true;
+    context.done_ = false;
+
+    // wait and lock
+    MutexLock l(&write_mutex_);
+    write_queue_.push_back(&context);
+    while (!context.done_ && (&context != write_queue_.front())) {
+        context.cv_.Wait();
+    }
+    if (context.done_) {
+        // finish, do something
+        return 0;
+    }
+
+    // merge WriteContext
+    WriteBatch wb;
+    std::deque<WriteContext*>::iterator iter = write_queue_.begin();
+    for (; iter != write_queue_.end(); ++iter) {
+        wb.Append(*iter);
+    }
+
+    // unlock do io
+    write_mutex_.Unlock();
+
+    // batch write file system and index table
     FileLocation location;
     DataWriter* writer = GetDataWriter();
-    writer->AddRecord(req->data, &location);
+    writer->AddRecord(wb.rep_, &location);
 
+    std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
+    for (; it != wb.context_list_.end(); ++it) {
+        WriteContext* ctx = *it;
+        FileLocation data_location = location;
+        data_location.size_ = ctx->req_->data.size();
+        data_location.offset_ += ctx->offset_;
+        WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
+    }
+
+    // lock, resched other WriteContext
+    write_mutex_.Lock();
+    WriteContext* last_writer = wb.context_list_.back();
+    while (true) {
+        WriteContext* ready = write_queue_.front();
+        write_queue_.pop_front();
+        if (ready != &context) {
+            ready->done_ = true;
+            ready->cv_.Signal();
+        }
+        if (ready == last_writer) break;
+    }
+    if (!write_queue_.empty()) {
+        write_queue_.front()->cv_.Signal();
+    }
+
+    return 0;
+}
+
+int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
+                               StoreCallback callback, void* callback_param,
+                               FileLocation& location) {
     std::string null_value;
     null_value.clear();
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
     context->counter_.Inc();
+
 
     // update primary table
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
@@ -126,6 +195,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp, StoreCallback c
                            context->callback_param_);
         delete context;
     }
+
     return 0;
 }
 
@@ -362,32 +432,6 @@ std::string TableImpl::TimeToString() {
     return time_buf;
 }
 
-DataWriter* TableImpl::GetDataWriter() {
-    DataWriter* writer = NULL;
-    if (fs_.writer_ == NULL) {
-        std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
-        WritableFile* file;
-        fs_.env_->NewWritableFile(fname, &file);
-        fs_.writer_ = new DataWriter(fname, file);
-    }
-    writer = fs_.writer_;
-    return writer;
-}
-
-// data writer impl
-int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
-    Status s = file_->Append(data);
-    if (!s.ok()) {
-        return -1;
-    }
-    location->size_ = data.size();
-    file_->Sync();
-    location->offset_ = offset_;
-    offset_ += location->size_;
-    location->fname_ = fname_;
-    return 0;
-}
-
 RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
     MutexLock l(&file_mutex_);
 
@@ -418,6 +462,43 @@ RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
         file = it->second;
     }
     return file;
+}
+
+// DataWriter Impl
+DataWriter* TableImpl::GetDataWriter() {
+    DataWriter* writer = NULL;
+    if (fs_.writer_ == NULL) {
+        std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
+        WritableFile* file;
+        fs_.env_->NewWritableFile(fname, &file);
+        fs_.writer_ = new DataWriter(fname, file);
+    }
+    writer = fs_.writer_;
+    return writer;
+}
+
+int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
+    Status s = file_->Append(data);
+    if (!s.ok()) {
+        return -1;
+    }
+    location->size_ = data.size();
+    file_->Sync();
+    location->offset_ = offset_;
+    offset_ += location->size_;
+    location->fname_ = fname_;
+    return 0;
+}
+
+// WriteBatch format
+//      body := value(non fixed len) + red_zone(8 Bytes magic code)
+int WriteBatch::Append(WriteContext* context) {
+    context->offset_ = rep_.size();
+    rep_.append(context->req_->data);
+    rep_.append("aaccbbdd");
+
+    context_list_.push_back(context);
+    return 0;
 }
 
 } // namespace mdt
