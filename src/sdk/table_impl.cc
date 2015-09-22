@@ -78,7 +78,7 @@ TableImpl::TableImpl(const TableDescription& table_desc,
 void PutCallback(tera::RowMutation* row) {
     PutContext* context = (PutContext*)row->GetContext();
     if (context->counter_.Dec() == 0) {
-        context->callback_(context->table_, context->req_, context->resp_,
+        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                            context->callback_param_);
         LOG(INFO) << "put callback";
         delete context;
@@ -191,7 +191,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 
     if (context->counter_.Dec() == 0) {
         // last one, do something
-        context->callback_(context->table_, context->req_, context->resp_,
+        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                            context->callback_param_);
         delete context;
     }

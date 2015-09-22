@@ -2,6 +2,7 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -64,9 +65,9 @@ void SetupGoogleLog() {
     LOG(INFO) << "start loging...";
 }
 
-void StoreCallback_Test(mdt::Table* table, const mdt::StoreRequest* request,
-                              mdt::StoreResponse* response,
-                              void* callback_param) {
+void StoreCallback_Test(mdt::Table* table, mdt::StoreRequest* request,
+                        mdt::StoreResponse* response,
+                        void* callback_param) {
     LOG(INFO) << "<<< callabck test >>>";
     bool* store_finish = (bool*)callback_param;
     *store_finish = true;
