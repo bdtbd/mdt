@@ -535,6 +535,11 @@ RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
 // DataWriter Impl
 DataWriter* TableImpl::GetDataWriter() {
     DataWriter* writer = NULL;
+    if (fs_.writer_ && fs_.writer_->SwitchDataFile()) {
+        LOG(INFO) << "data file too large, switch";
+        delete fs_.writer_;
+        fs_.writer_ = NULL;
+    }
     if (fs_.writer_ == NULL) {
         std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
         WritableFile* file;
