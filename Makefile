@@ -25,7 +25,6 @@ UTIL_SRC := $(wildcard src/util/*.cc)
 PROTO_SRC := $(filter-out %.pb.cc, $(wildcard src/proto/*.cc)) $(PROTO_OUT_CC)
 VERSION_SRC := src/version.cc
 MDTTOOL_SRC := $(wildcard src/mdt-tool/mdt-tool.cc)
-MDTTOOL_TEST_SRC := $(wildcard src/mdt-tool/mdt-tool-test.cc)
 SAMPLE_SRC := $(wildcard src/sample/mdt_test.cc)
 C_SAMPLE_SRC := $(wildcard src/sample/c_sample.c)
 
@@ -36,12 +35,11 @@ PROTO_OBJ := $(PROTO_SRC:.cc=.o)
 VERSION_OBJ := $(VERSION_SRC:.cc=.o)
 SAMPLE_OBJ := $(SAMPLE_SRC:.cc=.o)
 MDTTOOL_OBJ := $(MDTTOOL_SRC:.cc=.o)
-MDTTOOL_TEST_OBJ := $(MDTTOOL_TEST_SRC:.cc=.o)
 
 C_SAMPLE_OBJ := $(C_SAMPLE_SRC:.c=.o)
 
 CXX_OBJ := $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) \
-           $(SAMPLE_OBJ) $(MDTTOOL_OBJ) $(MDTTOOL_TEST_OBJ)
+           $(SAMPLE_OBJ) $(MDTTOOL_OBJ)
 C_OBJ := $(C_SAMPLE_OBJ)
 
 PROGRAM = 
@@ -51,7 +49,7 @@ MDTTOOL = mdt-tool
 MDTTOOL_TEST = mdt-tool-test
 C_SAMPLE = c_sample
 .PHONY: all clean cleanall test
-all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $($C_SAMPLE) $(MDTTOOL) $(MDTTOOL_TEST)
+all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $($C_SAMPLE) $(MDTTOOL)
 	mkdir -p build/include build/lib build/bin
 	#cp $(PROGRAM) build/bin
 	cp $(LIBRARY) build/lib
@@ -61,7 +59,7 @@ all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $($C_SAMPLE) $(MDTTOOL) $(MDTTOOL_TEST)
 
 clean:
 	rm -rf $(CXX_OBJ) $(C_OBJ)
-	rm -rf $(PROGRAM) $(LIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL) $(MDTTOOL_TEST)
+	rm -rf $(PROGRAM) $(LIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL)
 
 cleanall:
 	$(MAKE) clean
@@ -72,9 +70,6 @@ sample: $(SAMPLE_OBJ) $(LIBRARY)
 
 mdt-tool: $(MDTTOOL_OBJ) $(LIBRARY)
 	$(CXX) -o $@ $(MDTTOOL_OBJ) $(LIBRARY) $(LDFLAGS) -lreadline -lhistory -lncurses
-
-mdt-tool-test: $(MDTTOOL_TEST_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(MDTTOOL_TEST_OBJ) $(LIBRARY) $(LDFLAGS)
 
 c_sample: $(C_SAMPLE_OBJ) $(LIBRARY)
 	$(CXX) -o $@ $(C_SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
