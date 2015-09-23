@@ -11,8 +11,8 @@
 
 namespace mdt {
 
-class Database;
-class Table;
+struct Database;
+struct Table;
 
 // 打开数据库
 Database* OpenDatabase(const std::string& db_name);
@@ -57,7 +57,7 @@ struct StoreResponse {
 };
 
 // 异步写入回调
-typedef void (*StoreCallback)(Table* table, const StoreRequest* request,
+typedef void (*StoreCallback)(Table* table, StoreRequest* request,
                               StoreResponse* response,
                               void* callback_param);
 
@@ -109,8 +109,8 @@ struct SearchResponse {
 };
 
 // 异步查询回调
-typedef void (*SearchCallback)(Table* table, const SearchRequest* request,
-                               const SearchResponse* response,
+typedef void (*SearchCallback)(Table* table, SearchRequest* request,
+                               SearchResponse* response,
                                void* callback_param);
 
 // 查询接口

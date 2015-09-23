@@ -4,14 +4,14 @@ include depends.mk
 OPT ?= -g2 -Wall -Werror      # (B) Debug mode, w/ full line-level debugging symbols
 # OPT ?= -O2 -g2 -DNDEBUG   # (C) Profiling mode: opt, but w/debugging symbols
 
-CC = cc
+CC = gcc
 CXX = g++
 
 SHARED_CFLAGS = -fPIC
 SHARED_LDFLAGS = -shared -Wl,-soname -Wl,
 
 INCPATH += -I./src -I./include $(DEPS_INCPATH) 
-CFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
+CFLAGS += -std=c99 $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 CXXFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 LDFLAGS += -rdynamic $(DEPS_LDPATH) $(DEPS_LDFLAGS) -lpthread -lrt -lz -ldl
 
@@ -24,7 +24,8 @@ COMMON_SRC := $(wildcard src/common/*.cc)
 UTIL_SRC := $(wildcard src/util/*.cc)
 PROTO_SRC := $(filter-out %.pb.cc, $(wildcard src/proto/*.cc)) $(PROTO_OUT_CC)
 VERSION_SRC := src/version.cc
-SAMPLE_SRC := $(wildcard src/sample/*.cc)
+SAMPLE_SRC := $(wildcard src/sample/mdt_test.cc)
+C_SAMPLE_SRC := $(wildcard src/sample/c_sample.c)
 
 SDK_OBJ := $(SDK_SRC:.cc=.o)
 COMMON_OBJ := $(COMMON_SRC:.cc=.o)
@@ -32,16 +33,20 @@ UTIL_OBJ := $(UTIL_SRC:.cc=.o)
 PROTO_OBJ := $(PROTO_SRC:.cc=.o)
 VERSION_OBJ := $(VERSION_SRC:.cc=.o)
 SAMPLE_OBJ := $(SAMPLE_SRC:.cc=.o)
+C_SAMPLE_OBJ := $(C_SAMPLE_SRC:.c=.o)
 
-ALL_OBJ := $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(SAMPLE_OBJ)
+CXX_OBJ := $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) \
+           $(SAMPLE_OBJ)
+C_OBJ := $(C_SAMPLE_OBJ)
 
 PROGRAM = 
 LIBRARY = libmdt.a
 SAMPLE = sample
+C_SAMPLE = c_sample
 
 .PHONY: all clean cleanall test
 
-all: $(PROGRAM) $(LIBRARY) $(SAMPLE)
+all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $(C_SAMPLE)
 	mkdir -p build/include build/lib build/bin
 	#cp $(PROGRAM) build/bin
 	cp $(LIBRARY) build/lib
@@ -50,8 +55,8 @@ all: $(PROGRAM) $(LIBRARY) $(SAMPLE)
 	echo 'Done'
 
 clean:
-	rm -rf $(ALL_OBJ)
-	rm -rf $(PROGRAM) $(LIBRARY) $(SAMPLE)
+	rm -rf $(CXX_OBJ) $(C_OBJ)
+	rm -rf $(PROGRAM) $(LIBRARY) $(SAMPLE) $(C_SAMPLE)
 
 cleanall:
 	$(MAKE) clean
@@ -60,11 +65,17 @@ cleanall:
 sample: $(SAMPLE_OBJ) $(LIBRARY)
 	$(CXX) -o $@ $(SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
 
+c_sample: $(C_SAMPLE_OBJ) $(LIBRARY)
+	$(CXX) -o $@ $(C_SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
+
 libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 	$(AR) -rs $@ $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 
-$(ALL_OBJ): %.o: %.cc $(PROTO_OUT_H)
+$(CXX_OBJ): %.o: %.cc $(PROTO_OUT_H)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(C_OBJ): %.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(VERSION_SRC): FORCE
 	sh build_version.sh
