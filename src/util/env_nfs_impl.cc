@@ -73,6 +73,91 @@ private:
     DfsFile* file_;
 };
 
+class DfsReadableFile: virtual public SequentialFile, virtual public RandomAccessFile {
+public:
+    DfsReadableFile(Dfs* fs, const std::string& fname)
+        : fs_(fs), filename_(fname), file_(NULL), now_pos_(-1) {
+        file_ = fs_->OpenFile(filename_, RDONLY);
+        if (file_ == NULL) {
+            fprintf(stderr, "[env_dfs]: open file fail: %s\n", filename_.c_str());
+        }
+        LOG(INFO) << "open read file: " << filename_;
+        now_pos_ = 0;
+    }
+
+    ~DfsReadableFile() {
+        if (file_) {
+            file_->CloseFile();
+            delete file_;
+        }
+        file_ = NULL;
+    }
+
+    bool isValid() {
+        return file_ != NULL;
+    }
+
+    Status Read(size_t n, Slice* result, char* scratch) {
+        now_pos_ = -1;
+        Status s;
+        int32_t bytes_read = file_->Read(scratch, (int32_t)n);
+        *result = Slice(scratch, (bytes_read < 0) ? 0: bytes_read);
+        if (bytes_read < static_cast<int32_t>(n)) {
+            if (feof()) {
+                // end of file
+            } else {
+                s = IOError(filename_, errno);
+            }
+        }
+        return s;
+    }
+
+    Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const {
+        Status s;
+        int32_t bytes_read = file_->Pread(offset, scratch, n);
+        LOG(INFO) << "nfs pread: offset " << offset  << ", size " << n
+            << ", bytes_read " << bytes_read;
+        *result = Slice(scratch, (bytes_read < 0) ? 0 : bytes_read);
+        if (bytes_read < 0) {
+            s = IOError(filename_, errno);
+        }
+        return s;
+    }
+
+    virtual Status Skip(uint64_t n) {
+        int64_t current = file_->Tell();
+        if (current < 0) {
+            return IOError(filename_, errno);
+        }
+        int64_t newoffset = current + n;
+        int val = file_->Seek(newoffset);
+        if (val < 0) {
+            return IOError(filename_, errno);
+        }
+        return Status::OK();
+    }
+
+private:
+    bool feof() {
+        if (file_ && file_->Tell() >= fileSize()) {
+            return true;
+        }
+        return false;
+    }
+
+    int64_t fileSize() {
+        uint64_t size = 0;
+        fs_->GetFileSize(filename_, &size);
+        return size;
+    }
+
+private:
+    Dfs* fs_;
+    std::string filename_;
+    DfsFile* file_;
+    mutable ssize_t now_pos_;
+};
+
 class EnvNfsImpl : public Env {
 public:
     EnvNfsImpl(Dfs* dfs) {
@@ -92,12 +177,26 @@ public:
 
     virtual Status NewRandomAccessFile(const std::string& fname,
                                        RandomAccessFile** result) {
+        DfsReadableFile* f = new DfsReadableFile(dfs_, fname);
+        if (f == NULL || !f->isValid()) {
+            delete f;
+            *result = NULL;
+            return IOError(fname, errno);
+        }
+        *result = dynamic_cast<RandomAccessFile*>(f);
         return Status::OK();
     }
 
     virtual Status NewRandomAccessFile(const std::string& fname,
                                        uint64_t fsize,
                                        RandomAccessFile** result) {
+        DfsReadableFile* f = new DfsReadableFile(dfs_, fname);
+        if (f == NULL || !f->isValid()) {
+            delete f;
+            *result = NULL;
+            return IOError(fname, errno);
+        }
+        *result = dynamic_cast<RandomAccessFile*>(f);
         return Status::OK();
     }
 

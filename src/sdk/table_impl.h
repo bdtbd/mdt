@@ -124,6 +124,8 @@ public:
               const FilesystemAdapter& fs_adapter);
     virtual int Put(const StoreRequest* request, StoreResponse* response,
                     StoreCallback callback = NULL, void* callback_param = NULL);
+    virtual int Put(const BatchStoreRequest* request, StoreResponse* response,
+                    BatchStoreCallback callback = NULL, void* callback_param = NULL);
     virtual Status Get(const SearchRequest* request, SearchResponse* response,
                        SearchCallback callback = NULL, void* callback_param = NULL);
 

@@ -85,6 +85,65 @@ void PutCallback(tera::RowMutation* row) {
     }
 }
 
+struct InternalBatchPutCallbackParam {
+    BatchStoreRequest* req_;
+    StoreResponse* resp_;
+    BatchStoreCallback user_callback_;
+    void* user_param_;
+    Counter counter_; // atomic counter
+};
+
+void BatchStoreRequestCallback(Table* table, const StoreRequest* request,
+                               StoreResponse* response,
+                               void* callback_param) {
+    TableImpl* table_ptr;
+    table_ptr = (TableImpl*)table;
+    delete request;
+    InternalBatchPutCallbackParam* user_callback_param = (InternalBatchPutCallbackParam*)callback_param;
+    if (user_callback_param->counter_.Dec() == 0) {
+        delete response;
+        user_callback_param->user_callback_(table_ptr,
+                                            user_callback_param->req_,
+                                            user_callback_param->resp_,
+                                            user_callback_param->user_param_);
+        delete user_callback_param;
+    }
+}
+
+int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
+                BatchStoreCallback callback, void* callback_param) {
+    // construct vector<StoreRequest>
+    std::vector<StoreRequest*> req_vec;
+    std::vector<std::string>::const_iterator it = request->data_list.begin();
+    for (; it != request->data_list.end(); ++it) {
+        StoreRequest* req = new StoreRequest();
+        req->primary_key = request->primary_key;
+        req->timestamp = request->timestamp;
+        req->index_list = request->index_list;
+        req->data = *it;
+        req_vec.push_back(req);
+    }
+
+    StoreResponse* resp = new StoreResponse();
+    InternalBatchPutCallbackParam* user_callback_param = new InternalBatchPutCallbackParam();
+    user_callback_param->req_ = (BatchStoreRequest*)request;
+    user_callback_param->resp_ = response;
+    user_callback_param->user_callback_ = callback;
+    user_callback_param->user_param_ = callback_param;
+    user_callback_param->counter_.Inc();
+
+    std::vector<StoreRequest*>::iterator iter = req_vec.begin();
+    for (; iter != req_vec.end(); ++iter) {
+        user_callback_param->counter_.Inc();
+        Put(*iter, resp, BatchStoreRequestCallback, user_callback_param);
+    }
+
+    StoreRequest* null_req = new StoreRequest();
+    null_req->primary_key = "<MagicKey>";
+    BatchStoreRequestCallback(this, null_req, resp, user_callback_param);
+    return 0;
+}
+
 // Concurrence Put interface:
 //      1. wait and lock
 //      2. merge request while wait
@@ -134,6 +193,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
+        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
 
@@ -168,6 +228,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     // update primary table
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
+    LOG(INFO) << " write pri/index table, primary key: " << primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
     primary_row->SetContext(context);
@@ -181,6 +242,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
          ++it) {
         tera::Table* index_table = GetIndexTable(it->index_name);
         std::string index_key = it->index_key;
+        LOG(INFO) << " write pri/index table, index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
         index_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
         index_row->SetContext(context);
@@ -278,6 +340,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
+        LOG(INFO) << "select op, get primary key, index name " << index_name;
         tera::ScanDescriptor* scan_desc = NULL;
         switch ((int)index_cond_ex.comparator) {
         case kEqualTo:
@@ -326,6 +389,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
         while (!result->Done()) {
             const std::string& primary_key = result->Qualifier();
+            LOG(INFO) << "select op, primary key: " << primary_key;
             primary_key_list->push_back(primary_key);
             result->Next();
         }
@@ -361,12 +425,14 @@ Status TableImpl::GetRows(const std::vector<std::string>& primary_key_list,
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result) {
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     tera::RowReader* reader = primary_table->NewRowReader(primary_key);
+    LOG(INFO) << "get single row: primary_key " << primary_key << ", table name " << table_desc_.table_name;
     reader->AddColumnFamily(kPrimaryTableColumnFamily);
     primary_table->Get(reader);
     while (!reader->Done()) {
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
         location.ParseFromString(location_buffer);
+        LOG(INFO) << "read data from file " << location;
         std::string data;
         Status s = ReadDataFromFile(location, &data);
         if (s.ok()) {
@@ -401,12 +467,14 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
 
 tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
     std::string index_table_name = tera_.table_prefix_ + "#pri#" + table_name;
+    LOG(INFO) << "get primary table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
 
 tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + index_name;
+    LOG(INFO) << "get index table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
@@ -487,6 +555,7 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     location->offset_ = offset_;
     offset_ += location->size_;
     location->fname_ = fname_;
+    LOG(INFO) << "add record, offset " << location->offset_ << ", size " << location->size_;
     return 0;
 }
 
