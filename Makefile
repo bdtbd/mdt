@@ -49,7 +49,7 @@ MDTTOOL = mdt-tool
 MDTTOOL_TEST = mdt-tool-test
 C_SAMPLE = c_sample
 .PHONY: all clean cleanall test
-all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $($C_SAMPLE) $(MDTTOOL)
+all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL)
 	mkdir -p build/include build/lib build/bin
 	#cp $(PROGRAM) build/bin
 	cp $(LIBRARY) build/lib
