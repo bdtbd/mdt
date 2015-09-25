@@ -42,7 +42,13 @@ struct StoreRequest {
     int64_t timestamp;
     std::vector<struct Index> index_list;
     std::string data;
-    // std::vector<std::string> data_list;
+};
+
+struct BatchStoreRequest {
+    std::string primary_key; // key after encode
+    int64_t timestamp;
+    std::vector<struct Index> index_list;
+    std::vector<std::string> data_list;
 };
 
 // 写入结果
@@ -52,6 +58,10 @@ struct StoreResponse {
 
 // 异步写入回调
 typedef void (*StoreCallback)(Table* table, StoreRequest* request,
+                              StoreResponse* response,
+                              void* callback_param);
+
+typedef void (*BatchStoreCallback)(Table* table, const BatchStoreRequest* request,
                               StoreResponse* response,
                               void* callback_param);
 
