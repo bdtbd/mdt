@@ -55,8 +55,8 @@ DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
 
     // create db schema table (kv mode)
     std::string schema_table_name = db_name + "#SchemaTable#";
-    tera::TableDescriptor schema_desc(schema_table_name, true);
-    //schema_desc.SetRawKey(tera::kBinary);
+    tera::TableDescriptor schema_desc(schema_table_name);
+    schema_desc.SetRawKey(tera::kGeneralKv);
     tera::LocalityGroupDescriptor* schema_lg = schema_desc.AddLocalityGroup("lg");
     schema_lg->SetBlockSize(32 * 1024);
     tera_opt_.client_->CreateTable(schema_desc, &error_code);

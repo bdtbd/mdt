@@ -12,6 +12,7 @@ extern "C" {
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 typedef struct mdt_db_t mdt_db_t;
 typedef struct mdt_table_t mdt_table_t;
@@ -95,6 +96,7 @@ typedef struct mdt_index_condition_t {
 
 // 查询请求
 typedef struct mdt_search_request_t {
+    mdt_slice_t primary_key;
     mdt_index_condition_t* index_condition_list;
     size_t index_condition_list_len;
     int64_t start_timestamp;
