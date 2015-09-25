@@ -87,6 +87,13 @@ class DataWriter {
 public:
     DataWriter(const std::string& fname, WritableFile* file)
         : fname_(fname), file_(file), offset_(0) {}
+    ~DataWriter() {
+        if(file_) {
+            delete file_;
+        }
+    }
+
+    bool SwitchDataFile() { return offset_ > 1000000000; }
 
     int AddRecord(const std::string& data, FileLocation* location);
 
