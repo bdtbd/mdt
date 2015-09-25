@@ -265,15 +265,19 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
                       void* callback_param) {
     Status s;
 
-    VLOG(10) << "sanity index conditions";
-    std::vector<IndexConditionExtend> index_cond_ex_list;
-    s = ExtendIndexCondition(req->index_condition_list, &index_cond_ex_list);
-
     std::vector<std::string> primary_key_list;
-    if (s.ok()) {
-        VLOG(10) << "get primary keys";
-        s = GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
-                           req->end_timestamp, &primary_key_list);
+    if (!req->primary_key.empty()) {
+        primary_key_list.push_back(req->primary_key);
+    } else {
+        VLOG(10) << "sanity index conditions";
+        std::vector<IndexConditionExtend> index_cond_ex_list;
+        s = ExtendIndexCondition(req->index_condition_list, &index_cond_ex_list);
+
+        if (s.ok()) {
+            VLOG(10) << "get primary keys";
+            s = GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
+                               req->end_timestamp, &primary_key_list);
+        }
     }
 
     if (s.ok()) {
