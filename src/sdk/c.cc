@@ -187,6 +187,7 @@ void mdt_search(mdt_table_t* table,
                 void* callback_param) {
     // build internal request
     mdt::SearchRequest* internal_request = new mdt::SearchRequest;
+    internal_request->primary_key.assign(request->primary_key.data, request->primary_key.size);
     internal_request->index_condition_list.resize(request->index_condition_list_len);
     for (size_t i = 0; i < request->index_condition_list_len; i++) {
         mdt::IndexCondition& internal_index_cond = internal_request->index_condition_list[i];

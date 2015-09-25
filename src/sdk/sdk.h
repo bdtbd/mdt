@@ -92,6 +92,7 @@ struct IndexCondition {
 
 // 查询请求
 struct SearchRequest {
+    std::string primary_key;
     std::vector<struct IndexCondition> index_condition_list;
     int64_t start_timestamp;
     int64_t end_timestamp;
