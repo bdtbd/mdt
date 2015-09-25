@@ -119,8 +119,8 @@ Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr)
     std::string schema_value;
     TableDescription table_desc;
     tera_adapter_.opt_.schema_table_->Get(table_name, "", "", &schema_value, &error_code);
-    LOG(INFO) << "OpenTable: get table schema, table name " << table_name <<
-        ", error code " << tera::strerr(error_code);
+    LOG(INFO) << "OpenTable: get table schema, table name " << table_name 
+        << ", error code " << tera::strerr(error_code);
 
     // assemble TableDescription
     BigQueryTableSchema schema;
