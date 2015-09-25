@@ -20,7 +20,7 @@ int main(int ac, char* av[]) {
 
     // create db
     printf("open db ...\n");
-    const char* db_name = "mdt-test005";
+    const char* db_name = "mdt-test100";
     mdt_db_t* db = mdt_open_db(db_name, conf_path);
 
     // create table

@@ -77,11 +77,15 @@ TableImpl::TableImpl(const TableDescription& table_desc,
 
 void PutCallback(tera::RowMutation* row) {
     PutContext* context = (PutContext*)row->GetContext();
-    if (context->counter_.Dec() == 0) {
-        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
-                           context->callback_param_);
-        LOG(INFO) << "put callback";
-        delete context;
+    if (context->callback_) {
+        if (context->counter_.Dec() == 0) {
+            context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
+                               context->callback_param_);
+            LOG(INFO) << "put callback";
+            delete context;
+        }
+    } else {
+        context->counter_.Dec();
     }
 }
 
@@ -183,6 +187,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     write_mutex_.Unlock();
 
     // batch write file system and index table
+    VLOG(10) << "write file";
     FileLocation location;
     DataWriter* writer = GetDataWriter();
     writer->AddRecord(wb.rep_, &location);
@@ -222,17 +227,16 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     std::string null_value;
     null_value.clear();
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
-    context->counter_.Inc();
-
+    context->counter_.Set(1 + req->index_list.size());
 
     // update primary table
+    VLOG(10) << "write pri : " << req->primary_key;
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
-    LOG(INFO) << " write pri/index table, primary key: " << primary_key;
+    LOG(INFO) << " write pri table, primary key: " << primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
     primary_row->SetContext(context);
-    context->counter_.Inc();
     primary_row->SetCallBack(PutCallback);
     primary_table->ApplyMutation(primary_row);
 
@@ -242,22 +246,18 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
          ++it) {
         tera::Table* index_table = GetIndexTable(it->index_name);
         std::string index_key = it->index_key;
-        LOG(INFO) << " write pri/index table, index key: " << index_key;
+        LOG(INFO) << " write index table: " << it->index_name << ", index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
         index_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
         index_row->SetContext(context);
-        context->counter_.Inc();
         index_row->SetCallBack(PutCallback);
         index_table->ApplyMutation(index_row);
     }
 
-    if (context->counter_.Dec() == 0) {
-        // last one, do something
-        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
-                           context->callback_param_);
-        delete context;
+    // wait sync put finish
+    while (!callback && context->counter_.Get() > 0) {
+        usleep(1000);
     }
-
     return 0;
 }
 
@@ -265,16 +265,19 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
                       void* callback_param) {
     Status s;
 
+    VLOG(10) << "sanity index conditions";
     std::vector<IndexConditionExtend> index_cond_ex_list;
     s = ExtendIndexCondition(req->index_condition_list, &index_cond_ex_list);
 
     std::vector<std::string> primary_key_list;
     if (s.ok()) {
+        VLOG(10) << "get primary keys";
         s = GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
                            req->end_timestamp, &primary_key_list);
     }
 
     if (s.ok()) {
+        VLOG(10) << "get rows";
         s = GetRows(primary_key_list, &resp->result_stream);
     }
     return s;
@@ -288,6 +291,7 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
         const IndexCondition& index_cond = *it;
         std::map<std::string, IndexConditionExtend>::iterator ex_it;
         ex_it = dedup_map.find(index_cond.index_name);
+        VLOG(10) << "sanity index : " << index_cond.index_name;
         if (ex_it == dedup_map.end()) {
             IndexConditionExtend& index_cond_ex = dedup_map[index_cond.index_name];
             index_cond_ex.index_name = index_cond.index_name;
