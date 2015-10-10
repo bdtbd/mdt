@@ -147,9 +147,9 @@ public:
                                 std::vector<IndexConditionExtend>* index_condition_ex_list);
 
     Status GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                          int64_t start_timestamp, int64_t end_timestamp,
+                          const SearchRequest* req,
                           std::vector<std::string>* primary_key_list);
-
+    
     Status GetRows(const std::vector<std::string>& primary_key_list,
                    std::vector<ResultStream>* row_list);
 
@@ -174,6 +174,7 @@ private:
     TeraAdapter tera_;
     FilesystemAdapter fs_;
 
+    // file handle cache relative
     mutable Mutex file_mutex_;
     std::map<std::string, RandomAccessFile*> file_map_;
 

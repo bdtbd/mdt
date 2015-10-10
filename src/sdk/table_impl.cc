@@ -81,7 +81,7 @@ void PutCallback(tera::RowMutation* row) {
         if (context->counter_.Dec() == 0) {
             context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                                context->callback_param_);
-            LOG(INFO) << "put callback";
+            VLOG(12) << "put callback";
             delete context;
         }
     } else {
@@ -198,7 +198,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_;
+        VLOG(12) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
 
@@ -233,7 +233,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     VLOG(10) << "write pri : " << req->primary_key;
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
-    LOG(INFO) << " write pri table, primary key: " << primary_key;
+    VLOG(12) << " write pri table, primary key: " << primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
     primary_row->SetContext(context);
@@ -246,7 +246,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
          ++it) {
         tera::Table* index_table = GetIndexTable(it->index_name);
         std::string index_key = it->index_key;
-        LOG(INFO) << " write index table: " << it->index_name << ", index key: " << index_key;
+        VLOG(12) << " write index table: " << it->index_name << ", index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
         index_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
         index_row->SetContext(context);
@@ -275,8 +275,7 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
 
         if (s.ok()) {
             VLOG(10) << "get primary keys";
-            s = GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
-                               req->end_timestamp, &primary_key_list);
+            s = GetPrimaryKeys(index_cond_ex_list, req, &primary_key_list);
         }
     }
 
@@ -342,9 +341,10 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
 }
 
 Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                                 int64_t start_timestamp, int64_t end_timestamp,
+                                 const SearchRequest* req,
                                  std::vector<std::string>* primary_key_list) {
     for (size_t i = 0; i < index_condition_ex_list.size(); i++) {
+        bool skip_scan = false;
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
@@ -356,7 +356,8 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
             break;
         case kNotEqualTo:
-            abort();
+            LOG(WARNING) << "Scan not support !=";
+            skip_scan = true;
             break;
         case kLess:
             scan_desc = new tera::ScanDescriptor("");
@@ -387,18 +388,28 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             }
             break;
         default:
-            abort();
+            LOG(WARNING) << "Scan: unknown cmp";
+            skip_scan = true;
             break;
         }
 
+        if (skip_scan) continue;
+
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-        scan_desc->SetTimeRange(end_timestamp, start_timestamp);
+        scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
         tera::ErrorCode err;
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
+
+        int32_t num_pkey = 0;
         while (!result->Done()) {
+            if (req->limit <= num_pkey) break;
+
+            // TODO: sync scan is enough
             const std::string& primary_key = result->Qualifier();
             LOG(INFO) << "select op, primary key: " << primary_key;
             primary_key_list->push_back(primary_key);
+            num_pkey++;
+
             result->Next();
         }
 
@@ -442,6 +453,7 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         location.ParseFromString(location_buffer);
         LOG(INFO) << "read data from file " << location;
         std::string data;
+        // TODO: async scan
         Status s = ReadDataFromFile(location, &data);
         if (s.ok()) {
             VLOG(5) << "read data from " << location;
@@ -475,39 +487,49 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
 
 tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
     std::string index_table_name = tera_.table_prefix_ + "#pri#" + table_name;
-    LOG(INFO) << "get primary table: " << index_table_name;
+    VLOG(12) << "get primary table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
 
 tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + index_name;
-    LOG(INFO) << "get index table: " << index_table_name;
+    VLOG(12) << "get index table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
 
 std::string TableImpl::TimeToString() {
+#ifdef OS_LINUX
+    pid_t tid = syscall(SYS_gettid);
+#else
+    pthread_t tid = pthread_self();
+#endif
+    uint64_t thread_id = 0;
+    memcpy(&thread_id, &tid, std::min(sizeof(thread_id), sizeof(tid)));
+
     struct timeval now_tv;
     gettimeofday(&now_tv, NULL);
     const time_t seconds = now_tv.tv_sec;
     struct tm t;
     localtime_r(&seconds, &t);
-    char buf[27];
+    char buf[34];
     char* p = buf;
-    p += snprintf(p, 27,
-            "%04d-%02d-%02d-%02d:%02d:%02d.%06d",
+    p += snprintf(p, 34,
+            "%04d-%02d-%02d-%02d:%02d:%02d.%06d.%06lu",
             t.tm_year + 1900,
             t.tm_mon + 1,
             t.tm_mday,
             t.tm_hour,
             t.tm_min,
             t.tm_sec,
-            static_cast<int>(now_tv.tv_usec));
-    std::string time_buf(buf, 26);
+            static_cast<int>(now_tv.tv_usec),
+            (unsigned long)thread_id);
+    std::string time_buf(buf, 33);
     return time_buf;
 }
 
+// cache file handler
 RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
     MutexLock l(&file_mutex_);
 
@@ -568,7 +590,7 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     location->offset_ = offset_;
     offset_ += location->size_;
     location->fname_ = fname_;
-    LOG(INFO) << "add record, offset " << location->offset_ << ", size " << location->size_;
+    VLOG(12) << "add record, " << location;
     return 0;
 }
 
