@@ -3,13 +3,18 @@
 // found in the LICENSE file.
 
 #include <deque>
-#include <glog/logging.h>
-#include <tera.h>
-#include "sdk/sdk.h"
-#include "sdk/table_impl.h"
-#include "proto/kv.pb.h"
 
 #include <glog/logging.h>
+#include <glog/logging.h>
+
+#include "proto/kv.pb.h"
+#include "sdk/sdk.h"
+#include "sdk/table_impl.h"
+#include <tera.h>
+
+DECLARE_int64(concurrent_write_handle_num);
+DECLARE_int64(max_write_handle_seq);
+DECLARE_int64(data_size_per_sync);
 
 namespace mdt {
 
@@ -29,7 +34,6 @@ int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt
     fs_adapter.root_path_ = fs_opt.fs_path_ + "/" + table_name + "/";
     LOG(INFO) << "data file dir: " << fs_adapter.root_path_;
     fs_adapter.env_ = fs_opt.env_;
-    fs_adapter.writer_ = NULL;
 
     //init tera adapter
     TeraAdapter tera_adapter;
@@ -50,6 +54,17 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     fs_(fs_adapter) {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
+
+    // init write handle list
+    nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
+    cur_write_handle_id_ = 0;
+    write_handle_list_.clear();
+    WriteHandle write_handle;
+    write_handle.write_queue_.clear();
+    write_handle.writer_ = NULL;
+    for (int i = 0; i < nr_write_handle_; ++i) {
+        write_handle_list_.push_back(write_handle);
+    }
 
     tera::ErrorCode error_code;
 
@@ -75,20 +90,13 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     }
 }
 
-void PutCallback(tera::RowMutation* row) {
-    PutContext* context = (PutContext*)row->GetContext();
-    if (context->callback_) {
-        if (context->counter_.Dec() == 0) {
-            context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
-                               context->callback_param_);
-            VLOG(12) << "put callback";
-            delete context;
-        }
-    } else {
-        context->counter_.Dec();
-    }
+TableImpl::~TableImpl() {
+    // free write handle
+    //ReleaseDataWriter();
+    // TODO: write queue release
 }
 
+/////////  batch write /////////////
 struct InternalBatchPutCallbackParam {
     BatchStoreRequest* req_;
     StoreResponse* resp_;
@@ -148,6 +156,18 @@ int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
     return 0;
 }
 
+///////////  High concurrency write interface ////////////////
+struct DefaultUserCallbackParam {
+    CondVar* cond_;
+};
+
+void DefaultUserCallback(Table* table, StoreRequest* request,
+                         StoreResponse* response,
+                         void* callback_param) {
+    DefaultUserCallbackParam* param = (DefaultUserCallbackParam*)callback_param;
+    param->cond_->Signal();
+}
+
 // Concurrence Put interface:
 //      1. wait and lock
 //      2. merge request while wait
@@ -156,6 +176,17 @@ int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
 //      5. lock, resume other write
 int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
                    StoreCallback callback, void* callback_param) {
+    // try to construct Default callback
+    Mutex mu;
+    CondVar cond(&mu);
+    DefaultUserCallbackParam param;
+    param.cond_ = &cond;
+    if (callback == NULL) {
+        assert(0);
+        callback = DefaultUserCallback;
+        callback_param = &param;
+    }
+
     // construct WriteContext
     WriteContext context(&write_mutex_);
     context.req_ = req;
@@ -165,33 +196,43 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     context.sync_ = true;
     context.done_ = false;
 
+    // select write handle
+    WriteHandle* write_handle = GetWriteHandle();
+
     // wait and lock
     MutexLock l(&write_mutex_);
-    write_queue_.push_back(&context);
-    while (!context.done_ && (&context != write_queue_.front())) {
+    write_handle->write_queue_.push_back(&context);
+    while (!context.done_ && (&context != write_handle->write_queue_.front())) {
+        LOG(INFO) << "===== waitlock put";
         context.cv_.Wait();
     }
     if (context.done_) {
-        // finish, do something
+        write_mutex_.Unlock();
+        // write finish, if sync write, just wait callback
+        if (callback == DefaultUserCallback) {
+            param.cond_->Wait();
+        }
         return 0;
     }
-
+        
     // merge WriteContext
     WriteBatch wb;
-    std::deque<WriteContext*>::iterator iter = write_queue_.begin();
-    for (; iter != write_queue_.end(); ++iter) {
+    std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
+    for (; iter != write_handle->write_queue_.end(); ++iter) {
         wb.Append(*iter);
     }
 
     // unlock do io
     write_mutex_.Unlock();
+    LOG(INFO) << ">>>>> lock put";
 
-    // batch write file system and index table
+    // batch write file system
     VLOG(10) << "write file";
     FileLocation location;
-    DataWriter* writer = GetDataWriter();
+    DataWriter* writer = GetDataWriter(write_handle);
     writer->AddRecord(wb.rep_, &location);
 
+    // write index table
     std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
     for (; it != wb.context_list_.end(); ++it) {
         WriteContext* ctx = *it;
@@ -203,22 +244,39 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     }
 
     // lock, resched other WriteContext
+    LOG(INFO) << "<<<<< unlock put";
     write_mutex_.Lock();
     WriteContext* last_writer = wb.context_list_.back();
     while (true) {
-        WriteContext* ready = write_queue_.front();
-        write_queue_.pop_front();
+        WriteContext* ready = write_handle->write_queue_.front();
+        write_handle->write_queue_.pop_front();
         if (ready != &context) {
             ready->done_ = true;
             ready->cv_.Signal();
         }
         if (ready == last_writer) break;
     }
-    if (!write_queue_.empty()) {
-        write_queue_.front()->cv_.Signal();
+    if (!write_handle->write_queue_.empty()) {
+        write_handle->write_queue_.front()->cv_.Signal();
     }
 
+    write_mutex_.Unlock();
+    // write finish, if sync write, just wait callback
+    if (callback == DefaultUserCallback) {
+        param.cond_->Wait();
+    }
     return 0;
+}
+
+void PutCallback(tera::RowMutation* row) {
+    PutContext* context = (PutContext*)row->GetContext();
+    // the last one invoke user callback
+    if (context->counter_.Dec() == 0) {
+        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
+                context->callback_param_);
+        VLOG(12) << "put callback";
+        delete context;
+    }
 }
 
 int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
@@ -254,10 +312,6 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         index_table->ApplyMutation(index_row);
     }
 
-    // wait sync put finish
-    while (!callback && context->counter_.Get() > 0) {
-        usleep(1000);
-    }
     return 0;
 }
 
@@ -563,21 +617,43 @@ RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
 }
 
 // DataWriter Impl
-DataWriter* TableImpl::GetDataWriter() {
+DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
     DataWriter* writer = NULL;
-    if (fs_.writer_ && fs_.writer_->SwitchDataFile()) {
+    if (write_handle->writer_ && write_handle->writer_->SwitchDataFile()) {
         LOG(INFO) << "data file too large, switch";
-        delete fs_.writer_;
-        fs_.writer_ = NULL;
+        delete write_handle->writer_;
+        write_handle->writer_ = NULL;
     }
-    if (fs_.writer_ == NULL) {
+    if (write_handle->writer_ == NULL) {
         std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
         WritableFile* file;
         fs_.env_->NewWritableFile(fname, &file);
-        fs_.writer_ = new DataWriter(fname, file);
+        write_handle->writer_ = new DataWriter(fname, file);
     }
-    writer = fs_.writer_;
+    writer = write_handle->writer_;
     return writer;
+}
+
+void TableImpl::ReleaseDataWriter(WriteHandle* write_handle) {
+    // TODO
+    if (write_handle->writer_) {
+        delete write_handle->writer_;
+    }
+    write_handle->writer_ = NULL;
+}
+
+TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
+    MutexLock mu(&write_mutex_);
+
+    if (cur_write_handle_seq_ >= FLAGS_max_write_handle_seq) {
+        cur_write_handle_seq_ = 0;
+        cur_write_handle_id_ = (++cur_write_handle_id_) % nr_write_handle_;
+    }
+
+    WriteHandle* write_handle = (WriteHandle*)&(write_handle_list_[cur_write_handle_id_]);
+    LOG(INFO) << "id " << cur_write_handle_id_ << ", seq " << cur_write_handle_seq_
+            << ", write_handle addr " << (uint64_t)write_handle;
+    return write_handle;
 }
 
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
@@ -586,11 +662,17 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
         return -1;
     }
     location->size_ = data.size();
-    file_->Sync();
     location->offset_ = offset_;
     offset_ += location->size_;
     location->fname_ = fname_;
-    VLOG(12) << "add record, " << location;
+    // per 256KB, trigger sync
+    assert(offset_ >= cur_sync_offset_);
+    if ((offset_ - cur_sync_offset_) > (int32_t)FLAGS_data_size_per_sync) {
+        file_->Sync();
+        cur_sync_offset_ = offset_;
+    }
+    LOG(INFO) << "add record, offset " << location->offset_
+        << ", size " << location->size_;
     return 0;
 }
 
