@@ -5,7 +5,7 @@
 package mdt
 
 // #cgo LDFLAGS: -L. -L../mdt/lib -lmdt -ltera -lins_sdk -lsofa-pbrpc -lprotobuf -lsnappy -lzookeeper_mt -lgtest_main -lgtest -lglog -lgflags -ltcmalloc_minimal -lstdc++ -lc -lm -ldl -lpthread -lrt -lz
-// #include "c.h"
+// #include "mdt_c.h"
 import "C"
 import "unsafe"
 
