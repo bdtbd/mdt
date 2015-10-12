@@ -394,7 +394,14 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
 Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
                                  const SearchRequest* req,
                                  std::vector<std::string>* primary_key_list) {
-    for (size_t i = 0; i < index_condition_ex_list.size(); i++) {
+    size_t nr_index_table = index_condition_ex_list.size();  
+    std::vector<std::vector<std::string> > pri_vec(nr_index_table);
+    std::string min_key;
+        
+    if (nr_index_table <= 0)
+        return Status::OK();
+
+    for (size_t i = 0; i < nr_index_table; i++) {
         bool skip_scan = false;
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
@@ -450,7 +457,8 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
         tera::ErrorCode err;
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
-
+        
+        pri_vec[i].clear();
         int32_t num_pkey = 0;
         while (!result->Done()) {
             if (req->limit <= num_pkey) break;
@@ -458,15 +466,21 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             // TODO: sync scan is enough
             const std::string& primary_key = result->Qualifier();
             LOG(INFO) << "select op, primary key: " << primary_key;
-            primary_key_list->push_back(primary_key);
+            pri_vec[i].push_back(primary_key);
             num_pkey++;
 
             result->Next();
         }
-
         delete result;
         delete scan_desc;
+
+        // merge sort result
+        if ((min_key.size()) == 0 || (min_key.compare((pri_vec[i])[0]) > 0)) {
+            min_key = (pri_vec[i])[0];
+        }
     }
+        
+     
 
     return Status::OK();
 }
