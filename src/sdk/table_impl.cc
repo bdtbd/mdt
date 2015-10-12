@@ -644,7 +644,7 @@ TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
 
     if (cur_write_handle_seq_++ >= FLAGS_max_write_handle_seq) {
         cur_write_handle_seq_ = 0;
-        cur_write_handle_id_ = (++cur_write_handle_id_) % nr_write_handle_;
+        cur_write_handle_id_ = (cur_write_handle_id_ + 1) % nr_write_handle_;
     }
 
     WriteHandle* write_handle = (WriteHandle*)&(write_handle_list_[cur_write_handle_id_]);
