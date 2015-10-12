@@ -394,12 +394,13 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
 Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
                                  const SearchRequest* req,
                                  std::vector<std::string>* primary_key_list) {
-    size_t nr_index_table = index_condition_ex_list.size();  
+    size_t nr_index_table = index_condition_ex_list.size();
     std::vector<std::vector<std::string> > pri_vec(nr_index_table);
-    std::string min_key;
-        
-    if (nr_index_table <= 0)
+
+    primary_key_list->clear();
+    if (nr_index_table <= 0) {
         return Status::OK();
+    }
 
     for (size_t i = 0; i < nr_index_table; i++) {
         bool skip_scan = false;
@@ -457,7 +458,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
         tera::ErrorCode err;
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
-        
+
         pri_vec[i].clear();
         int32_t num_pkey = 0;
         while (!result->Done()) {
@@ -473,15 +474,59 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         }
         delete result;
         delete scan_desc;
+    }
 
-        // merge sort result
-        if ((min_key.size()) == 0 || (min_key.compare((pri_vec[i])[0]) > 0)) {
-            min_key = (pri_vec[i])[0];
+    PrimaryKeyMergeSort(pri_vec, primary_key_list);
+    return Status::OK();
+}
+
+///////   fast merge sort algorithm   ////////
+Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
+                                      std::vector<std::string>* primary_key_list) {
+    uint32_t nr_stream = pri_vec.size();
+    if (nr_stream <= 0) {
+        return Status::OK();
+    }
+
+    // collect iterator, min_key
+    std::string min_key;
+    std::vector<std::vector<std::string>::iterator > iter_vec(nr_stream);
+    min_key = (pri_vec[0])[0];
+    for (uint32_t i = 0; i < nr_stream; i++) {
+        std::vector<std::string>::iterator it = pri_vec[i].begin();
+        iter_vec[i] = it;
+        if (min_key.compare((pri_vec[i])[0]) > 0) min_key = (pri_vec[i])[0];
+    }
+
+    while (1) {
+        std::string max_key = min_key;
+        // collect min && max key in all stream
+        for (uint32_t i = 0; i < nr_stream; i++) {
+            if (min_key.compare(*(iter_vec[i])) != 0) {
+                // binary search
+                iter_vec[i] = std::lower_bound(iter_vec[i], pri_vec[i].end(), min_key);
+                if (iter_vec[i] == pri_vec[i].end()) {
+                    // this stream finish, so exit
+                    return Status::OK();
+                }
+                if (max_key.compare(*(iter_vec[i])) < 0) max_key = *(iter_vec[i]);
+            }
+        }
+
+        // collect result
+        if (min_key.compare(max_key) == 0) {
+            primary_key_list->push_back(max_key);
+            ++(iter_vec[0]);
+            if (iter_vec[0] == pri_vec[0].end()) {
+                return Status::OK();
+            }
+            min_key = *(iter_vec[0]);
+        } else {
+            // drop invalid result, update min_key, use max_key enhance merge sort
+            min_key = max_key;
         }
     }
-        
-     
-
+    assert(0);
     return Status::OK();
 }
 
