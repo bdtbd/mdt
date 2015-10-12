@@ -506,7 +506,9 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
         std::string max_key = min_key;
         // collect min && max key in all stream
         for (uint32_t i = 0; i < nr_stream; i++) {
-            if (min_key.compare(*(iter_vec[i])) != 0) {
+            if (min_key.compare(*(iter_vec[i])) == 0) {
+                ++(iter_vec[i]);
+            } else {
                 // binary search
                 iter_vec[i] = std::lower_bound(iter_vec[i], pri_vec[i].end(), min_key);
                 if (iter_vec[i] == pri_vec[i].end()) {
@@ -520,7 +522,7 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
         // collect result
         if (min_key.compare(max_key) == 0) {
             primary_key_list->push_back(max_key);
-            ++(iter_vec[0]);
+            // get next min_key
             if (iter_vec[0] == pri_vec[0].end()) {
                 return Status::OK();
             }
