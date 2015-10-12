@@ -16,4 +16,4 @@ DEFINE_string(database_root_dir, "/disk/tera/DatabaseDir", "database's data file
 // write ops param
 DEFINE_int64(concurrent_write_handle_num, 10, "num of fs writer");
 DEFINE_int64(max_write_handle_seq, 10, "max num of req can schedule to current write_handle");
-DEFINE_int64(data_size_per_sync, 262144, "num of data per Sync()");
+DEFINE_int64(data_size_per_sync, 0, "num of data per Sync()");
