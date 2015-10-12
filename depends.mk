@@ -57,3 +57,10 @@ DEPS_LDPATH = -L$(TERA_LIBDIR) -L$(SOFA_PBRPC_LIBDIR) -L$(PROTOBUF_LIBDIR) \
               -L$(TERA_LIBDIR)
 DEPS_LDFLAGS = -ltera -lins_sdk -lsofa-pbrpc -lprotobuf -lsnappy -lzookeeper_mt \
                -lgtest_main -lgtest -lglog -lgflags -ltcmalloc_minimal
+DEPS_LIBRARIES = $(TERA_LIBDIR)/libtera.a $(INS_LIBDIR)/libins_sdk.a \
+                 $(SOFA_PBRPC_LIBDIR)/libsofa-pbrpc.a $(PROTOBUF_LIBDIR)/libprotobuf.a \
+                 $(SNAPPY_LIBDIR)/libsnappy.a $(ZOOKEEPER_LIBDIR)/libzookeeper_mt.a \
+                 $(GTEST_LIBDIR)/libgtest_main.a $(GTEST_LIBDIR)/libgtest.a \
+                 $(GLOG_LIBDIR)/libglog.a $(GFLAGS_LIBDIR)/libgflags.a \
+                 $(GPERFTOOLS_LIBDIR)/libtcmalloc_minimal.a
+

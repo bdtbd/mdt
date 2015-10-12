@@ -199,9 +199,11 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     WriteHandle* write_handle = GetWriteHandle();
 
     // wait and lock
+    LOG(INFO) << ">>>>> begin put, ctx " << (uint64_t)(&context);
     write_mutex_.Lock();
     write_handle->write_queue_.push_back(&context);
     while (!context.done_ && (&context != write_handle->write_queue_.front())) {
+        LOG(INFO) << "===== waitlock put, ctx " << (uint64_t)(&context);
         context.cv_.Wait();
     }
     if (context.done_) {
@@ -222,7 +224,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
 
     // unlock do io
     write_mutex_.Unlock();
-    VLOG(30) << ">>>>> lock put, ctx " << (uint64_t)(&context);
+    LOG(INFO) << ">>>>> lock put, ctx " << (uint64_t)(&context);
 
     // batch write file system
     FileLocation location;
@@ -236,7 +238,8 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        VLOG(12) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_;
+        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_ 
+                << ", pri key " << ctx->req_->primary_key;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
 
@@ -258,6 +261,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     }
 
     write_mutex_.Unlock();
+    LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(&context);
     // write finish, if sync write, just wait callback
     if (callback == DefaultUserCallback) {
         param.cond_->Wait();

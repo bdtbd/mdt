@@ -64,7 +64,10 @@ all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $($C_SAMPLE) $(MDTTOOL) $(WRITE_TEST) $(MUL
 	#cp $(PROGRAM) build/bin
 	cp $(LIBRARY) build/lib
 	cp src/sdk/sdk.h build/include/mdt.h
+	cp src/sdk/c.h build/include/mdt_c.h
+	cp src/sdk/mdt.go build/include/mdt.go
 	cp -r conf build
+	cp $(DEPS_LIBRARIES) build/lib
 	echo 'Done'
 
 clean:
