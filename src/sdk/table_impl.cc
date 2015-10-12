@@ -212,7 +212,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
         }
         return 0;
     }
-        
+
     // merge WriteContext
     WriteBatch wb;
     std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
