@@ -86,7 +86,7 @@ struct WriteBatch {
 class DataWriter {
 public:
     DataWriter(const std::string& fname, WritableFile* file)
-        : fname_(fname), file_(file), offset_(0) {}
+        : fname_(fname), file_(file), offset_(0), cur_sync_offset_(0) {}
     ~DataWriter() {
         if(file_) {
             delete file_;
@@ -102,13 +102,13 @@ private:
     std::string fname_;
     WritableFile* file_;
     int32_t offset_; // TODO: no more than 4G per file
+    int32_t cur_sync_offset_; // offset of data has been sync to datanode, default Sync per 256KB
 };
 
 struct FilesystemAdapter {
     std::string root_path_; // data file dir
     Env* env_;
 
-    DataWriter* writer_;
 };
 
 enum COMPARATOR_EXTEND {
@@ -129,6 +129,7 @@ public:
     TableImpl(const TableDescription& table_desc,
               const TeraAdapter& tera_adapter,
               const FilesystemAdapter& fs_adapter);
+    ~TableImpl();
     virtual int Put(const StoreRequest* request, StoreResponse* response,
                     StoreCallback callback = NULL, void* callback_param = NULL);
     virtual int Put(const BatchStoreRequest* request, StoreResponse* response,
@@ -149,7 +150,7 @@ public:
     Status GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
                           const SearchRequest* req,
                           std::vector<std::string>* primary_key_list);
-    
+
     Status GetRows(const std::vector<std::string>& primary_key_list,
                    std::vector<ResultStream>* row_list);
 
@@ -164,7 +165,17 @@ public:
                         FileLocation& location);
 
 private:
-    DataWriter* GetDataWriter();
+    // NOTE： WriteHandle can not operator in race condition
+    struct WriteHandle {
+        std::deque<WriteContext*> write_queue_;
+        DataWriter* writer_;
+    };
+
+    WriteHandle* GetWriteHandle();
+    DataWriter* GetDataWriter(WriteHandle* write_handle);
+    void ReleaseDataWriter(WriteHandle* write_handle);
+
+private:
     tera::Table* GetPrimaryTable(const std::string& table_name);
     tera::Table* GetIndexTable(const std::string& index_name);
     std::string TimeToString();
@@ -180,7 +191,10 @@ private:
 
     // use for put
     mutable Mutex write_mutex_;
-    std::deque<WriteContext*> write_queue_;
+        std::vector<WriteHandle> write_handle_list_;
+    int nr_write_handle_;
+    int cur_write_handle_id_; // current selected write_handle
+    int cur_write_handle_seq_; // num of request schedule to current write_handle
 };
 
 struct PutContext {
