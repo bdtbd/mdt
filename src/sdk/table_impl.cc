@@ -182,7 +182,6 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     DefaultUserCallbackParam param;
     param.cond_ = &cond;
     if (callback == NULL) {
-        assert(0);
         callback = DefaultUserCallback;
         callback_param = &param;
     }
@@ -195,15 +194,17 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     context.callback_param_ = callback_param;
     context.sync_ = true;
     context.done_ = false;
+    VLOG(30) << "ctx " << (uint64_t)(&context) << ", req " << (uint64_t)req;
 
     // select write handle
     WriteHandle* write_handle = GetWriteHandle();
 
     // wait and lock
-    MutexLock l(&write_mutex_);
+    //MutexLock l(&write_mutex_);
+    write_mutex_.Lock();
     write_handle->write_queue_.push_back(&context);
     while (!context.done_ && (&context != write_handle->write_queue_.front())) {
-        LOG(INFO) << "===== waitlock put";
+        VLOG(30) << "===== waitlock put";
         context.cv_.Wait();
     }
     if (context.done_) {
@@ -219,12 +220,13 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     WriteBatch wb;
     std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
     for (; iter != write_handle->write_queue_.end(); ++iter) {
+	VLOG(30) << "ctx " << (uint64_t)((WriteContext*)*iter);
         wb.Append(*iter);
     }
 
     // unlock do io
     write_mutex_.Unlock();
-    LOG(INFO) << ">>>>> lock put";
+    VLOG(30) << ">>>>> lock put, ctx " << (uint64_t)(&context);
 
     // batch write file system
     VLOG(10) << "write file";
@@ -236,6 +238,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
     for (; it != wb.context_list_.end(); ++it) {
         WriteContext* ctx = *it;
+	VLOG(30) << "write idx, ctx " << (uint64_t)ctx;
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
@@ -244,11 +247,12 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     }
 
     // lock, resched other WriteContext
-    LOG(INFO) << "<<<<< unlock put";
+    VLOG(30) << "<<<<< unlock put";
     write_mutex_.Lock();
     WriteContext* last_writer = wb.context_list_.back();
     while (true) {
         WriteContext* ready = write_handle->write_queue_.front();
+	VLOG(30) << "finish ctx " << (uint64_t)ready;
         write_handle->write_queue_.pop_front();
         if (ready != &context) {
             ready->done_ = true;
@@ -645,7 +649,7 @@ void TableImpl::ReleaseDataWriter(WriteHandle* write_handle) {
 TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
     MutexLock mu(&write_mutex_);
 
-    if (cur_write_handle_seq_ >= FLAGS_max_write_handle_seq) {
+    if (cur_write_handle_seq_++ >= FLAGS_max_write_handle_seq) {
         cur_write_handle_seq_ = 0;
         cur_write_handle_id_ = (++cur_write_handle_id_) % nr_write_handle_;
     }
