@@ -3,13 +3,18 @@
 // found in the LICENSE file.
 
 #include <deque>
-#include <glog/logging.h>
-#include <tera.h>
-#include "sdk/sdk.h"
-#include "sdk/table_impl.h"
-#include "proto/kv.pb.h"
 
 #include <glog/logging.h>
+#include <glog/logging.h>
+
+#include "proto/kv.pb.h"
+#include "sdk/sdk.h"
+#include "sdk/table_impl.h"
+#include <tera.h>
+
+DECLARE_int64(concurrent_write_handle_num);
+DECLARE_int64(max_write_handle_seq);
+DECLARE_int64(data_size_per_sync);
 
 namespace mdt {
 
@@ -29,7 +34,6 @@ int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt
     fs_adapter.root_path_ = fs_opt.fs_path_ + "/" + table_name + "/";
     LOG(INFO) << "data file dir: " << fs_adapter.root_path_;
     fs_adapter.env_ = fs_opt.env_;
-    fs_adapter.writer_ = NULL;
 
     //init tera adapter
     TeraAdapter tera_adapter;
@@ -50,6 +54,17 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     fs_(fs_adapter) {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
+
+    // init write handle list
+    nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
+    cur_write_handle_id_ = 0;
+    write_handle_list_.clear();
+    WriteHandle write_handle;
+    write_handle.write_queue_.clear();
+    write_handle.writer_ = NULL;
+    for (int i = 0; i < nr_write_handle_; ++i) {
+        write_handle_list_.push_back(write_handle);
+    }
 
     tera::ErrorCode error_code;
 
@@ -75,20 +90,13 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     }
 }
 
-void PutCallback(tera::RowMutation* row) {
-    PutContext* context = (PutContext*)row->GetContext();
-    if (context->callback_) {
-        if (context->counter_.Dec() == 0) {
-            context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
-                               context->callback_param_);
-            LOG(INFO) << "put callback";
-            delete context;
-        }
-    } else {
-        context->counter_.Dec();
-    }
+TableImpl::~TableImpl() {
+    // free write handle
+    //ReleaseDataWriter();
+    // TODO: write queue release
 }
 
+/////////  batch write /////////////
 struct InternalBatchPutCallbackParam {
     BatchStoreRequest* req_;
     StoreResponse* resp_;
@@ -148,6 +156,18 @@ int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
     return 0;
 }
 
+///////////  High concurrency write interface ////////////////
+struct DefaultUserCallbackParam {
+    CondVar* cond_;
+};
+
+void DefaultUserCallback(Table* table, StoreRequest* request,
+                         StoreResponse* response,
+                         void* callback_param) {
+    DefaultUserCallbackParam* param = (DefaultUserCallbackParam*)callback_param;
+    param->cond_->Signal();
+}
+
 // Concurrence Put interface:
 //      1. wait and lock
 //      2. merge request while wait
@@ -156,6 +176,16 @@ int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
 //      5. lock, resume other write
 int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
                    StoreCallback callback, void* callback_param) {
+    // try to construct Default callback
+    Mutex mu;
+    CondVar cond(&mu);
+    DefaultUserCallbackParam param;
+    param.cond_ = &cond;
+    if (callback == NULL) {
+        callback = DefaultUserCallback;
+        callback_param = &param;
+    }
+
     // construct WriteContext
     WriteContext context(&write_mutex_);
     context.req_ = req;
@@ -165,60 +195,85 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     context.sync_ = true;
     context.done_ = false;
 
+    // select write handle
+    WriteHandle* write_handle = GetWriteHandle();
+
     // wait and lock
-    MutexLock l(&write_mutex_);
-    write_queue_.push_back(&context);
-    while (!context.done_ && (&context != write_queue_.front())) {
+    write_mutex_.Lock();
+    write_handle->write_queue_.push_back(&context);
+    while (!context.done_ && (&context != write_handle->write_queue_.front())) {
         context.cv_.Wait();
     }
     if (context.done_) {
-        // finish, do something
+        write_mutex_.Unlock();
+        // write finish, if sync write, just wait callback
+        if (callback == DefaultUserCallback) {
+            param.cond_->Wait();
+        }
         return 0;
     }
 
     // merge WriteContext
     WriteBatch wb;
-    std::deque<WriteContext*>::iterator iter = write_queue_.begin();
-    for (; iter != write_queue_.end(); ++iter) {
+    std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
+    for (; iter != write_handle->write_queue_.end(); ++iter) {
         wb.Append(*iter);
     }
 
     // unlock do io
     write_mutex_.Unlock();
+    VLOG(30) << ">>>>> lock put, ctx " << (uint64_t)(&context);
 
-    // batch write file system and index table
-    VLOG(10) << "write file";
+    // batch write file system
     FileLocation location;
-    DataWriter* writer = GetDataWriter();
+    DataWriter* writer = GetDataWriter(write_handle);
     writer->AddRecord(wb.rep_, &location);
 
+    // write index table
     std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
     for (; it != wb.context_list_.end(); ++it) {
         WriteContext* ctx = *it;
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_;
+        VLOG(12) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
 
     // lock, resched other WriteContext
+    VLOG(30) << "<<<<< unlock put";
     write_mutex_.Lock();
     WriteContext* last_writer = wb.context_list_.back();
     while (true) {
-        WriteContext* ready = write_queue_.front();
-        write_queue_.pop_front();
+        WriteContext* ready = write_handle->write_queue_.front();
+        write_handle->write_queue_.pop_front();
         if (ready != &context) {
             ready->done_ = true;
             ready->cv_.Signal();
         }
         if (ready == last_writer) break;
     }
-    if (!write_queue_.empty()) {
-        write_queue_.front()->cv_.Signal();
+    if (!write_handle->write_queue_.empty()) {
+        write_handle->write_queue_.front()->cv_.Signal();
     }
 
+    write_mutex_.Unlock();
+    // write finish, if sync write, just wait callback
+    if (callback == DefaultUserCallback) {
+        param.cond_->Wait();
+    }
     return 0;
+}
+
+void PutCallback(tera::RowMutation* row) {
+    PutContext* context = (PutContext*)row->GetContext();
+    // the last one invoke user callback
+    if (context->counter_.Dec() == 0) {
+        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
+                context->callback_param_);
+        VLOG(12) << "put callback";
+        delete context;
+    }
 }
 
 int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
@@ -233,7 +288,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     VLOG(10) << "write pri : " << req->primary_key;
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
-    LOG(INFO) << " write pri table, primary key: " << primary_key;
+    VLOG(12) << " write pri table, primary key: " << primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
     primary_row->SetContext(context);
@@ -246,7 +301,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
          ++it) {
         tera::Table* index_table = GetIndexTable(it->index_name);
         std::string index_key = it->index_key;
-        LOG(INFO) << " write index table: " << it->index_name << ", index key: " << index_key;
+        VLOG(12) << " write index table: " << it->index_name << ", index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
         index_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
         index_row->SetContext(context);
@@ -254,10 +309,6 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         index_table->ApplyMutation(index_row);
     }
 
-    // wait sync put finish
-    while (!callback && context->counter_.Get() > 0) {
-        usleep(1000);
-    }
     return 0;
 }
 
@@ -275,8 +326,7 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
 
         if (s.ok()) {
             VLOG(10) << "get primary keys";
-            s = GetPrimaryKeys(index_cond_ex_list, req->start_timestamp,
-                               req->end_timestamp, &primary_key_list);
+            s = GetPrimaryKeys(index_cond_ex_list, req, &primary_key_list);
         }
     }
 
@@ -342,9 +392,10 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
 }
 
 Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                                 int64_t start_timestamp, int64_t end_timestamp,
+                                 const SearchRequest* req,
                                  std::vector<std::string>* primary_key_list) {
     for (size_t i = 0; i < index_condition_ex_list.size(); i++) {
+        bool skip_scan = false;
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
@@ -356,7 +407,8 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
             break;
         case kNotEqualTo:
-            abort();
+            LOG(WARNING) << "Scan not support !=";
+            skip_scan = true;
             break;
         case kLess:
             scan_desc = new tera::ScanDescriptor("");
@@ -387,18 +439,28 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             }
             break;
         default:
-            abort();
+            LOG(WARNING) << "Scan: unknown cmp";
+            skip_scan = true;
             break;
         }
 
+        if (skip_scan) continue;
+
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-        scan_desc->SetTimeRange(end_timestamp, start_timestamp);
+        scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
         tera::ErrorCode err;
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
+
+        int32_t num_pkey = 0;
         while (!result->Done()) {
+            if (req->limit <= num_pkey) break;
+
+            // TODO: sync scan is enough
             const std::string& primary_key = result->Qualifier();
             LOG(INFO) << "select op, primary key: " << primary_key;
             primary_key_list->push_back(primary_key);
+            num_pkey++;
+
             result->Next();
         }
 
@@ -442,6 +504,7 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         location.ParseFromString(location_buffer);
         LOG(INFO) << "read data from file " << location;
         std::string data;
+        // TODO: async scan
         Status s = ReadDataFromFile(location, &data);
         if (s.ok()) {
             VLOG(5) << "read data from " << location;
@@ -475,39 +538,49 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
 
 tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
     std::string index_table_name = tera_.table_prefix_ + "#pri#" + table_name;
-    LOG(INFO) << "get primary table: " << index_table_name;
+    VLOG(12) << "get primary table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
 
 tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + index_name;
-    LOG(INFO) << "get index table: " << index_table_name;
+    VLOG(12) << "get index table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
 }
 
 std::string TableImpl::TimeToString() {
+#ifdef OS_LINUX
+    pid_t tid = syscall(SYS_gettid);
+#else
+    pthread_t tid = pthread_self();
+#endif
+    uint64_t thread_id = 0;
+    memcpy(&thread_id, &tid, std::min(sizeof(thread_id), sizeof(tid)));
+
     struct timeval now_tv;
     gettimeofday(&now_tv, NULL);
     const time_t seconds = now_tv.tv_sec;
     struct tm t;
     localtime_r(&seconds, &t);
-    char buf[27];
+    char buf[34];
     char* p = buf;
-    p += snprintf(p, 27,
-            "%04d-%02d-%02d-%02d:%02d:%02d.%06d",
+    p += snprintf(p, 34,
+            "%04d-%02d-%02d-%02d:%02d:%02d.%06d.%06lu",
             t.tm_year + 1900,
             t.tm_mon + 1,
             t.tm_mday,
             t.tm_hour,
             t.tm_min,
             t.tm_sec,
-            static_cast<int>(now_tv.tv_usec));
-    std::string time_buf(buf, 26);
+            static_cast<int>(now_tv.tv_usec),
+            (unsigned long)thread_id);
+    std::string time_buf(buf, 33);
     return time_buf;
 }
 
+// cache file handler
 RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
     MutexLock l(&file_mutex_);
 
@@ -541,21 +614,43 @@ RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
 }
 
 // DataWriter Impl
-DataWriter* TableImpl::GetDataWriter() {
+DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
     DataWriter* writer = NULL;
-    if (fs_.writer_ && fs_.writer_->SwitchDataFile()) {
+    if (write_handle->writer_ && write_handle->writer_->SwitchDataFile()) {
         LOG(INFO) << "data file too large, switch";
-        delete fs_.writer_;
-        fs_.writer_ = NULL;
+        delete write_handle->writer_;
+        write_handle->writer_ = NULL;
     }
-    if (fs_.writer_ == NULL) {
+    if (write_handle->writer_ == NULL) {
         std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
         WritableFile* file;
         fs_.env_->NewWritableFile(fname, &file);
-        fs_.writer_ = new DataWriter(fname, file);
+        write_handle->writer_ = new DataWriter(fname, file);
     }
-    writer = fs_.writer_;
+    writer = write_handle->writer_;
     return writer;
+}
+
+void TableImpl::ReleaseDataWriter(WriteHandle* write_handle) {
+    // TODO
+    if (write_handle->writer_) {
+        delete write_handle->writer_;
+    }
+    write_handle->writer_ = NULL;
+}
+
+TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
+    MutexLock mu(&write_mutex_);
+
+    if (cur_write_handle_seq_++ >= FLAGS_max_write_handle_seq) {
+        cur_write_handle_seq_ = 0;
+        cur_write_handle_id_ = (++cur_write_handle_id_) % nr_write_handle_;
+    }
+
+    WriteHandle* write_handle = (WriteHandle*)&(write_handle_list_[cur_write_handle_id_]);
+    LOG(INFO) << "id " << cur_write_handle_id_ << ", seq " << cur_write_handle_seq_
+            << ", write_handle addr " << (uint64_t)write_handle;
+    return write_handle;
 }
 
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
@@ -564,11 +659,17 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
         return -1;
     }
     location->size_ = data.size();
-    file_->Sync();
     location->offset_ = offset_;
     offset_ += location->size_;
     location->fname_ = fname_;
-    LOG(INFO) << "add record, offset " << location->offset_ << ", size " << location->size_;
+    // per 256KB, trigger sync
+    assert(offset_ >= cur_sync_offset_);
+    if ((offset_ - cur_sync_offset_) > (int32_t)FLAGS_data_size_per_sync) {
+        file_->Sync();
+        cur_sync_offset_ = offset_;
+    }
+    LOG(INFO) << "add record, offset " << location->offset_
+        << ", size " << location->size_;
     return 0;
 }
 
