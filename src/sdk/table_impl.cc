@@ -166,9 +166,7 @@ void DefaultUserCallback(Table* table, StoreRequest* request,
                          StoreResponse* response,
                          void* callback_param) {
     DefaultUserCallbackParam* param = (DefaultUserCallbackParam*)callback_param;
-    if (!FLAGS_use_tera_async_write) {
-        param->cond_->Signal();
-    }
+    param->cond_->Signal();
 }
 
 // Concurrence Put interface:
@@ -184,7 +182,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     CondVar cond(&mu);
     DefaultUserCallbackParam param;
     param.cond_ = &cond;
-    if (callback == NULL) {
+    if (callback == NULL && !FLAGS_use_tera_async_write) {
         callback = DefaultUserCallback;
         callback_param = &param;
     }
@@ -212,7 +210,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     if (context.done_) {
         write_mutex_.Unlock();
         // write finish, if sync write, just wait callback
-        if (!FLAGS_use_tera_async_write && callback == DefaultUserCallback) {
+        if (callback == DefaultUserCallback) {
             param.cond_->Wait();
         }
         return 0;
@@ -266,7 +264,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     write_mutex_.Unlock();
     LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(&context);
     // write finish, if sync write, just wait callback
-    if (!FLAGS_use_tera_async_write && callback == DefaultUserCallback) {
+    if (callback == DefaultUserCallback) {
         param.cond_->Wait();
     }
     return 0;
@@ -276,8 +274,10 @@ void PutCallback(tera::RowMutation* row) {
     PutContext* context = (PutContext*)row->GetContext();
     // the last one invoke user callback
     if (context->counter_.Dec() == 0) {
-        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
+        if (context->callback_) {
+            context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                 context->callback_param_);
+        }
         VLOG(12) << "put callback";
         delete context;
     }
