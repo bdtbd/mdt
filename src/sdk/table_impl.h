@@ -139,11 +139,11 @@ public:
 
     virtual const std::string& TableName() {return table_desc_.table_name;}
 
-public:
     static int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                          Table** table_ptr);
 
+private:
     Status ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
                                 std::vector<IndexConditionExtend>* index_condition_ex_list);
 
@@ -164,21 +164,21 @@ public:
                         StoreCallback callback, void* callback_param,
                         FileLocation& location);
 
+    Status PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
+                               std::vector<std::string>* primary_key_list);
+    tera::Table* GetPrimaryTable(const std::string& table_name);
+    tera::Table* GetIndexTable(const std::string& index_name);
+    std::string TimeToString();
+
 private:
     // NOTE： WriteHandle can not operator in race condition
     struct WriteHandle {
         std::deque<WriteContext*> write_queue_;
         DataWriter* writer_;
     };
-
     WriteHandle* GetWriteHandle();
     DataWriter* GetDataWriter(WriteHandle* write_handle);
     void ReleaseDataWriter(WriteHandle* write_handle);
-
-private:
-    tera::Table* GetPrimaryTable(const std::string& table_name);
-    tera::Table* GetIndexTable(const std::string& index_name);
-    std::string TimeToString();
 
 private:
     TableDescription table_desc_;
