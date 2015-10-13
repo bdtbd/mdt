@@ -238,7 +238,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_ 
+        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
                 << ", pri key " << ctx->req_->primary_key;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
@@ -464,15 +464,11 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
 
         pri_vec[i].clear();
-        int32_t num_pkey = 0;
         while (!result->Done()) {
-            if (req->limit <= num_pkey) break;
-
             // TODO: sync scan is enough
             const std::string& primary_key = result->Qualifier();
             LOG(INFO) << "select op, primary key: " << primary_key;
             pri_vec[i].push_back(primary_key);
-            num_pkey++;
 
             result->Next();
         }
@@ -480,13 +476,15 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         delete scan_desc;
     }
 
-    PrimaryKeyMergeSort(pri_vec, primary_key_list);
+    // merge sort
+    PrimaryKeyMergeSort(pri_vec, primary_key_list, req->limit);
     return Status::OK();
 }
 
 ///////   fast merge sort algorithm   ////////
 Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
-                                      std::vector<std::string>* primary_key_list) {
+                                      std::vector<std::string>* primary_key_list,
+                                      int32_t limit) {
     uint32_t nr_stream = pri_vec.size();
     if (nr_stream <= 0) {
         return Status::OK();
@@ -496,14 +494,31 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
     std::string min_key;
     std::vector<std::vector<std::string>::iterator > iter_vec(nr_stream);
     for (uint32_t i = 0; i < nr_stream; i++) {
-        std::vector<std::string>::iterator it = pri_vec[i].begin();
-        iter_vec[i] = it;
 	if (pri_vec[i].size() == 0) {
 	    LOG(INFO) << "no result in stream " << i;
 	    return Status::OK();
 	}
-        if ((min_key.size() == 0) || 
-	    (min_key.compare((pri_vec[i])[0]) > 0)) { 
+
+        // sort primary_key stream, erase unique primary key
+        std::string unique_key;
+        std::sort(pri_vec[i].begin(), pri_vec[i].end());
+        std::vector<std::string>::iterator unique_it = pri_vec[i].begin();
+        unique_key = *unique_it;
+        ++unique_it;
+        while (unique_it != pri_vec[i].end()) {
+            if ((*unique_it).compare(unique_key) == 0) {
+                unique_it = pri_vec[i].erase(unique_it);
+            } else {
+                unique_key = *unique_it;
+                ++unique_it;
+            }
+        }
+
+        // get min_key in primary_key stream
+        std::vector<std::string>::iterator it = pri_vec[i].begin();
+        iter_vec[i] = it;
+        if ((min_key.size() == 0) ||
+	    (min_key.compare((pri_vec[i])[0]) > 0)) {
 	    min_key = (pri_vec[i])[0];
 	}
     }
@@ -530,7 +545,8 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
 	    LOG(INFO) << "merge pri key " << max_key;
             primary_key_list->push_back(max_key);
             // get next min_key
-            if (iter_vec[0] == pri_vec[0].end()) {
+            if ((iter_vec[0] == pri_vec[0].end()) ||
+                ((int32_t)primary_key_list->size() >= limit)) {
                 return Status::OK();
             }
             min_key = *(iter_vec[0]);
