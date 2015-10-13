@@ -15,6 +15,7 @@
 DECLARE_int64(concurrent_write_handle_num);
 DECLARE_int64(max_write_handle_seq);
 DECLARE_int64(data_size_per_sync);
+DECLARE_bool(use_tera_async_write);
 
 namespace mdt {
 
@@ -181,7 +182,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     CondVar cond(&mu);
     DefaultUserCallbackParam param;
     param.cond_ = &cond;
-    if (callback == NULL) {
+    if (callback == NULL && !FLAGS_use_tera_async_write) {
         callback = DefaultUserCallback;
         callback_param = &param;
     }
@@ -273,11 +274,14 @@ void PutCallback(tera::RowMutation* row) {
     PutContext* context = (PutContext*)row->GetContext();
     // the last one invoke user callback
     if (context->counter_.Dec() == 0) {
-        context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
+        if (context->callback_) {
+            context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                 context->callback_param_);
+        }
         VLOG(12) << "put callback";
         delete context;
     }
+    delete row;
 }
 
 int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,

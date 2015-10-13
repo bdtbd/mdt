@@ -28,7 +28,9 @@ void StoreCallback_Test(mdt::Table* table, mdt::StoreRequest* request,
     WriteTask* task = (WriteTask*)callback_param;
     if (task->counter_->Dec() == 0) {
 	task->cond_->Signal();
-    } 
+    }
+    delete request;
+    delete response;
 }
 
 void* write_task(void* arg) {
