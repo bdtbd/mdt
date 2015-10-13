@@ -37,8 +37,9 @@ void primary_key_scan(mdt::Table* table, std::string& primary_key) {
 
 void index_key_scan(mdt::Table* table) {
     mdt::SearchRequest* search_req = new mdt::SearchRequest;
-    search_req->start_timestamp = 1444411457;
-    search_req->end_timestamp = 1444411459;
+    search_req->limit = 100;
+    search_req->start_timestamp = 1444465625;
+    search_req->end_timestamp = 1444465627;
 
     mdt::IndexCondition query_index_cond1, query_index_cond2;
     query_index_cond1.index_name = "Query";
