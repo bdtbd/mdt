@@ -495,11 +495,17 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
     // collect iterator, min_key
     std::string min_key;
     std::vector<std::vector<std::string>::iterator > iter_vec(nr_stream);
-    min_key = (pri_vec[0])[0];
     for (uint32_t i = 0; i < nr_stream; i++) {
         std::vector<std::string>::iterator it = pri_vec[i].begin();
         iter_vec[i] = it;
-        if (min_key.compare((pri_vec[i])[0]) > 0) min_key = (pri_vec[i])[0];
+	if (pri_vec[i].size() == 0) {
+	    LOG(INFO) << "no result in stream " << i;
+	    return Status::OK();
+	}
+        if ((min_key.size() == 0) || 
+	    (min_key.compare((pri_vec[i])[0]) > 0)) { 
+	    min_key = (pri_vec[i])[0];
+	}
     }
 
     while (1) {
@@ -521,6 +527,7 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
 
         // collect result
         if (min_key.compare(max_key) == 0) {
+	    LOG(INFO) << "merge pri key " << max_key;
             primary_key_list->push_back(max_key);
             // get next min_key
             if (iter_vec[0] == pri_vec[0].end()) {
