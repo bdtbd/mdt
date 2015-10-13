@@ -165,7 +165,8 @@ private:
                         FileLocation& location);
 
     Status PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
-                               std::vector<std::string>* primary_key_list);
+                               std::vector<std::string>* primary_key_list,
+                               int32_t limit);
     tera::Table* GetPrimaryTable(const std::string& table_name);
     tera::Table* GetIndexTable(const std::string& index_name);
     std::string TimeToString();
