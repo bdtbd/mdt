@@ -15,6 +15,7 @@
 DECLARE_int64(concurrent_write_handle_num);
 DECLARE_int64(max_write_handle_seq);
 DECLARE_int64(data_size_per_sync);
+DECLARE_bool(use_tera_async_write);
 
 namespace mdt {
 
@@ -165,7 +166,9 @@ void DefaultUserCallback(Table* table, StoreRequest* request,
                          StoreResponse* response,
                          void* callback_param) {
     DefaultUserCallbackParam* param = (DefaultUserCallbackParam*)callback_param;
-    param->cond_->Signal();
+    if (!FLAGS_use_tera_async_write) {
+        param->cond_->Signal();
+    }
 }
 
 // Concurrence Put interface:
@@ -209,7 +212,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     if (context.done_) {
         write_mutex_.Unlock();
         // write finish, if sync write, just wait callback
-        if (callback == DefaultUserCallback) {
+        if (!FLAGS_use_tera_async_write && callback == DefaultUserCallback) {
             param.cond_->Wait();
         }
         return 0;
@@ -263,7 +266,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     write_mutex_.Unlock();
     LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(&context);
     // write finish, if sync write, just wait callback
-    if (callback == DefaultUserCallback) {
+    if (!FLAGS_use_tera_async_write && callback == DefaultUserCallback) {
         param.cond_->Wait();
     }
     return 0;
@@ -278,6 +281,7 @@ void PutCallback(tera::RowMutation* row) {
         VLOG(12) << "put callback";
         delete context;
     }
+    delete row;
 }
 
 int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
