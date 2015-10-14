@@ -6,15 +6,19 @@
 #define  MDT_SDK_TABLE_IMPL_H_
 
 #include <deque>
+
+#include <boost/asio.hpp>
+
 #include "proto/kv.pb.h"
 #include "util/counter.h"
 #include "util/env.h"
 #include <tera.h>
 #include "util/coding.h"
 #include "util/mutex.h"
+
+#include "sdk/option.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
-#include "sdk/option.h"
 
 namespace mdt {
 
@@ -63,6 +67,7 @@ struct WriteContext {
 
     // control field
     bool sync_;
+    bool is_wait_;
     bool done_;
     CondVar cv_;
 
@@ -144,6 +149,12 @@ public:
                          Table** table_ptr);
 
 private:
+    // write op
+    int InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
+    void QueueTimerFunc();
+    void GetAllRequest(WriteContext** context_ptr, std::vector<WriteContext*>* local_queue);
+    bool SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue);
+
     Status ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
                                 std::vector<IndexConditionExtend>* index_condition_ex_list);
 
@@ -192,10 +203,19 @@ private:
 
     // use for put
     mutable Mutex write_mutex_;
-        std::vector<WriteHandle> write_handle_list_;
+    std::vector<WriteHandle> write_handle_list_;
     int nr_write_handle_;
     int cur_write_handle_id_; // current selected write_handle
     int cur_write_handle_seq_; // num of request schedule to current write_handle
+    // support batch write
+    std::vector<WriteContext*> batch_queue_;
+    mutable Mutex queue_mutex_;
+    // queue timer
+    bool queue_timer_stop_;
+    mutable Mutex queue_timer_mu_; // mutex must declare before cv
+    CondVar queue_timer_cv_;
+    boost::asio::io_service queue_io_;
+    boost::asio::deadline_timer queue_timer_;
 };
 
 struct PutContext {

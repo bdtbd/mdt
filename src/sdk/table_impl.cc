@@ -6,6 +6,7 @@
 
 #include <glog/logging.h>
 #include <glog/logging.h>
+#include <boost/bind.hpp>
 
 #include "proto/kv.pb.h"
 #include "sdk/sdk.h"
@@ -16,6 +17,8 @@ DECLARE_int64(concurrent_write_handle_num);
 DECLARE_int64(max_write_handle_seq);
 DECLARE_int64(data_size_per_sync);
 DECLARE_bool(use_tera_async_write);
+DECLARE_int64(write_batch_queue_size);
+DECLARE_int64(request_queue_flush_internal);
 
 namespace mdt {
 
@@ -52,9 +55,16 @@ TableImpl::TableImpl(const TableDescription& table_desc,
                      const FilesystemAdapter& fs_adapter)
     : table_desc_(table_desc),
     tera_(tera_adapter),
-    fs_(fs_adapter) {
+    fs_(fs_adapter),
+    queue_timer_stop_(false),
+    queue_timer_cv_(&queue_timer_mu_),
+    queue_timer_(queue_io_, boost::posix_time::millisec(FLAGS_request_queue_flush_internal)) {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
+
+    // create timer
+    queue_timer_.async_wait(boost::bind(&TableImpl::QueueTimerFunc, this));
+    queue_io_.run();
 
     // init write handle list
     nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
@@ -95,6 +105,24 @@ TableImpl::~TableImpl() {
     // free write handle
     //ReleaseDataWriter();
     // TODO: write queue release
+    //
+
+    // stop timer, flush request
+    queue_timer_mu_.Lock();
+    queue_timer_stop_ = true;
+    queue_timer_cv_.Wait();
+    queue_timer_mu_.Unlock();
+
+    std::vector<WriteContext*> local_queue;
+    WriteContext* context = NULL;
+    GetAllRequest(&context, &local_queue);
+    // Batch write
+    if (context) {
+        InternalBatchWrite(context, local_queue);
+        delete context;
+    }
+
+    return;
 }
 
 /////////  batch write /////////////
@@ -158,6 +186,67 @@ int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
 }
 
 ///////////  High concurrency write interface ////////////////
+// cache req optimise for write file system with high latency in ASYNC write tera mode
+bool TableImpl::SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue) {
+    queue_mutex_.Lock();
+    // only async write can use batch
+    if (FLAGS_use_tera_async_write && (batch_queue_.size() < (uint32_t)FLAGS_write_batch_queue_size)) {
+        batch_queue_.push_back(context);
+        queue_mutex_.Unlock();
+        return true;
+    }
+    // copy to local queue
+    std::vector<WriteContext*>::iterator wc_it = batch_queue_.begin();
+    for (; wc_it != batch_queue_.end(); ++wc_it) {
+        local_queue->push_back(*wc_it);
+    }
+    batch_queue_.clear();
+    queue_mutex_.Unlock();
+    return false;
+}
+
+void TableImpl::GetAllRequest(WriteContext** context_ptr, std::vector<WriteContext*>* local_queue) {
+    *context_ptr = NULL;
+    local_queue->clear();
+    queue_mutex_.Lock();
+    std::vector<WriteContext*>::iterator it = batch_queue_.begin();
+    for (; it != batch_queue_.end(); ++it) {
+        if (*context_ptr == NULL) {
+            *context_ptr = *it;
+        } else {
+            local_queue->push_back(*it);
+        }
+    }
+    batch_queue_.clear();
+    queue_mutex_.Unlock();
+    return;
+}
+
+void TableImpl::QueueTimerFunc() {
+    // Get request from queue
+    std::vector<WriteContext*> local_queue;
+    WriteContext* context = NULL;
+    GetAllRequest(&context, &local_queue);
+    // Batch write
+    if (context) {
+        InternalBatchWrite(context, local_queue);
+        delete context;
+    }
+
+    // timer controller
+    queue_timer_mu_.Lock();
+    if (queue_timer_stop_) {
+        queue_timer_mu_.Unlock();
+        queue_timer_cv_.Signal();
+        return;
+    }
+    queue_timer_mu_.Unlock();
+    // reset timer
+    queue_timer_.expires_at(queue_timer_.expires_at() + boost::posix_time::millisec(FLAGS_request_queue_flush_internal));
+    queue_timer_.async_wait(boost::bind(&TableImpl::QueueTimerFunc, this));
+    return;
+}
+
 struct DefaultUserCallbackParam {
     CondVar* cond_;
 };
@@ -169,50 +258,26 @@ void DefaultUserCallback(Table* table, StoreRequest* request,
     param->cond_->Signal();
 }
 
-// Concurrence Put interface:
-//      1. wait and lock
-//      2. merge request while wait
-//      3. unlock, write batch
-//      4. for each raw write: PutIndex()
-//      5. lock, resume other write
-int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
-                   StoreCallback callback, void* callback_param) {
-    // try to construct Default callback
-    Mutex mu;
-    CondVar cond(&mu);
-    DefaultUserCallbackParam param;
-    param.cond_ = &cond;
-    if (callback == NULL && !FLAGS_use_tera_async_write) {
-        callback = DefaultUserCallback;
-        callback_param = &param;
-    }
-
-    // construct WriteContext
-    WriteContext context(&write_mutex_);
-    context.req_ = req;
-    context.resp_ = resp;
-    context.callback_ = callback;
-    context.callback_param_ = callback_param;
-    context.sync_ = true;
-    context.done_ = false;
-
-    // select write handle
+// timer context
+int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue) {
+    // Get write handle
     WriteHandle* write_handle = GetWriteHandle();
 
-    // wait and lock
-    LOG(INFO) << ">>>>> begin put, ctx " << (uint64_t)(&context);
+    LOG(INFO) << ">>>>> begin put, ctx " << (uint64_t)(context);
     write_mutex_.Lock();
-    write_handle->write_queue_.push_back(&context);
-    while (!context.done_ && (&context != write_handle->write_queue_.front())) {
-        LOG(INFO) << "===== waitlock put, ctx " << (uint64_t)(&context);
-        context.cv_.Wait();
+    write_handle->write_queue_.push_back(context);
+    std::vector<WriteContext*>::iterator wc_it = ctx_queue.begin();
+    for (; wc_it != ctx_queue.end(); ++wc_it) {
+        write_handle->write_queue_.push_back(*wc_it);
     }
-    if (context.done_) {
+    while (!context->done_ && (context != write_handle->write_queue_.front())) {
+        LOG(INFO) << "===== waitlock put, ctx " << (uint64_t)(context);
+        context->is_wait_ = true;
+        context->cv_.Wait();
+    }
+    if (context->done_) {
         write_mutex_.Unlock();
-        // write finish, if sync write, just wait callback
-        if (callback == DefaultUserCallback) {
-            param.cond_->Wait();
-        }
+        //delete context;
         return 0;
     }
 
@@ -225,7 +290,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
 
     // unlock do io
     write_mutex_.Unlock();
-    LOG(INFO) << ">>>>> lock put, ctx " << (uint64_t)(&context);
+    LOG(INFO) << ">>>>> lock put, ctx " << (uint64_t)(context);
 
     // batch write file system
     FileLocation location;
@@ -251,23 +316,163 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     while (true) {
         WriteContext* ready = write_handle->write_queue_.front();
         write_handle->write_queue_.pop_front();
-        if (ready != &context) {
+        if (ready != context) {
             ready->done_ = true;
-            ready->cv_.Signal();
+            if (ready->is_wait_) {
+                // wait up suspend thread, so that it can do something cleanup
+                ready->cv_.Signal();
+            } else {
+                // this write context has no context, help it free memory
+                delete ready;
+            }
         }
-        if (ready == last_writer) break;
+        // cannot access ready any more
+        if (ready == last_writer) {
+            break;
+        }
     }
     if (!write_handle->write_queue_.empty()) {
         write_handle->write_queue_.front()->cv_.Signal();
     }
 
     write_mutex_.Unlock();
-    LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(&context);
+    LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(context);
+    //delete context;
+    return 0;
+}
+
+// Concurrence Put interface:
+//      1. wait and lock
+//      2. merge request while wait
+//      3. unlock, write batch
+//      4. for each raw write: PutIndex()
+//      5. lock, resume other write
+int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
+                   StoreCallback callback, void* callback_param) {
+    // try to construct Default callback
+    Mutex mu;
+    CondVar cond(&mu);
+    DefaultUserCallbackParam param;
+    param.cond_ = &cond;
+    if (callback == NULL && !FLAGS_use_tera_async_write) {
+        callback = DefaultUserCallback;
+        callback_param = &param;
+    }
+
+    // construct WriteContext
+    WriteContext* context = new WriteContext(&write_mutex_);
+    context->req_ = req;
+    context->resp_ = resp;
+    context->callback_ = callback;
+    context->callback_param_ = callback_param;
+    context->sync_ = true;
+    context->is_wait_ = false;
+    context->done_ = false;
+
+    // internal batch help enhance single thread
+    std::vector<WriteContext*> local_queue;
+    if (SubmitRequest(context, &local_queue)) {
+        return 0;
+    }
+
+    InternalBatchWrite(context, local_queue);
     // write finish, if sync write, just wait callback
     if (callback == DefaultUserCallback) {
         param.cond_->Wait();
     }
+    delete context;
     return 0;
+
+#if 0
+    // select write handle
+    WriteHandle* write_handle = GetWriteHandle();
+
+    // wait and lock
+    LOG(INFO) << ">>>>> begin put, ctx " << (uint64_t)(context);
+    write_mutex_.Lock();
+    write_handle->write_queue_.push_back(context);
+    std::vector<WriteContext*> wc_it = local_queue.begin();
+    for (; wc_it != local_queue.end(); wc_it) {
+        write_handle->write_queue_.push_back(*wc_it);
+    }
+    while (!context->done_ && (context != write_handle->write_queue_.front())) {
+        LOG(INFO) << "===== waitlock put, ctx " << (uint64_t)(context);
+        context->is_wait_ = true;
+        context->cv_.Wait();
+    }
+    if (context->done_) {
+        write_mutex_.Unlock();
+        // write finish, if sync write, just wait callback
+        if (callback == DefaultUserCallback) {
+            param.cond_->Wait();
+        }
+        delete context;
+        return 0;
+    }
+
+    // merge WriteContext
+    WriteBatch wb;
+    std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
+    for (; iter != write_handle->write_queue_.end(); ++iter) {
+        wb.Append(*iter);
+    }
+
+    // unlock do io
+    write_mutex_.Unlock();
+    LOG(INFO) << ">>>>> lock put, ctx " << (uint64_t)(context);
+
+    // batch write file system
+    FileLocation location;
+    DataWriter* writer = GetDataWriter(write_handle);
+    writer->AddRecord(wb.rep_, &location);
+
+    // write index table
+    std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
+    for (; it != wb.context_list_.end(); ++it) {
+        WriteContext* ctx = *it;
+        FileLocation data_location = location;
+        data_location.size_ = ctx->req_->data.size();
+        data_location.offset_ += ctx->offset_;
+        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
+                << ", pri key " << ctx->req_->primary_key;
+        WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
+    }
+
+    // lock, resched other WriteContext
+    VLOG(30) << "<<<<< unlock put";
+    write_mutex_.Lock();
+    WriteContext* last_writer = wb.context_list_.back();
+    while (true) {
+        WriteContext* ready = write_handle->write_queue_.front();
+        write_handle->write_queue_.pop_front();
+        if (ready != context) {
+            ready->done_ = true;
+            if (ready->is_wait_) {
+                // wait up suspend thread, so that it can do something cleanup
+                ready->cv_.Signal();
+            } else {
+                // this write context has no context, help it free memory
+                delete ready;
+            }
+        }
+        // cannot access ready any more
+        if (ready == last_writer) {
+            break;
+        }
+    }
+    if (!write_handle->write_queue_.empty()) {
+        write_handle->write_queue_.front()->cv_.Signal();
+    }
+
+    write_mutex_.Unlock();
+    LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(context);
+    // write finish, if sync write, just wait callback
+    if (callback == DefaultUserCallback) {
+        param.cond_->Wait();
+    }
+    delete context;
+    return 0;
+#endif
 }
 
 void PutCallback(tera::RowMutation* row) {
