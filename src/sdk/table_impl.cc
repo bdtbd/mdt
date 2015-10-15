@@ -57,14 +57,12 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     tera_(tera_adapter),
     fs_(fs_adapter),
     queue_timer_stop_(false),
-    queue_timer_cv_(&queue_timer_mu_),
-    queue_timer_(queue_io_, boost::posix_time::millisec(FLAGS_request_queue_flush_internal)) {
+    queue_timer_cv_(&queue_timer_mu_) {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
 
     // create timer
-    queue_timer_.async_wait(boost::bind(&TableImpl::QueueTimerFunc, this));
-    queue_io_.run();
+    pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 
     // init write handle list
     nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
@@ -222,28 +220,33 @@ void TableImpl::GetAllRequest(WriteContext** context_ptr, std::vector<WriteConte
     return;
 }
 
-void TableImpl::QueueTimerFunc() {
-    // Get request from queue
-    std::vector<WriteContext*> local_queue;
-    WriteContext* context = NULL;
-    GetAllRequest(&context, &local_queue);
-    // Batch write
-    if (context) {
-        InternalBatchWrite(context, local_queue);
-        delete context;
-    }
+void* TableImpl::TimerThreadWrapper(void* arg) {
+    reinterpret_cast<TableImpl*>(arg)->QueueTimerFunc();
+    return NULL;
+}
 
-    // timer controller
-    queue_timer_mu_.Lock();
-    if (queue_timer_stop_) {
+void TableImpl::QueueTimerFunc() {
+    while (1) {
+        // Get request from queue
+        std::vector<WriteContext*> local_queue;
+        WriteContext* context = NULL;
+        GetAllRequest(&context, &local_queue);
+        // Batch write
+        if (context) {
+            InternalBatchWrite(context, local_queue);
+            delete context;
+        }
+
+        // timer controller
+        queue_timer_mu_.Lock();
+        if (queue_timer_stop_) {
+            queue_timer_mu_.Unlock();
+            queue_timer_cv_.Signal();
+            return;
+        }
         queue_timer_mu_.Unlock();
-        queue_timer_cv_.Signal();
-        return;
+        usleep(FLAGS_request_queue_flush_internal);
     }
-    queue_timer_mu_.Unlock();
-    // reset timer
-    queue_timer_.expires_at(queue_timer_.expires_at() + boost::posix_time::millisec(FLAGS_request_queue_flush_internal));
-    queue_timer_.async_wait(boost::bind(&TableImpl::QueueTimerFunc, this));
     return;
 }
 

@@ -151,6 +151,7 @@ public:
 private:
     // write op
     int InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
+    static void* TimerThreadWrapper(void* arg);
     void QueueTimerFunc();
     void GetAllRequest(WriteContext** context_ptr, std::vector<WriteContext*>* local_queue);
     bool SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue);
@@ -212,10 +213,9 @@ private:
     mutable Mutex queue_mutex_;
     // queue timer
     bool queue_timer_stop_;
+    pthread_t timer_tid_;
     mutable Mutex queue_timer_mu_; // mutex must declare before cv
     CondVar queue_timer_cv_;
-    boost::asio::io_service queue_io_;
-    boost::asio::deadline_timer queue_timer_;
 };
 
 struct PutContext {
