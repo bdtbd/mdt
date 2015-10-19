@@ -10,6 +10,7 @@ class Table {
 public:
     Table() {}
     virtual ~Table() {}
+    virtual int BatchWrite(BatchWriteContext* ctx) = 0;
     virtual int Put(const StoreRequest* request, StoreResponse* response,
                     StoreCallback callback = NULL, void* callback_param = NULL) = 0;
     virtual Status Get(const SearchRequest* request, SearchResponse* response,

@@ -124,62 +124,103 @@ TableImpl::~TableImpl() {
 }
 
 /////////  batch write /////////////
-struct InternalBatchPutCallbackParam {
-    BatchStoreRequest* req_;
-    StoreResponse* resp_;
-    BatchStoreCallback user_callback_;
-    void* user_param_;
-    Counter counter_; // atomic counter
+struct SyncBatchWriteCallbackParam {
+    CondVar* cond_;
+    BatchWriteContext* ctx_;
+    Counter counter_; // last one wakeup wait thread
 };
 
-void BatchStoreRequestCallback(Table* table, StoreRequest* request,
-                               StoreResponse* response,
-                               void* callback_param) {
-    TableImpl* table_ptr;
-    table_ptr = (TableImpl*)table;
-    delete request;
-    InternalBatchPutCallbackParam* user_callback_param = (InternalBatchPutCallbackParam*)callback_param;
-    if (user_callback_param->counter_.Dec() == 0) {
-        delete response;
-        user_callback_param->user_callback_(table_ptr,
-                                            user_callback_param->req_,
-                                            user_callback_param->resp_,
-                                            user_callback_param->user_param_);
-        delete user_callback_param;
+void SyncBatchWriteCallback(Table* table, StoreRequest* request,
+                       StoreResponse* response,
+                       void* callback_param) {
+    SyncBatchWriteCallbackParam* param = (SyncBatchWriteCallbackParam*)callback_param;
+    if (response->error != 0) {
+        param->ctx_->error = response->error;
+    }
+    if (param->counter_.Dec() == 0) {
+        param->cond_->Signal();
     }
 }
 
-int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
-                BatchStoreCallback callback, void* callback_param) {
-    // construct vector<StoreRequest>
-    std::vector<StoreRequest*> req_vec;
-    std::vector<std::string>::const_iterator it = request->data_list.begin();
-    for (; it != request->data_list.end(); ++it) {
-        StoreRequest* req = new StoreRequest();
-        req->primary_key = request->primary_key;
-        req->timestamp = request->timestamp;
-        req->index_list = request->index_list;
-        req->data = *it;
-        req_vec.push_back(req);
+struct AsyncWriteCallbackParam {
+    BatchWriteContext* ctx_;
+    Counter counter_; // atomic counter
+};
+
+void AsyncWriteCallback(Table* table, StoreRequest* request,
+                        StoreResponse* response,
+                        void* callback_param) {
+    AsyncWriteCallbackParam* param = (AsyncWriteCallbackParam*)callback_param;
+    if (response->error != 0) {
+        param->ctx_->error = response->error;
+    }
+    if (param->counter_.Dec() == 0) {
+        // last one, do something
+        param->ctx_->callback(table, param->ctx_);
+        delete param;
+    }
+}
+
+int TableImpl::BatchWrite(BatchWriteContext* ctx) {
+    if (ctx == NULL || ctx->nr_batch <= 0) {
+        return 0;
+    }
+    ctx->error = 0;
+
+    // if sync write, construct default callback
+    Mutex mu;
+    CondVar cond(&mu);
+    SyncBatchWriteCallbackParam param;
+    param.cond_ = &cond;
+
+    StoreCallback internal_callback = NULL;
+    void* internal_param = NULL;
+    if (ctx->callback == NULL) {
+        // sync batchwrite
+        internal_callback = SyncBatchWriteCallback;
+        param.ctx_ = ctx;
+        param.counter_.Set(ctx->nr_batch);
+        internal_param = &param;
+    } else {
+        // async batchwrite
+        internal_callback = AsyncWriteCallback;
+        AsyncWriteCallbackParam* async_param = new AsyncWriteCallbackParam;
+        async_param->ctx_ = ctx;
+        async_param->counter_.Set(ctx->nr_batch);
+        internal_param = async_param;
     }
 
-    StoreResponse* resp = new StoreResponse();
-    InternalBatchPutCallbackParam* user_callback_param = new InternalBatchPutCallbackParam();
-    user_callback_param->req_ = (BatchStoreRequest*)request;
-    user_callback_param->resp_ = response;
-    user_callback_param->user_callback_ = callback;
-    user_callback_param->user_param_ = callback_param;
-    user_callback_param->counter_.Inc();
+    // first request need batch control
+    WriteContext* context = new WriteContext(&write_mutex_);
+    context->req_ = &(ctx->req[0]);
+    context->resp_ = &(ctx->resp[0]);
+    context->callback_ = internal_callback;
+    context->callback_param_ = internal_param;
+    context->sync_ = true;
+    context->is_wait_ = false;
+    context->done_ = false;
 
-    std::vector<StoreRequest*>::iterator iter = req_vec.begin();
-    for (; iter != req_vec.end(); ++iter) {
-        user_callback_param->counter_.Inc();
-        Put(*iter, resp, BatchStoreRequestCallback, user_callback_param);
+    std::vector<WriteContext*> local_queue;
+    for (int i = 1; i < ctx->nr_batch; i++) {
+        WriteContext* write_ctx = new WriteContext(&write_mutex_);
+        write_ctx->req_ = &(ctx->req[i]);
+        write_ctx->resp_ = &(ctx->resp[i]);
+        write_ctx->callback_ = internal_callback;
+        write_ctx->callback_param_ = internal_param;
+        write_ctx->sync_ = true;
+        write_ctx->is_wait_ = false;
+        write_ctx->done_ = false;
+        local_queue.push_back(write_ctx);
     }
 
-    StoreRequest* null_req = new StoreRequest();
-    null_req->primary_key = "<MagicKey>";
-    BatchStoreRequestCallback(this, null_req, resp, user_callback_param);
+    // exec batch write
+    InternalBatchWrite(context, local_queue);
+
+    // sync wait
+    if (context->callback_ == SyncBatchWriteCallback) {
+        param.cond_->Wait();
+    }
+    delete context;
     return 0;
 }
 
@@ -248,17 +289,6 @@ void TableImpl::QueueTimerFunc() {
         usleep(FLAGS_request_queue_flush_internal);
     }
     return;
-}
-
-struct DefaultUserCallbackParam {
-    CondVar* cond_;
-};
-
-void DefaultUserCallback(Table* table, StoreRequest* request,
-                         StoreResponse* response,
-                         void* callback_param) {
-    DefaultUserCallbackParam* param = (DefaultUserCallbackParam*)callback_param;
-    param->cond_->Signal();
 }
 
 // timer context
@@ -344,6 +374,16 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     return 0;
 }
 
+struct SyncWriteCallbackParam {
+    CondVar* cond_;
+};
+
+void SyncWriteCallback(Table* table, StoreRequest* request,
+                       StoreResponse* response,
+                       void* callback_param) {
+    SyncWriteCallbackParam* param = (SyncWriteCallbackParam*)callback_param;
+    param->cond_->Signal();
+}
 // Concurrence Put interface:
 //      1. wait and lock
 //      2. merge request while wait
@@ -355,10 +395,10 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     // try to construct Default callback
     Mutex mu;
     CondVar cond(&mu);
-    DefaultUserCallbackParam param;
+    SyncWriteCallbackParam param;
     param.cond_ = &cond;
     if (callback == NULL && !FLAGS_use_tera_async_write) {
-        callback = DefaultUserCallback;
+        callback = SyncWriteCallback;
         callback_param = &param;
     }
 
@@ -380,7 +420,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
 
     InternalBatchWrite(context, local_queue);
     // write finish, if sync write, just wait callback
-    if (callback == DefaultUserCallback) {
+    if (callback == SyncWriteCallback) {
         param.cond_->Wait();
     }
     delete context;

@@ -60,6 +60,25 @@ typedef struct mdt_store_response_t {
     int error;
 } mdt_store_response_t;
 
+// batch write
+typedef struct mdt_batch_write_context_t {
+    mdt_store_request_t* batch_req;
+    mdt_store_response_t* resp; // useless
+    uint64_t nr_batch;
+    int error;
+} mdt_batch_write_context_t;
+
+// batch write callback
+typedef void (*mdt_batch_write_callback)(mdt_table_t *table,
+                                         mdt_batch_write_context_t* ctx,
+                                         void* callback_param);
+
+// batch write interface
+extern void mdt_batch_write(mdt_table_t* table,
+                            mdt_batch_write_context_t* ctx,
+                            mdt_batch_write_callback callback,
+                            void* callback_param);
+
 // 异步写入回调
 typedef void (*mdt_store_callback)(mdt_table_t* table,
                                    const mdt_store_request_t* request,
