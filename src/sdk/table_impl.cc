@@ -124,40 +124,26 @@ TableImpl::~TableImpl() {
 }
 
 /////////  batch write /////////////
-struct SyncBatchWriteCallbackParam {
+struct DefaultBatchWriteCallbackParam {
     CondVar* cond_;
     BatchWriteContext* ctx_;
     Counter counter_; // last one wakeup wait thread
 };
 
-void SyncBatchWriteCallback(Table* table, StoreRequest* request,
+void DefaultBatchWriteCallback(Table* table, StoreRequest* request,
                        StoreResponse* response,
                        void* callback_param) {
-    SyncBatchWriteCallbackParam* param = (SyncBatchWriteCallbackParam*)callback_param;
+    DefaultBatchWriteCallbackParam* param = (DefaultBatchWriteCallbackParam*)callback_param;
     if (response->error != 0) {
         param->ctx_->error = response->error;
     }
     if (param->counter_.Dec() == 0) {
-        param->cond_->Signal();
-    }
-}
-
-struct AsyncWriteCallbackParam {
-    BatchWriteContext* ctx_;
-    Counter counter_; // atomic counter
-};
-
-void AsyncWriteCallback(Table* table, StoreRequest* request,
-                        StoreResponse* response,
-                        void* callback_param) {
-    AsyncWriteCallbackParam* param = (AsyncWriteCallbackParam*)callback_param;
-    if (response->error != 0) {
-        param->ctx_->error = response->error;
-    }
-    if (param->counter_.Dec() == 0) {
-        // last one, do something
-        param->ctx_->callback(table, param->ctx_);
-        delete param;
+        if (param->ctx_->callback == NULL) {
+            param->cond_->Signal();
+        } else {
+            param->ctx_->callback(table, param->ctx_);
+            delete param;
+        }
     }
 }
 
@@ -170,21 +156,19 @@ int TableImpl::BatchWrite(BatchWriteContext* ctx) {
     // if sync write, construct default callback
     Mutex mu;
     CondVar cond(&mu);
-    SyncBatchWriteCallbackParam param;
+    DefaultBatchWriteCallbackParam param;
     param.cond_ = &cond;
 
-    StoreCallback internal_callback = NULL;
+    StoreCallback internal_callback = DefaultBatchWriteCallback;
     void* internal_param = NULL;
     if (ctx->callback == NULL) {
         // sync batchwrite
-        internal_callback = SyncBatchWriteCallback;
         param.ctx_ = ctx;
         param.counter_.Set(ctx->nr_batch);
         internal_param = &param;
     } else {
         // async batchwrite
-        internal_callback = AsyncWriteCallback;
-        AsyncWriteCallbackParam* async_param = new AsyncWriteCallbackParam;
+        DefaultBatchWriteCallbackParam* async_param = new DefaultBatchWriteCallbackParam;
         async_param->ctx_ = ctx;
         async_param->counter_.Set(ctx->nr_batch);
         internal_param = async_param;
@@ -217,7 +201,7 @@ int TableImpl::BatchWrite(BatchWriteContext* ctx) {
     InternalBatchWrite(context, local_queue);
 
     // sync wait
-    if (context->callback_ == SyncBatchWriteCallback) {
+    if (context->callback_ == DefaultBatchWriteCallback) {
         param.cond_->Wait();
     }
     delete context;
