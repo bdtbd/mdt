@@ -286,7 +286,7 @@ static pthread_once_t once = PTHREAD_ONCE_INIT;
 static Env* nfs_env;
 
 static void InitNfsEnv() {
-    Nfs::Init(FLAGS_env_nfs_mountpoint, FLAGS_env_nfs_conf_path);
+    Nfs::Init(FLAGS_env_nfs_mountpoint, FLAGS_env_nfs_conf_path, FLAGS_env_nfs_so_path);
     Dfs* dfs = Nfs::GetInstance();
     nfs_env = new EnvNfsImpl(dfs);
 }

@@ -37,7 +37,9 @@ private:
 
 class Nfs : public Dfs {
 public:
-  static void Init(const std::string& mountpoint, const std::string& conf_path);
+  static void Init(const std::string& mountpoint,
+                   const std::string& conf_path,
+                   const std::string& lib_path);
   static int CalcNamespaceId(const char* c_path, int max_namespaces);
   static Nfs* GetInstance();
   ~Nfs();
@@ -53,7 +55,7 @@ public:
 private:
   Nfs();
   static Mutex mu_;
-  static void LoadSymbol();
+  static void LoadSymbol(const char* lib_path);
   static bool dl_init_;
 };
 

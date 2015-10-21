@@ -63,9 +63,14 @@ void* ResolveSymbol(void* dl, const char* sym) {
   return sym_ptr;
 }
 
-void Nfs::LoadSymbol() {
+void Nfs::LoadSymbol(const char* lib_path) {
   dlerror();
-  void* dl = dlopen("libnfs.so", RTLD_NOW | RTLD_GLOBAL);
+  void* dl = NULL;
+
+  lib_path != NULL && dlopen(lib_path, RTLD_NOW | RTLD_GLOBAL);
+  dl == NULL && (dl = dlopen("./libnfs.so", RTLD_NOW | RTLD_GLOBAL));
+  dl == NULL && (dl = dlopen("../lib/libnfs.so", RTLD_NOW | RTLD_GLOBAL));
+  dl == NULL && (dl = dlopen("libnfs.so", RTLD_NOW | RTLD_GLOBAL));
   if (dl == NULL) {
     fprintf(stderr, "dlopen libnfs.so error: %s\n", dlerror());
     abort();
@@ -192,11 +197,13 @@ int Nfs::CalcNamespaceId(const char* c_path, int max_namespaces) {
     return index;
 }
 
-void Nfs::Init(const std::string& mountpoint, const std::string& conf_path)
+void Nfs::Init(const std::string& mountpoint,
+               const std::string& conf_path,
+               const std::string& lib_path)
 {
   MutexLock l(&mu_);
   if (!dl_init_) {
-    LoadSymbol();
+    LoadSymbol(lib_path.c_str());
     dl_init_ = true;
   }
   (*nfsSetComlogLevel)(2);
