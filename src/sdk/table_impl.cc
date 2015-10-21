@@ -280,7 +280,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     // Get write handle
     WriteHandle* write_handle = GetWriteHandle();
 
-    LOG(INFO) << ">>>>> begin put, ctx " << (uint64_t)(context);
+    VLOG(20) << ">>>>> begin put, ctx " << (uint64_t)(context);
     write_mutex_.Lock();
     write_handle->write_queue_.push_back(context);
     std::vector<WriteContext*>::iterator wc_it = ctx_queue.begin();
@@ -288,7 +288,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
         write_handle->write_queue_.push_back(*wc_it);
     }
     while (!context->done_ && (context != write_handle->write_queue_.front())) {
-        LOG(INFO) << "===== waitlock put, ctx " << (uint64_t)(context);
+        VLOG(20) << "===== waitlock put, ctx " << (uint64_t)(context);
         context->is_wait_ = true;
         context->cv_.Wait();
     }
@@ -307,7 +307,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
 
     // unlock do io
     write_mutex_.Unlock();
-    LOG(INFO) << ">>>>> lock put, ctx " << (uint64_t)(context);
+    VLOG(20) << ">>>>> lock put, ctx " << (uint64_t)(context);
 
     // batch write file system
     FileLocation location;
@@ -321,7 +321,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
+        VLOG(20) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
                 << ", pri key " << ctx->req_->primary_key;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
@@ -353,7 +353,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     }
 
     write_mutex_.Unlock();
-    LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(context);
+    VLOG(20) << "<<<<< finish put, ctx " << (uint64_t)(context);
     //delete context;
     return 0;
 }
