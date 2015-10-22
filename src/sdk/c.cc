@@ -71,6 +71,103 @@ void mdt_close_table(mdt_table_t* table) {
     delete table;
 }
 
+/////////////////////////////////////////////////
+///////////  c to cpp's convertion  /////////////
+/////////////////////////////////////////////////
+void mdt_convert_write_request(mdt_store_request_t* c_req, mdt::StoreRequest* cpp_req) {
+    cpp_req->primary_key.assign(c_req->primary_key.data, c_req->primary_key.size);
+    cpp_req->timestamp = c_req->timestamp;
+    cpp_req->index_list.resize(c_req->index_list_len);
+    for (size_t i = 0; i < c_req->index_list_len; i++) {
+        mdt_index_t& c_index = c_req->index_list[i];
+        mdt::Index& cpp_index = cpp_req->index_list[i];
+        mdt_slice_to_string(c_index.index_name, &cpp_index.index_name);
+        mdt_slice_to_string(c_index.index_key, &cpp_index.index_key);
+    }
+    mdt_slice_to_string(c_req->data, &cpp_req->data);
+    return;
+}
+
+void mdt_convert_batchwrite_request(mdt_batch_write_context_t* c_ctx, mdt::BatchWriteContext* cpp_ctx) {
+    cpp_ctx->req = new mdt::StoreRequest[c_ctx->nr_batch];
+    cpp_ctx->resp = new mdt::StoreResponse[c_ctx->nr_batch];
+    for (uint64_t i = 0; i < c_ctx->nr_batch; i++) {
+        mdt_convert_write_request(&(c_ctx->batch_req[i]), &(cpp_ctx->req[i]));
+    }
+    cpp_ctx->nr_batch = c_ctx->nr_batch;
+    return;
+}
+
+void mdt_free_batchwrite_request(mdt::BatchWriteContext* cpp_ctx) {
+    delete cpp_ctx->req;
+    delete cpp_ctx->resp;
+}
+
+// batch write interface
+typedef struct mdt_c_batch_write_callback_param {
+    mdt_table_t* table;
+    mdt_batch_write_context_t* ctx;
+    mdt_batch_write_callback callback;
+    void *callback_param; // user param
+} mdt_c_batch_write_callback_param_t;
+
+void mdt_default_batch_write_callback(mdt::Table* table, mdt::BatchWriteContext* ctx) {
+    mdt_c_batch_write_callback_param_t* param = (mdt_c_batch_write_callback_param_t*)(ctx->callback_param);
+    param->ctx->error = ctx->error;
+    param->callback(param->table, param->ctx, param->callback_param);
+
+    // do some cleanup
+    mdt_free_batchwrite_request(ctx);
+    delete param;
+    delete ctx;
+}
+
+void mdt_convert_batchwrite_callback(mdt_table_t* table,
+                                     mdt_batch_write_context_t* c_ctx,
+                                     mdt_batch_write_callback c_callback,
+                                     void* c_callback_param,
+                                     mdt::BatchWriteContext* cpp_ctx) {
+    mdt::BatchWriteCallback cpp_callback = NULL;
+    mdt_c_batch_write_callback_param_t* cpp_callback_param = NULL;
+
+    if (c_callback) {
+        // has user callback
+        cpp_callback = mdt_default_batch_write_callback;
+
+        cpp_callback_param = new mdt_c_batch_write_callback_param_t;
+        cpp_callback_param->table = table;
+        cpp_callback_param->ctx = c_ctx;
+        cpp_callback_param->callback = c_callback;
+        cpp_callback_param->callback_param = c_callback_param;
+    }
+    cpp_ctx->callback = cpp_callback;
+    cpp_ctx->callback_param = cpp_callback_param;
+    return;
+}
+
+void mdt_batch_write(mdt_table_t* table,
+                     mdt_batch_write_context_t* ctx,
+                     mdt_batch_write_callback callback,
+                     void* callback_param) {
+    // transform c ctx into c++ ctx
+    mdt::BatchWriteContext* internal_ctx = new mdt::BatchWriteContext;
+    mdt_convert_batchwrite_request(ctx, internal_ctx);
+
+    // construct callback
+    mdt_convert_batchwrite_callback(table, ctx, callback, callback_param, internal_ctx);
+
+    mdt::BatchWrite(table->rep, internal_ctx);
+
+    // do some cleanup
+    if (callback == NULL) {
+        ctx->error = internal_ctx->error;
+        mdt_free_batchwrite_request(internal_ctx);
+        delete internal_ctx;
+    }
+    return;
+}
+
+// high performance put interface
 struct mdt_c_store_callback_param {
     mdt_table_t* table;
     const mdt_store_request_t* request;
@@ -79,7 +176,6 @@ struct mdt_c_store_callback_param {
     void* callback_param;
 };
 
-// 写入回调
 void mdt_c_store_callback(mdt::Table* internal_table,
                           mdt::StoreRequest* internal_request,
                           mdt::StoreResponse* internal_response,
