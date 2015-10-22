@@ -38,6 +38,10 @@ void Put(Table* table, const StoreRequest* request, StoreResponse* response,
     table->Put(request, response, callback, callback_param);
 }
 
+void BatchWrite(Table* table, BatchWriteContext* ctx) {
+    table->BatchWrite(ctx);
+}
+
 // 查询接口
 void Get(Table* table, const SearchRequest* request, SearchResponse* response,
          SearchCallback callback, void* callback_param) {

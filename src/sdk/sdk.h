@@ -44,24 +44,27 @@ struct StoreRequest {
     std::string data;
 };
 
-struct BatchStoreRequest {
-    std::string primary_key; // key after encode
-    int64_t timestamp;
-    std::vector<struct Index> index_list;
-    std::vector<std::string> data_list;
-};
-
 // 写入结果
 struct StoreResponse {
     int error;
 };
 
+struct BatchWriteContext;
+typedef void (*BatchWriteCallback)(Table* table, BatchWriteContext* ctx);
+
+struct BatchWriteContext {
+    StoreRequest* req;
+    StoreResponse* resp;
+    int nr_batch; // num of request batch
+    int error;
+    BatchWriteCallback callback; // one callback
+    void* callback_param; // one param
+};
+
+void BatchWrite(Table* table, BatchWriteContext* ctx);
+
 // 异步写入回调
 typedef void (*StoreCallback)(Table* table, StoreRequest* request,
-                              StoreResponse* response,
-                              void* callback_param);
-
-typedef void (*BatchStoreCallback)(Table* table, const BatchStoreRequest* request,
                               StoreResponse* response,
                               void* callback_param);
 

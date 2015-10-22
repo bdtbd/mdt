@@ -11,6 +11,7 @@
 #include "proto/kv.pb.h"
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
+#include "util/string_util.h"
 #include <tera.h>
 
 DECLARE_int64(concurrent_write_handle_num);
@@ -137,62 +138,87 @@ TableImpl::~TableImpl() {
 }
 
 /////////  batch write /////////////
-struct InternalBatchPutCallbackParam {
-    BatchStoreRequest* req_;
-    StoreResponse* resp_;
-    BatchStoreCallback user_callback_;
-    void* user_param_;
-    Counter counter_; // atomic counter
+struct DefaultBatchWriteCallbackParam {
+    CondVar* cond_;
+    BatchWriteContext* ctx_;
+    Counter counter_; // last one wakeup wait thread
 };
 
-void BatchStoreRequestCallback(Table* table, StoreRequest* request,
-                               StoreResponse* response,
-                               void* callback_param) {
-    TableImpl* table_ptr;
-    table_ptr = (TableImpl*)table;
-    delete request;
-    InternalBatchPutCallbackParam* user_callback_param = (InternalBatchPutCallbackParam*)callback_param;
-    if (user_callback_param->counter_.Dec() == 0) {
-        delete response;
-        user_callback_param->user_callback_(table_ptr,
-                                            user_callback_param->req_,
-                                            user_callback_param->resp_,
-                                            user_callback_param->user_param_);
-        delete user_callback_param;
+void DefaultBatchWriteCallback(Table* table, StoreRequest* request,
+                       StoreResponse* response,
+                       void* callback_param) {
+    DefaultBatchWriteCallbackParam* param = (DefaultBatchWriteCallbackParam*)callback_param;
+    if (response->error != 0) {
+        param->ctx_->error = response->error;
+    }
+    if (param->counter_.Dec() == 0) {
+        if (param->ctx_->callback == NULL) {
+            param->cond_->Signal();
+        } else {
+            param->ctx_->callback(table, param->ctx_);
+            delete param;
+        }
     }
 }
 
-int TableImpl::Put(const BatchStoreRequest* request, StoreResponse* response,
-                BatchStoreCallback callback, void* callback_param) {
-    // construct vector<StoreRequest>
-    std::vector<StoreRequest*> req_vec;
-    std::vector<std::string>::const_iterator it = request->data_list.begin();
-    for (; it != request->data_list.end(); ++it) {
-        StoreRequest* req = new StoreRequest();
-        req->primary_key = request->primary_key;
-        req->timestamp = request->timestamp;
-        req->index_list = request->index_list;
-        req->data = *it;
-        req_vec.push_back(req);
+int TableImpl::BatchWrite(BatchWriteContext* ctx) {
+    if (ctx == NULL || ctx->nr_batch <= 0) {
+        return 0;
+    }
+    ctx->error = 0;
+
+    // if sync write, construct default callback
+    Mutex mu;
+    CondVar cond(&mu);
+    DefaultBatchWriteCallbackParam param;
+    param.cond_ = &cond;
+
+    StoreCallback internal_callback = DefaultBatchWriteCallback;
+    void* internal_param = NULL;
+    if (ctx->callback == NULL) {
+        // sync batchwrite
+        param.ctx_ = ctx;
+        param.counter_.Set(ctx->nr_batch);
+        internal_param = &param;
+    } else {
+        // async batchwrite
+        DefaultBatchWriteCallbackParam* async_param = new DefaultBatchWriteCallbackParam;
+        async_param->ctx_ = ctx;
+        async_param->counter_.Set(ctx->nr_batch);
+        internal_param = async_param;
     }
 
-    StoreResponse* resp = new StoreResponse();
-    InternalBatchPutCallbackParam* user_callback_param = new InternalBatchPutCallbackParam();
-    user_callback_param->req_ = (BatchStoreRequest*)request;
-    user_callback_param->resp_ = response;
-    user_callback_param->user_callback_ = callback;
-    user_callback_param->user_param_ = callback_param;
-    user_callback_param->counter_.Inc();
+    // first request need batch control
+    WriteContext* context = new WriteContext(&write_mutex_);
+    context->req_ = &(ctx->req[0]);
+    context->resp_ = &(ctx->resp[0]);
+    context->callback_ = internal_callback;
+    context->callback_param_ = internal_param;
+    context->sync_ = true;
+    context->is_wait_ = false;
+    context->done_ = false;
 
-    std::vector<StoreRequest*>::iterator iter = req_vec.begin();
-    for (; iter != req_vec.end(); ++iter) {
-        user_callback_param->counter_.Inc();
-        Put(*iter, resp, BatchStoreRequestCallback, user_callback_param);
+    std::vector<WriteContext*> local_queue;
+    for (int i = 1; i < ctx->nr_batch; i++) {
+        WriteContext* write_ctx = new WriteContext(&write_mutex_);
+        write_ctx->req_ = &(ctx->req[i]);
+        write_ctx->resp_ = &(ctx->resp[i]);
+        write_ctx->callback_ = internal_callback;
+        write_ctx->callback_param_ = internal_param;
+        write_ctx->sync_ = true;
+        write_ctx->is_wait_ = false;
+        write_ctx->done_ = false;
+        local_queue.push_back(write_ctx);
     }
 
-    StoreRequest* null_req = new StoreRequest();
-    null_req->primary_key = "<MagicKey>";
-    BatchStoreRequestCallback(this, null_req, resp, user_callback_param);
+    // exec batch write
+    InternalBatchWrite(context, local_queue);
+
+    // sync wait
+    if (context->callback_ == DefaultBatchWriteCallback) {
+        param.cond_->Wait();
+    }
+    delete context;
     return 0;
 }
 
@@ -263,23 +289,12 @@ void TableImpl::QueueTimerFunc() {
     return;
 }
 
-struct DefaultUserCallbackParam {
-    CondVar* cond_;
-};
-
-void DefaultUserCallback(Table* table, StoreRequest* request,
-                         StoreResponse* response,
-                         void* callback_param) {
-    DefaultUserCallbackParam* param = (DefaultUserCallbackParam*)callback_param;
-    param->cond_->Signal();
-}
-
 // timer context
 int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue) {
     // Get write handle
     WriteHandle* write_handle = GetWriteHandle();
 
-    LOG(INFO) << ">>>>> begin put, ctx " << (uint64_t)(context);
+    VLOG(20) << ">>>>> begin put, ctx " << (uint64_t)(context);
     write_mutex_.Lock();
     write_handle->write_queue_.push_back(context);
     std::vector<WriteContext*>::iterator wc_it = ctx_queue.begin();
@@ -287,7 +302,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
         write_handle->write_queue_.push_back(*wc_it);
     }
     while (!context->done_ && (context != write_handle->write_queue_.front())) {
-        LOG(INFO) << "===== waitlock put, ctx " << (uint64_t)(context);
+        VLOG(20) << "===== waitlock put, ctx " << (uint64_t)(context);
         context->is_wait_ = true;
         context->cv_.Wait();
     }
@@ -306,7 +321,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
 
     // unlock do io
     write_mutex_.Unlock();
-    LOG(INFO) << ">>>>> lock put, ctx " << (uint64_t)(context);
+    VLOG(20) << ">>>>> lock put, ctx " << (uint64_t)(context);
 
     // batch write file system
     FileLocation location;
@@ -320,7 +335,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        LOG(INFO) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
+        VLOG(20) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
                 << ", pri key " << ctx->req_->primary_key;
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
@@ -352,11 +367,21 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     }
 
     write_mutex_.Unlock();
-    LOG(INFO) << "<<<<< finish put, ctx " << (uint64_t)(context);
+    VLOG(20) << "<<<<< finish put, ctx " << (uint64_t)(context);
     //delete context;
     return 0;
 }
 
+struct SyncWriteCallbackParam {
+    CondVar* cond_;
+};
+
+void SyncWriteCallback(Table* table, StoreRequest* request,
+                       StoreResponse* response,
+                       void* callback_param) {
+    SyncWriteCallbackParam* param = (SyncWriteCallbackParam*)callback_param;
+    param->cond_->Signal();
+}
 // Concurrence Put interface:
 //      1. wait and lock
 //      2. merge request while wait
@@ -368,10 +393,10 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     // try to construct Default callback
     Mutex mu;
     CondVar cond(&mu);
-    DefaultUserCallbackParam param;
+    SyncWriteCallbackParam param;
     param.cond_ = &cond;
     if (callback == NULL && !FLAGS_use_tera_async_write) {
-        callback = DefaultUserCallback;
+        callback = SyncWriteCallback;
         callback_param = &param;
     }
 
@@ -393,7 +418,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
 
     InternalBatchWrite(context, local_queue);
     // write finish, if sync write, just wait callback
-    if (callback == DefaultUserCallback) {
+    if (callback == SyncWriteCallback) {
         param.cond_->Wait();
     }
     delete context;
@@ -541,8 +566,11 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 
     // write timestamp table
     tera::Table* ts_table = GetTimestampTable();
-    std::string ts_key((char*)&req->timestamp, sizeof(req->timestamp));
-    VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp;
+    char buf[8];
+    EncodeBigEndian(buf, req->timestamp);
+    std::string ts_key(buf, sizeof(buf));
+    VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp
+             << ", ts string: " << DebugString(ts_key);
     tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
     ts_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
     ts_row->SetContext(context);
@@ -642,7 +670,6 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
-        LOG(INFO) << "select op, get primary key, index name " << index_name;
         tera::ScanDescriptor* scan_desc = NULL;
         switch ((int)index_cond_ex.comparator) {
         case kEqualTo:
@@ -689,6 +716,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
 
         if (skip_scan) continue;
 
+        VLOG(10) << "select op, scan index table: " << index_name;
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
         scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
         tera::ErrorCode err;
@@ -698,7 +726,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         while (!result->Done()) {
             // TODO: sync scan is enough
             const std::string& primary_key = result->Qualifier();
-            LOG(INFO) << "select op, primary key: " << primary_key;
+            VLOG(12) << "select op, primary key: " << primary_key;
             pri_vec[i].push_back(primary_key);
 
             result->Next();
@@ -711,10 +739,15 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         GetAllTimestampTables(&ts_table_list);
         pri_vec.resize(1);
 
+        char buf[8];
+        EncodeBigEndian(buf, req->start_timestamp);
+        std::string start_ts_key(buf, sizeof(buf));
+        EncodeBigEndian(buf, req->end_timestamp);
+        std::string end_ts_key(buf, sizeof(buf));
+        VLOG(10) << "scan timestamp table: " << DebugString(start_ts_key) << " ~ "
+                 << DebugString(end_ts_key);
         for (size_t i = 0; i < ts_table_list.size(); i++) {
             tera::Table* ts_table = ts_table_list[i];
-            std::string start_ts_key((char*)&req->start_timestamp, sizeof(req->start_timestamp));
-            std::string end_ts_key((char*)&req->end_timestamp, sizeof(req->end_timestamp));
             tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
             scan_desc->SetEnd(end_ts_key + '\0');
             scan_desc->AddColumnFamily(kIndexTableColumnFamily);
@@ -724,7 +757,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
             while (!result->Done()) {
                 // TODO: sync scan is enough
                 const std::string& primary_key = result->Qualifier();
-                LOG(INFO) << "select op, primary key: " << primary_key;
+                VLOG(12) << "select op, primary key: " << primary_key;
                 pri_vec[0].push_back(primary_key);
 
                 result->Next();

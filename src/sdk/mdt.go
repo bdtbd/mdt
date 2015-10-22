@@ -67,7 +67,101 @@ type Index struct {
     IndexKey string // key after encode
 }
 
-// 写入接口
+/////////////////////////////////
+///// batch write interface /////
+/////////////////////////////////
+type WriteContext struct {
+    PrimaryKey string
+    Timestamp int64
+    IndexList []Index
+    Data string
+}
+
+type BatchWriteContext struct {
+    Context []WriteContext
+    NumberBatch int
+    Error int
+}
+
+func ConvertWriteRequest(req *WriteContext, c_req *C.mdt_store_request_t) int {
+    // convert request
+    c_req.primary_key.data = C.CString(req.PrimaryKey)
+    c_req.primary_key.size = C.size_t(len(req.PrimaryKey))
+    c_req.timestamp = C.int64_t(req.Timestamp)
+    c_req.index_list = nil
+    c_req.index_list_len = C.size_t(len(req.IndexList))
+    // alloc memory
+    var idx Index
+    c_req.index_list = (*C.mdt_index_t)(C.malloc(C.size_t(unsafe.Sizeof(idx)) * c_req.index_list_len))
+    c_index_list := (*[1 << 30]C.mdt_index_t)(unsafe.Pointer(c_req.index_list))
+    for i := C.size_t(0); i < c_req.index_list_len; i++ {
+        c_index_list[i].index_name.data = C.CString(req.IndexList[i].IndexName)
+        c_index_list[i].index_name.size = C.size_t(len(req.IndexList[i].IndexName))
+        c_index_list[i].index_key.data = C.CString(req.IndexList[i].IndexKey)
+        c_index_list[i].index_key.size = C.size_t(len(req.IndexList[i].IndexKey))
+    }
+    c_req.data.data = C.CString(req.Data)
+    c_req.data.size = C.size_t(len(req.Data))
+
+    return 0
+}
+
+func FreeWriteRequest(c_req *C.mdt_store_request_t) int {
+    C.free(unsafe.Pointer(c_req.primary_key.data))
+    c_index_list := (*[1 << 30]C.mdt_index_t)(unsafe.Pointer(c_req.index_list))
+    for i := C.size_t(0); i < c_req.index_list_len; i++ {
+        C.free(unsafe.Pointer(c_index_list[i].index_name.data))
+        C.free(unsafe.Pointer(c_index_list[i].index_key.data))
+    }
+    C.free(unsafe.Pointer(c_req.index_list))
+    C.free(unsafe.Pointer(c_req.data.data))
+    return 0
+}
+
+func ConvertBatchWriteRequest(wb *BatchWriteContext, c_wb *C.mdt_batch_write_context_t) int {
+    var req C.mdt_store_request_t
+    c_wb.nr_batch = C.uint64_t(wb.NumberBatch)
+    c_wb.error = 0
+    c_wb.batch_req = (*C.mdt_store_request_t)(C.malloc(C.size_t(unsafe.Sizeof(req)) * C.size_t(c_wb.nr_batch)))
+    c_batch_req := (*[1 << 30]C.mdt_store_request_t)(unsafe.Pointer(c_wb.batch_req))
+    for i := C.size_t(0); i < C.size_t(c_wb.nr_batch); i++ {
+        ConvertWriteRequest(&(wb.Context[i]), &(c_batch_req[i]))
+    }
+
+    // alloc response memory
+    var resp C.mdt_store_response_t
+    c_wb.resp = (*C.mdt_store_response_t)(C.malloc(C.size_t(unsafe.Sizeof(resp)) * C.size_t(c_wb.nr_batch)))
+
+    return 0
+}
+
+func FreeBatchWriteRequest(c_wb *C.mdt_batch_write_context_t) int {
+    c_batch_req := (*[1 << 30]C.mdt_store_request_t)(unsafe.Pointer(c_wb.batch_req))
+    for i := C.size_t(0); i < C.size_t(c_wb.nr_batch); i++ {
+        FreeWriteRequest(&(c_batch_req[i]))
+    }
+    C.free(unsafe.Pointer(c_wb.batch_req))
+    C.free(unsafe.Pointer(c_wb.resp))
+    return 0
+}
+
+func BatchWrite(table *Table, wb *BatchWriteContext) int {
+    // prepare request
+    var c_wb C.mdt_batch_write_context_t
+    ConvertBatchWriteRequest(wb, &c_wb);
+
+    C.mdt_batch_write(table.rep, &c_wb, nil, nil)
+    error := int(c_wb.error)
+    wb.Error = error
+
+    // do some cleanup
+    FreeBatchWriteRequest(&c_wb)
+    return error
+}
+
+//////////////////////////
+//      写入接口        //
+//////////////////////////
 func Store(table *Table,
            primary_key string,  // key after encode
            timestamp int64,
@@ -106,9 +200,8 @@ func Store(table *Table,
         C.free(unsafe.Pointer(c_index_list[i].index_key.data))
     }
     C.free(unsafe.Pointer(c_request.index_list))
-	C.free(unsafe.Pointer(c_request.data.data))
-	
-	return error
+    C.free(unsafe.Pointer(c_request.data.data))
+    return error
 }
 
 // 比较器
