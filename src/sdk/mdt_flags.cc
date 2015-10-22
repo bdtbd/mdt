@@ -20,3 +20,4 @@ DEFINE_int64(data_size_per_sync, 0, "num of data per Sync()");
 DEFINE_bool(use_tera_async_write, true, "if true, use tera async write");
 DEFINE_int64(write_batch_queue_size, 10, "the num of write request can batch in single thread");
 DEFINE_int64(request_queue_flush_internal, 10, "the number of ms wait before flush request");
+DEFINE_int64(max_timestamp_table_num, 10,  "num of timestamp index table");

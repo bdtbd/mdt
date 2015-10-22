@@ -182,6 +182,7 @@ func SearchByIndexKey(table *Table,
     var c_response C.mdt_search_response_t
         
     // convert request
+    c_request.primary_key.size = 0
     c_request.index_condition_list_len = C.size_t(len(index_condition_list))
     c_request.index_condition_list = (*C.mdt_index_condition_t)(C.malloc(36 * c_request.index_condition_list_len))
     c_index_condition_list := (*[1<<30]C.mdt_index_condition_t)(unsafe.Pointer(c_request.index_condition_list))
