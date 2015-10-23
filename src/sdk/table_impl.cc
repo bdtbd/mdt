@@ -11,11 +11,13 @@
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
 #include <tera.h>
+#include "util/string_util.h"
 
 DECLARE_int64(concurrent_write_handle_num);
 DECLARE_int64(max_write_handle_seq);
 DECLARE_int64(data_size_per_sync);
 DECLARE_bool(use_tera_async_write);
+DECLARE_int64(max_timestamp_table_num);
 
 namespace mdt {
 
@@ -89,6 +91,18 @@ TableImpl::TableImpl(const TableDescription& table_desc,
         assert(index_table);
         tera_.tera_table_map_[index_table_name] = index_table;
     }
+      // open timestamp index table
+      nr_timestamp_table_ = (int)FLAGS_max_timestamp_table_num;
+      cur_timestamp_table_id_ = 0;
+      for (int i = 0; i < nr_timestamp_table_; i++) {
+          char ts_name[32];
+          sprintf(ts_name, "timestamp#%d", i);
+          std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + ts_name;
+          LOG(INFO) << "open index table: " << index_table_name;
+          tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
+          assert(index_table);
+          tera_.tera_table_map_[index_table_name] = index_table;
+      }
 }
 
 TableImpl::~TableImpl() {
@@ -290,7 +304,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     std::string null_value;
     null_value.clear();
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
-    context->counter_.Set(1 + req->index_list.size());
+    context->counter_.Set(2 + req->index_list.size());
 
     // update primary table
     VLOG(10) << "write pri : " << req->primary_key;
@@ -316,6 +330,18 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         index_row->SetCallBack(PutCallback);
         index_table->ApplyMutation(index_row);
     }
+    // write timestamp table
+    tera::Table* ts_table = GetTimestampTable();
+    char buf[8];
+    EncodeBigEndian(buf, req->timestamp);
+    std::string ts_key(buf, sizeof(buf));
+    VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp
+               << ", ts string: " << DebugString(ts_key);
+    tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
+    ts_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
+    ts_row->SetContext(context);
+    ts_row->SetCallBack(PutCallback);
+    ts_table->ApplyMutation(ts_row);
 
     return 0;
 }
@@ -775,5 +801,16 @@ int WriteBatch::Append(WriteContext* context) {
     context_list_.push_back(context);
     return 0;
 }
+
+tera::Table* TableImpl::GetTimestampTable() {
+       MutexLock mu(&write_mutex_);
+       cur_timestamp_table_id_ = (cur_timestamp_table_id_ + 1) % nr_timestamp_table_;
+       char ts_name[32];
+       sprintf(ts_name, "timestamp#%d", cur_timestamp_table_id_);
+       std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
+       VLOG(12) << "get index table: " << index_table_name;
+       tera::Table* table = tera_.tera_table_map_[index_table_name];
+       return table;
+   }
 
 } // namespace mdt

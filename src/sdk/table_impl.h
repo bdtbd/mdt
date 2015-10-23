@@ -170,6 +170,7 @@ private:
     tera::Table* GetPrimaryTable(const std::string& table_name);
     tera::Table* GetIndexTable(const std::string& index_name);
     std::string TimeToString();
+    tera::Table* GetTimestampTable();
 
 private:
     // NOTE： WriteHandle can not operator in race condition
@@ -196,6 +197,8 @@ private:
     int nr_write_handle_;
     int cur_write_handle_id_; // current selected write_handle
     int cur_write_handle_seq_; // num of request schedule to current write_handle
+    int nr_timestamp_table_; // const
+    int cur_timestamp_table_id_;
 };
 
 struct PutContext {
