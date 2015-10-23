@@ -184,6 +184,8 @@ private:
                                int32_t limit);
     tera::Table* GetPrimaryTable(const std::string& table_name);
     tera::Table* GetIndexTable(const std::string& index_name);
+    tera::Table* GetTimestampTable();
+    void GetAllTimestampTables(std::vector<tera::Table*>* table_list);
     std::string TimeToString();
 
 private:
@@ -211,6 +213,8 @@ private:
     int nr_write_handle_;
     int cur_write_handle_id_; // current selected write_handle
     int cur_write_handle_seq_; // num of request schedule to current write_handle
+    int nr_timestamp_table_; // const
+    int cur_timestamp_table_id_;
     // support batch write
     std::vector<WriteContext*> batch_queue_;
     mutable Mutex queue_mutex_;
