@@ -103,8 +103,8 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     nr_timestamp_table_ = (int)FLAGS_max_timestamp_table_num;
     cur_timestamp_table_id_ = 0;
     for (int i = 0; i < nr_timestamp_table_; i++) {
-        char ts_name[32];
-        sprintf(ts_name, "timestamp#%d", i);
+        char ts_name[32] = {0};
+        snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
         std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + ts_name;
         LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
@@ -555,6 +555,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
          it != req->index_list.end();
          ++it) {
         tera::Table* index_table = GetIndexTable(it->index_name);
+        CHECK_NOTNULL(index_table);
         std::string index_key = it->index_key;
         VLOG(12) << " write index table: " << it->index_name << ", index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
@@ -933,8 +934,8 @@ tera::Table* TableImpl::GetTimestampTable() {
     MutexLock mu(&write_mutex_);
     cur_timestamp_table_id_ = (cur_timestamp_table_id_ + 1) % nr_timestamp_table_;
 
-    char ts_name[32];
-    sprintf(ts_name, "timestamp#%d", cur_timestamp_table_id_);
+    char ts_name[32] = {0};
+    snprintf(ts_name, sizeof(ts_name), "timestamp#%d", cur_timestamp_table_id_);
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
     VLOG(12) << "get index table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
@@ -943,8 +944,8 @@ tera::Table* TableImpl::GetTimestampTable() {
 
 void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
     for (int i = 0; i < nr_timestamp_table_; i++) {
-        char ts_name[32];
-        sprintf(ts_name, "timestamp#%d", i);
+        char ts_name[32] = {0};
+        snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
         std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
         tera::Table* table = tera_.tera_table_map_[index_table_name];
         table_list->push_back(table);
