@@ -59,7 +59,7 @@ MULWRITE_TEST = mulcli_write_test
 SCAN_TEST = scan_test
 C_SAMPLE = c_sample
 .PHONY: all clean cleanall test
-all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $($C_SAMPLE) $(MDTTOOL) $(WRITE_TEST) $(MULWRITE_TEST) $(SCAN_TEST)
+all: $(PROGRAM) $(LIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL) $(WRITE_TEST) $(MULWRITE_TEST) $(SCAN_TEST)
 	mkdir -p build/include build/lib build/bin
 	#cp $(PROGRAM) build/bin
 	cp $(LIBRARY) build/lib

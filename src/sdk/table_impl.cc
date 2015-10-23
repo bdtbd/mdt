@@ -11,6 +11,7 @@
 #include "proto/kv.pb.h"
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
+#include "util/string_util.h"
 #include <tera.h>
 
 DECLARE_int64(concurrent_write_handle_num);
@@ -19,6 +20,7 @@ DECLARE_int64(data_size_per_sync);
 DECLARE_bool(use_tera_async_write);
 DECLARE_int64(write_batch_queue_size);
 DECLARE_int64(request_queue_flush_internal);
+DECLARE_int64(max_timestamp_table_num);
 
 namespace mdt {
 
@@ -92,6 +94,18 @@ TableImpl::TableImpl(const TableDescription& table_desc,
          ++it) {
         std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + it->index_name;
         //std::string index_table_name = GetIndexTable(it->index_name);
+        LOG(INFO) << "open index table: " << index_table_name;
+        tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
+        assert(index_table);
+        tera_.tera_table_map_[index_table_name] = index_table;
+    }
+    // open timestamp index table
+    nr_timestamp_table_ = (int)FLAGS_max_timestamp_table_num;
+    cur_timestamp_table_id_ = 0;
+    for (int i = 0; i < nr_timestamp_table_; i++) {
+        char ts_name[32];
+        sprintf(ts_name, "timestamp#%d", i);
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + ts_name;
         LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
         assert(index_table);
@@ -522,7 +536,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     std::string null_value;
     null_value.clear();
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
-    context->counter_.Set(1 + req->index_list.size());
+    context->counter_.Set(2 + req->index_list.size());
 
     // update primary table
     VLOG(10) << "write pri : " << req->primary_key;
@@ -535,6 +549,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     primary_row->SetCallBack(PutCallback);
     primary_table->ApplyMutation(primary_row);
 
+    // write index tables
     std::vector<Index>::const_iterator it;
     for (it = req->index_list.begin();
          it != req->index_list.end();
@@ -548,6 +563,19 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         index_row->SetCallBack(PutCallback);
         index_table->ApplyMutation(index_row);
     }
+
+    // write timestamp table
+    tera::Table* ts_table = GetTimestampTable();
+    char buf[8];
+    EncodeBigEndian(buf, req->timestamp);
+    std::string ts_key(buf, sizeof(buf));
+    VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp
+             << ", ts string: " << DebugString(ts_key);
+    tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
+    ts_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
+    ts_row->SetContext(context);
+    ts_row->SetCallBack(PutCallback);
+    ts_table->ApplyMutation(ts_row);
 
     return 0;
 }
@@ -637,17 +665,11 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
     size_t nr_index_table = index_condition_ex_list.size();
     std::vector<std::vector<std::string> > pri_vec(nr_index_table);
 
-    primary_key_list->clear();
-    if (nr_index_table <= 0) {
-        return Status::OK();
-    }
-
     for (size_t i = 0; i < nr_index_table; i++) {
         bool skip_scan = false;
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
-        LOG(INFO) << "select op, get primary key, index name " << index_name;
         tera::ScanDescriptor* scan_desc = NULL;
         switch ((int)index_cond_ex.comparator) {
         case kEqualTo:
@@ -694,6 +716,7 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
 
         if (skip_scan) continue;
 
+        VLOG(10) << "select op, scan index table: " << index_name;
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
         scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
         tera::ErrorCode err;
@@ -703,13 +726,45 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         while (!result->Done()) {
             // TODO: sync scan is enough
             const std::string& primary_key = result->Qualifier();
-            LOG(INFO) << "select op, primary key: " << primary_key;
+            VLOG(12) << "select op, primary key: " << primary_key;
             pri_vec[i].push_back(primary_key);
 
             result->Next();
         }
         delete result;
         delete scan_desc;
+    }
+    if (nr_index_table <= 0) {
+        std::vector<tera::Table*> ts_table_list;
+        GetAllTimestampTables(&ts_table_list);
+        pri_vec.resize(1);
+
+        char buf[8];
+        EncodeBigEndian(buf, req->start_timestamp);
+        std::string start_ts_key(buf, sizeof(buf));
+        EncodeBigEndian(buf, req->end_timestamp);
+        std::string end_ts_key(buf, sizeof(buf));
+        VLOG(10) << "scan timestamp table: " << DebugString(start_ts_key) << " ~ "
+                 << DebugString(end_ts_key);
+        for (size_t i = 0; i < ts_table_list.size(); i++) {
+            tera::Table* ts_table = ts_table_list[i];
+            tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
+            scan_desc->SetEnd(end_ts_key + '\0');
+            scan_desc->AddColumnFamily(kIndexTableColumnFamily);
+            tera::ErrorCode err;
+            tera::ResultStream* result = ts_table->Scan(*scan_desc, &err);
+
+            while (!result->Done()) {
+                // TODO: sync scan is enough
+                const std::string& primary_key = result->Qualifier();
+                VLOG(12) << "select op, primary key: " << primary_key;
+                pri_vec[0].push_back(primary_key);
+
+                result->Next();
+            }
+            delete result;
+            delete scan_desc;
+        }
     }
 
     // merge sort
@@ -730,10 +785,10 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
     std::string min_key;
     std::vector<std::vector<std::string>::iterator > iter_vec(nr_stream);
     for (uint32_t i = 0; i < nr_stream; i++) {
-	if (pri_vec[i].size() == 0) {
-	    LOG(INFO) << "no result in stream " << i;
-	    return Status::OK();
-	}
+        if (pri_vec[i].size() == 0) {
+            LOG(INFO) << "no result in stream " << i;
+            return Status::OK();
+        }
 
         // sort primary_key stream, erase unique primary key
         std::string unique_key;
@@ -754,9 +809,9 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
         std::vector<std::string>::iterator it = pri_vec[i].begin();
         iter_vec[i] = it;
         if ((min_key.size() == 0) ||
-	    (min_key.compare((pri_vec[i])[0]) > 0)) {
-	    min_key = (pri_vec[i])[0];
-	}
+            (min_key.compare((pri_vec[i])[0]) > 0)) {
+            min_key = (pri_vec[i])[0];
+        }
     }
 
     while (1) {
@@ -778,7 +833,7 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
 
         // collect result
         if (min_key.compare(max_key) == 0) {
-	    LOG(INFO) << "merge pri key " << max_key;
+            LOG(INFO) << "merge pri key " << max_key;
             primary_key_list->push_back(max_key);
             // get next min_key
             if ((iter_vec[0] == pri_vec[0].end()) ||
@@ -872,6 +927,28 @@ tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
     VLOG(12) << "get index table: " << index_table_name;
     tera::Table* table = tera_.tera_table_map_[index_table_name];
     return table;
+}
+
+tera::Table* TableImpl::GetTimestampTable() {
+    MutexLock mu(&write_mutex_);
+    cur_timestamp_table_id_ = (cur_timestamp_table_id_ + 1) % nr_timestamp_table_;
+
+    char ts_name[32];
+    sprintf(ts_name, "timestamp#%d", cur_timestamp_table_id_);
+    std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
+    VLOG(12) << "get index table: " << index_table_name;
+    tera::Table* table = tera_.tera_table_map_[index_table_name];
+    return table;
+}
+
+void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
+    for (int i = 0; i < nr_timestamp_table_; i++) {
+        char ts_name[32];
+        sprintf(ts_name, "timestamp#%d", i);
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
+        tera::Table* table = tera_.tera_table_map_[index_table_name];
+        table_list->push_back(table);
+    }
 }
 
 std::string TableImpl::TimeToString() {
