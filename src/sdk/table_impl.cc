@@ -536,7 +536,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     std::string null_value;
     null_value.clear();
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
-    context->counter_.Set(1 + req->index_list.size());
+    context->counter_.Set(2 + req->index_list.size());
 
     // update primary table
     VLOG(10) << "write pri : " << req->primary_key;
