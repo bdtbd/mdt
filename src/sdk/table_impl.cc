@@ -227,7 +227,9 @@ int TableImpl::BatchWrite(BatchWriteContext* ctx) {
 bool TableImpl::SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue) {
     queue_mutex_.Lock();
     // only async write can use batch
+    VLOG(25) << "Batch Queue size " << batch_queue_.size() << ", new context " << (uint64_t)context;
     if (FLAGS_use_tera_async_write && (batch_queue_.size() < (uint32_t)FLAGS_write_batch_queue_size)) {
+        // req and resp will be free, after Put return
         batch_queue_.push_back(context);
         queue_mutex_.Unlock();
         return true;
@@ -272,6 +274,8 @@ void TableImpl::QueueTimerFunc() {
         GetAllRequest(&context, &local_queue);
         // Batch write
         if (context) {
+            VLOG(25) << "queue timer get req " << (uint64_t)context << ", local queue size "
+                << local_queue.size();
             InternalBatchWrite(context, local_queue);
             delete context;
         }
@@ -279,8 +283,8 @@ void TableImpl::QueueTimerFunc() {
         // timer controller
         queue_timer_mu_.Lock();
         if (queue_timer_stop_) {
-            queue_timer_mu_.Unlock();
             queue_timer_cv_.Signal();
+            queue_timer_mu_.Unlock();
             return;
         }
         queue_timer_mu_.Unlock();
@@ -354,6 +358,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
                 ready->cv_.Signal();
             } else {
                 // this write context has no context, help it free memory
+                VLOG(25) << "no write context " << (uint64_t)ready;
                 delete ready;
             }
         }
@@ -396,14 +401,24 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     SyncWriteCallbackParam param;
     param.cond_ = &cond;
     if (callback == NULL && !FLAGS_use_tera_async_write) {
+        // write tera sync
         callback = SyncWriteCallback;
         callback_param = &param;
     }
 
     // construct WriteContext
     WriteContext* context = new WriteContext(&write_mutex_);
-    context->req_ = req;
-    context->resp_ = resp;
+    StoreRequest* internal_req = (StoreRequest*)req;
+    StoreResponse* internal_resp = resp;
+    if (callback == NULL || callback == SyncWriteCallback) {
+        // sync Put: sync or async write tera
+        internal_req = new StoreRequest;
+        internal_resp = new StoreResponse;
+        *internal_req = *req;
+        *internal_resp = *resp;
+    }
+    context->req_ = internal_req;
+    context->resp_ = internal_resp;
     context->callback_ = callback;
     context->callback_param_ = callback_param;
     context->sync_ = true;
@@ -415,11 +430,12 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     if (SubmitRequest(context, &local_queue)) {
         return 0;
     }
-
     InternalBatchWrite(context, local_queue);
     // write finish, if sync write, just wait callback
     if (callback == SyncWriteCallback) {
         param.cond_->Wait();
+        delete context->req_;
+        delete context->resp_;
     }
     delete context;
     return 0;
@@ -523,6 +539,12 @@ void PutCallback(tera::RowMutation* row) {
         if (context->callback_) {
             context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                 context->callback_param_);
+        } else {
+            // callback is null, free req and resp
+            VLOG(25) << "tera async write finish, delete req " << (uint64_t)context->req_
+                << ", resp " << (uint64_t)context->resp_;
+            delete context->req_;
+            delete context->resp_;
         }
         VLOG(12) << "put callback";
         delete context;
