@@ -352,26 +352,86 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
                       void* callback_param) {
     Status s;
-
-    std::vector<std::string> primary_key_list;
     if (!req->primary_key.empty()) {
-        primary_key_list.push_back(req->primary_key);
+        GetByPrimaryKey(req->primary_key, &resp->result_stream);
+    } else if (req->index_condition_list.size() > 0) {
+        GetByIndex(req->index_condition_list, req->start_timestamp, req->end_timestamp,
+                   req->limit, &resp->result_stream);
     } else {
-        VLOG(10) << "sanity index conditions";
-        std::vector<IndexConditionExtend> index_cond_ex_list;
-        s = ExtendIndexCondition(req->index_condition_list, &index_cond_ex_list);
-
-        if (s.ok()) {
-            VLOG(10) << "get primary keys";
-            s = GetPrimaryKeys(index_cond_ex_list, req, &primary_key_list);
-        }
+        GetByTimestamp(req->start_timestamp, req->end_timestamp,
+                       req->limit, &resp->result_stream);
     }
 
-    if (s.ok()) {
-        VLOG(10) << "get rows";
-        s = GetRows(primary_key_list, &resp->result_stream);
+    if (resp->result_stream.size() == 0) {
+        s = Status::NotFound("not found");
     }
     return s;
+}
+
+Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
+                                  std::vector<ResultStream>* result_list) {
+    VLOG(10) << "get by primary key: " << DebugString(primary_key);
+    ResultStream result;
+    Status s = GetSingleRow(primary_key, &result);
+    if (s.ok()) {
+        result_list->push_back(result);
+    }
+    return s;
+}
+
+Status TableImpl::GetByIndex(const std::vector<IndexCondition>& index_condition_list,
+                             int64_t start_timestamp, int64_t end_timestamp, int32_t limit,
+                             std::vector<ResultStream>* result_list) {
+    VLOG(10) << "extend index conditions";
+    std::vector<IndexConditionExtend> index_cond_ex_list;
+    Status s = ExtendIndexCondition(index_condition_list, &index_cond_ex_list);
+
+    if (s.ok()) {
+        VLOG(10) << "get by extend index conditions";
+        s = GetByExtendIndex(index_cond_ex_list, start_timestamp, end_timestamp,
+                             limit, result_list);
+    }
+
+    return s;
+}
+
+Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
+                                 int32_t limit, std::vector<ResultStream>* result_list) {
+    std::vector<tera::Table*> ts_table_list;
+    GetAllTimestampTables(&ts_table_list);
+
+    char buf[8];
+    EncodeBigEndian(buf, start_timestamp);
+    std::string start_ts_key(buf, sizeof(buf));
+    EncodeBigEndian(buf, end_timestamp);
+    std::string end_ts_key(buf, sizeof(buf));
+    VLOG(10) << "get by timestamp table: " << DebugString(start_ts_key) << " ~ "
+             << DebugString(end_ts_key);
+    for (size_t i = 0; (int32_t)result_list->size() < limit && i < ts_table_list.size(); i++) {
+        tera::Table* ts_table = ts_table_list[i];
+        tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
+        scan_desc->SetEnd(end_ts_key + '\0');
+        scan_desc->AddColumnFamily(kIndexTableColumnFamily);
+
+        VLOG(10) << "scan timestamp table: " << i;
+        tera::ErrorCode err;
+        tera::ResultStream* result = ts_table->Scan(*scan_desc, &err);
+
+        while ((int32_t)result_list->size() < limit && !result->Done()) {
+            const std::string& primary_key = result->Qualifier();
+            VLOG(12) << "select op, primary key: " << primary_key;
+            ResultStream row;
+            Status s = GetSingleRow(primary_key, &row);
+            if (s.ok()) {
+                result_list->push_back(row);
+            }
+            result->Next();
+        }
+        delete result;
+        delete scan_desc;
+    }
+
+    return Status::OK();
 }
 
 Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
@@ -428,10 +488,15 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
     return Status::OK();
 }
 
-Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                                 const SearchRequest* req,
-                                 std::vector<std::string>* primary_key_list) {
+Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& index_condition_ex_list,
+                                   int64_t start_timestamp, int64_t end_timestamp,
+                                   int32_t limit, std::vector<ResultStream>* result_list) {
     size_t nr_index_table = index_condition_ex_list.size();
+    CHECK_GT(nr_index_table, 0U);
+
+    std::vector<tera::Table*> index_table_vec(nr_index_table);
+    std::vector<tera::ScanDescriptor*> scan_desc_vec(nr_index_table);
+    std::vector<tera::ResultStream*> scan_stream_vec(nr_index_table);
     std::vector<std::vector<std::string> > pri_vec(nr_index_table);
 
     for (size_t i = 0; i < nr_index_table; i++) {
@@ -439,6 +504,8 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
+
+        VLOG(10) << "select op, create scan stream of index: " << index_name;
         tera::ScanDescriptor* scan_desc = NULL;
         switch ((int)index_cond_ex.comparator) {
         case kEqualTo:
@@ -485,66 +552,97 @@ Status TableImpl::GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_
 
         if (skip_scan) continue;
 
-        VLOG(10) << "select op, scan index table: " << index_name;
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-        scan_desc->SetTimeRange(req->end_timestamp, req->start_timestamp);
-        tera::ErrorCode err;
-        tera::ResultStream* result = index_table->Scan(*scan_desc, &err);
+        scan_desc->SetTimeRange(end_timestamp, start_timestamp);
 
-        pri_vec[i].clear();
-        while (!result->Done()) {
-            // TODO: sync scan is enough
-            const std::string& primary_key = result->Qualifier();
-            VLOG(12) << "select op, primary key: " << primary_key;
-            pri_vec[i].push_back(primary_key);
-
-            result->Next();
-        }
-        delete result;
-        delete scan_desc;
+        index_table_vec[i] = index_table;
+        scan_desc_vec[i] = scan_desc;
+        scan_stream_vec[i] = NULL;
     }
 
-    if (nr_index_table <= 0) {
-        std::vector<tera::Table*> ts_table_list;
-        GetAllTimestampTables(&ts_table_list);
-        pri_vec.resize(1);
 
-        char buf[8];
-        EncodeBigEndian(buf, req->start_timestamp);
-        std::string start_ts_key(buf, sizeof(buf));
-        EncodeBigEndian(buf, req->end_timestamp);
-        std::string end_ts_key(buf, sizeof(buf));
-        VLOG(10) << "scan timestamp table: " << DebugString(start_ts_key) << " ~ "
-                 << DebugString(end_ts_key);
-        for (size_t i = 0; i < ts_table_list.size(); i++) {
-            tera::Table* ts_table = ts_table_list[i];
-            tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
-            scan_desc->SetEnd(end_ts_key + '\0');
-            scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-            tera::ErrorCode err;
-            tera::ResultStream* result = ts_table->Scan(*scan_desc, &err);
-
-            while (!result->Done()) {
-                    // TODO: sync scan is enough
-                const std::string& primary_key = result->Qualifier();
-                    VLOG(12) << "select op, primary key: " << primary_key;
-                    pri_vec[0].push_back(primary_key);
-
-                result->Next();
-            }
-            delete result;
-            delete scan_desc;
-        }
+    while ((int32_t)result_list->size() < limit
+           && ScanMultiIndexTables(&index_table_vec[0], &scan_desc_vec[0], &scan_stream_vec[0],
+                                   &pri_vec[0], nr_index_table, limit)) {
+        // merge sort
+        std::vector<std::string> primary_key_list;
+        PrimaryKeyMergeSort(pri_vec, &primary_key_list);
+        VLOG(10) << "select op, primary key merge sort: " << primary_key_list.size();
+        GetRows(primary_key_list, limit - result_list->size(), result_list);
     }
-    // merge sort
-    PrimaryKeyMergeSort(pri_vec, primary_key_list, req->limit);
+
+    for (size_t i = 0; i < nr_index_table; i++) {
+        delete scan_desc_vec[i];
+        delete scan_stream_vec[i];
+    }
     return Status::OK();
+}
+
+bool TableImpl::ScanMultiIndexTables(tera::Table** index_table_list,
+                                     tera::ScanDescriptor** scan_desc_list,
+                                     tera::ResultStream** scan_stream_list,
+                                     std::vector<std::string>* primary_key_vec_list,
+                                     uint32_t size, int32_t limit) {
+    VLOG(10) << "ScanMultiIndexTables index: " << index_table_list[0]->GetName() << ", size " << size;
+    CHECK_GT(size, 0U);
+    if (size == 1) {
+        primary_key_vec_list[0].clear();
+    }
+
+    if (primary_key_vec_list[0].empty()) {
+        scan_stream_list[0] = ScanIndexTable(index_table_list[0], scan_desc_list[0], scan_stream_list[0],
+                                             limit, &primary_key_vec_list[0]);
+        if (primary_key_vec_list[0].size() == 0) {
+            return false;
+        }
+    }
+
+    while (size > 1 && !ScanMultiIndexTables(index_table_list + 1, scan_desc_list + 1,
+                                             scan_stream_list + 1, primary_key_vec_list + 1,
+                                             size - 1, limit)) {
+        CHECK_EQ(scan_stream_list[1], (void*)NULL);
+        CHECK_EQ(primary_key_vec_list[1].size(), 0U);
+
+        primary_key_vec_list[0].clear();
+        scan_stream_list[0] = ScanIndexTable(index_table_list[0], scan_desc_list[0], scan_stream_list[0],
+                                             limit, &primary_key_vec_list[0]);
+        if (primary_key_vec_list[0].size() <= 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+tera::ResultStream* TableImpl::ScanIndexTable(tera::Table* index_table,
+                                              tera::ScanDescriptor* scan_desc,
+                                              tera::ResultStream* result, int32_t limit,
+                                              std::vector<std::string>* primary_key_list) {
+    CHECK_EQ(primary_key_list->size(), 0U);
+    VLOG(10) << "begin scan index: " << index_table->GetName();
+    if (result == NULL) {
+        tera::ErrorCode err;
+        result = index_table->Scan(*scan_desc, &err);
+    }
+    CHECK_NOTNULL(result);
+    while (!result->Done() && (int32_t)primary_key_list->size() < limit) {
+        const std::string& primary_key = result->Qualifier();
+        primary_key_list->push_back(primary_key);
+        VLOG(12) << "select op, primary key: " << primary_key;
+        result->Next();
+    }
+    if (primary_key_list->size() == 0) {
+        delete result;
+        result = NULL;
+    }
+    VLOG(10) << "finish scan index: " << index_table->GetName() << ", get primary key num: "
+             << primary_key_list->size();
+    return result;
 }
 
 ///////   fast merge sort algorithm   ////////
 Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
-                                      std::vector<std::string>* primary_key_list,
-                                      int32_t limit) {
+                                      std::vector<std::string>* primary_key_list) {
     uint32_t nr_stream = pri_vec.size();
     if (nr_stream <= 0) {
         return Status::OK();
@@ -605,8 +703,7 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
             LOG(INFO) << "merge pri key " << max_key;
             primary_key_list->push_back(max_key);
             // get next min_key
-            if ((iter_vec[0] == pri_vec[0].end()) ||
-                ((int32_t)primary_key_list->size() >= limit)) {
+            if (iter_vec[0] == pri_vec[0].end()) {
                 return Status::OK();
             }
             min_key = *(iter_vec[0]);
@@ -619,43 +716,42 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
     return Status::OK();
 }
 
-Status TableImpl::GetRows(const std::vector<std::string>& primary_key_list,
-                          std::vector<ResultStream>* row_list) {
-    Status s;
-    for (uint32_t i = 0; i < primary_key_list.size(); i++) {
+int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
+                           std::vector<ResultStream>* row_list) {
+    int32_t got_count = 0;
+    for (uint32_t i = 0; got_count < limit && i < primary_key_list.size(); i++) {
         const std::string& primary_key = primary_key_list[i];
         ResultStream result;
-        s = GetSingleRow(primary_key, &result);
+        Status s = GetSingleRow(primary_key, &result);
         if (s.ok()) {
             VLOG(5) << "get primary data: " << primary_key;
             row_list->push_back(result);
+            got_count++;
         } else {
-            LOG(WARNING) << "fail to get primary data: " << primary_key;
+            LOG(WARNING) << "fail to get primary data: " << primary_key
+                << ", status: " << s.ToString();
         }
     }
-
-    if (primary_key_list.size() > 0 && row_list->size() == 0) {
-        return Status::NotFound("row list not found");
-    }
-    return Status::OK();
+    return got_count;
 }
 
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result) {
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     tera::RowReader* reader = primary_table->NewRowReader(primary_key);
-    LOG(INFO) << "get single row: primary_key " << primary_key << ", table name " << table_desc_.table_name;
+    VLOG(12) << "read primary table: " <<  table_desc_.table_name
+        << ", primary key: " << DebugString(primary_key);
     reader->AddColumnFamily(kPrimaryTableColumnFamily);
     primary_table->Get(reader);
     while (!reader->Done()) {
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
         location.ParseFromString(location_buffer);
-        LOG(INFO) << "read data from file " << location;
+        VLOG(12) << "begin to read data from " << location;
         std::string data;
         // TODO: async scan
         Status s = ReadDataFromFile(location, &data);
         if (s.ok()) {
-            VLOG(5) << "read data from " << location;
+            VLOG(12) << "finsh read data from " << location;
             result->result_data_list.push_back(data);
         } else {
             LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
@@ -681,6 +777,7 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
     if (s.ok()) {
         data->assign(result.data(), result.size());
     }
+    delete[] scratch;
     return s;
 }
 

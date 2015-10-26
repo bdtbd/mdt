@@ -144,15 +144,36 @@ public:
                          Table** table_ptr);
 
 private:
+    Status GetByPrimaryKey(const std::string& primary_key,
+                           std::vector<ResultStream>* result_list);
+
+    Status GetByIndex(const std::vector<IndexCondition>& index_condition_list,
+                      int64_t start_timestamp, int64_t end_timestamp, int32_t limit,
+                      std::vector<ResultStream>* result_list);
+
+    Status GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
+                          int32_t limit, std::vector<ResultStream>* result_list);
+
     Status ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
                                 std::vector<IndexConditionExtend>* index_condition_ex_list);
 
-    Status GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                          const SearchRequest* req,
-                          std::vector<std::string>* primary_key_list);
+    Status GetByExtendIndex(const std::vector<IndexConditionExtend>& index_condition_ex_list,
+                            int64_t start_timestamp, int64_t end_timestamp,
+                            int32_t limit, std::vector<ResultStream>* result_list);
 
-    Status GetRows(const std::vector<std::string>& primary_key_list,
-                   std::vector<ResultStream>* row_list);
+    bool ScanMultiIndexTables(tera::Table** index_table_list,
+                              tera::ScanDescriptor** scan_desc_list,
+                              tera::ResultStream** scan_stream_list,
+                              std::vector<std::string>* primary_key_vec_list,
+                              uint32_t size, int32_t limit);
+
+    tera::ResultStream* ScanIndexTable(tera::Table* index_table,
+                                       tera::ScanDescriptor* scan_desc,
+                                       tera::ResultStream* scan_stream, int32_t limit,
+                                       std::vector<std::string>* primary_key_list);
+
+    int32_t GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
+                    std::vector<ResultStream>* row_list);
 
     Status GetSingleRow(const std::string& primary_key, ResultStream* result);
 
@@ -165,8 +186,7 @@ private:
                         FileLocation& location);
 
     Status PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
-                               std::vector<std::string>* primary_key_list,
-                               int32_t limit);
+                               std::vector<std::string>* primary_key_list);
     tera::Table* GetPrimaryTable(const std::string& table_name);
     tera::Table* GetIndexTable(const std::string& index_name);
     tera::Table* GetTimestampTable();
