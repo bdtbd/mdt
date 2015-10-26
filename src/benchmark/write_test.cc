@@ -13,6 +13,11 @@
 #include "util/counter.h"
 #include "util/mutex.h"
 
+DEFINE_string(dbname, "z012", "production name");
+DEFINE_string(tablename, "kepler001", "table name");
+
+DECLARE_string(flagfile);
+
 struct WriteTask {
     mdt::Table* table_;
     uint64_t start_key_;
@@ -96,10 +101,13 @@ void dispatch_task(std::vector<WriteTask*>& tasks, mdt::Table* table, mdt::Mutex
 
 int main(int ac, char* av[]) {
     ::google::ParseCommandLineFlags(&ac, &av, true);
-    //std::string db_name = "mdt-test005";
-    //std::string table_name = "table-kepler001";
-    std::string db_name = "z012";
-    std::string table_name = "kepler001";
+    std::string db_name = FLAGS_dbname;
+    std::string table_name = FLAGS_tablename;
+
+    std::cout << "conf " << FLAGS_flagfile << std::endl;
+    if (access(FLAGS_flagfile.c_str(), F_OK)) {
+        std::cout << " ***** WRITE TEST: use default param *****\n";
+    }
 
     std::cout << "open db ..." << std::endl;
     mdt::Database* db;

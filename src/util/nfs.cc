@@ -67,10 +67,11 @@ void Nfs::LoadSymbol(const char* lib_path) {
   dlerror();
   void* dl = NULL;
 
-  lib_path != NULL && dlopen(lib_path, RTLD_NOW | RTLD_GLOBAL);
-  dl == NULL && (dl = dlopen("./libnfs.so", RTLD_NOW | RTLD_GLOBAL));
-  dl == NULL && (dl = dlopen("../lib/libnfs.so", RTLD_NOW | RTLD_GLOBAL));
-  dl == NULL && (dl = dlopen("libnfs.so", RTLD_NOW | RTLD_GLOBAL));
+  fprintf(stderr, "libnfs.so path %s\n", lib_path);
+  (lib_path != NULL) && (dl = dlopen(lib_path, RTLD_NOW | RTLD_GLOBAL));
+  (dl == NULL) && (dl = dlopen("./libnfs.so", RTLD_NOW | RTLD_GLOBAL));
+  (dl == NULL) && (dl = dlopen("../lib/libnfs.so", RTLD_NOW | RTLD_GLOBAL));
+  (dl == NULL) && (dl = dlopen("libnfs.so", RTLD_NOW | RTLD_GLOBAL));
   if (dl == NULL) {
     fprintf(stderr, "dlopen libnfs.so error: %s\n", dlerror());
     abort();

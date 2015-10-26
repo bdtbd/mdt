@@ -385,6 +385,8 @@ void SyncWriteCallback(Table* table, StoreRequest* request,
                        StoreResponse* response,
                        void* callback_param) {
     SyncWriteCallbackParam* param = (SyncWriteCallbackParam*)callback_param;
+    delete request;
+    delete response;
     param->cond_->Signal();
 }
 // Concurrence Put interface:
@@ -434,8 +436,6 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     // write finish, if sync write, just wait callback
     if (callback == SyncWriteCallback) {
         param.cond_->Wait();
-        delete context->req_;
-        delete context->resp_;
     }
     delete context;
     return 0;
