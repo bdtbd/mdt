@@ -63,7 +63,7 @@ DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
 
     tera_opt_.schema_table_ = tera_opt_.client_->OpenTable(schema_table_name, &error_code);
     LOG(INFO) << "open schema table, table name " << schema_table_name <<
-        ", error code " << tera::strerr(error_code);
+        ", addr " << tera_opt_.schema_table_ << ", error code " << tera::strerr(error_code);
     assert(tera_opt_.schema_table_);
 
     tera_adapter_.opt_ = tera_opt_;
@@ -133,8 +133,9 @@ Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr)
     tera::ErrorCode error_code;
     std::string schema_value;
     TableDescription table_desc;
+    LOG(INFO) << "table name " << table_name << ", schema_table " << (uint64_t)tera_adapter_.opt_.schema_table_;
     tera_adapter_.opt_.schema_table_->Get(table_name, "", "", &schema_value, &error_code);
-    LOG(INFO) << "OpenTable: get table schema, table name " << table_name 
+    LOG(INFO) << "OpenTable: get table schema, table name " << table_name
         << ", error code " << tera::strerr(error_code);
 
     // assemble TableDescription

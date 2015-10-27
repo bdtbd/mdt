@@ -13,6 +13,11 @@
 #include "util/counter.h"
 #include "util/mutex.h"
 
+DEFINE_string(dbname, "z012", "production name");
+DEFINE_string(tablename, "kepler001", "table name");
+
+DECLARE_string(flagfile);
+
 struct WriteTask {
     mdt::Table* table_;
     uint64_t start_key_;
@@ -50,7 +55,7 @@ void* write_task(void* arg) {
 	char* col_ptr = colbuf;
 	uint64_t col_id = i + task->start_key_;
 	col_ptr += snprintf(col_ptr, 11, "%011lu", col_id);
-	std::string col = colbuf;	
+	std::string col = colbuf;
 
         mdt::Index query, costtime, service;
         query.index_name = "Query";
@@ -60,7 +65,7 @@ void* write_task(void* arg) {
         costtime.index_name = "Costtime";
         costtime.index_key = "5ms";
         costtime.index_key += col;
-        
+
 	service.index_name = "Service";
         service.index_key = "bs module";
         service.index_key += col;
@@ -79,15 +84,15 @@ void* write_task(void* arg) {
     return NULL;
 }
 
-void dispatch_task(mdt::Table* table, mdt::Mutex* mu, mdt::CondVar* cond,
+void dispatch_task(std::vector<WriteTask*>& tasks, mdt::Table* table, mdt::Mutex* mu, mdt::CondVar* cond,
 		   mdt::Counter* counter, uint64_t num_task, uint64_t num_keys) {
     for (uint64_t i = 0; i < num_task; i++) {
 	pthread_t tid;
-	WriteTask* task = new WriteTask;
+	WriteTask* task = tasks[i];
 	task->table_ = table;
 	task->mu_ = mu;
 	task->cond_ = cond;
-	task->counter_ = counter;	
+	task->counter_ = counter;
 	task->start_key_ = num_keys * i;
 	task->num_keys_ = num_keys;
 	pthread_create(&tid, NULL, write_task, task);
@@ -96,11 +101,14 @@ void dispatch_task(mdt::Table* table, mdt::Mutex* mu, mdt::CondVar* cond,
 
 int main(int ac, char* av[]) {
     ::google::ParseCommandLineFlags(&ac, &av, true);
-    //std::string db_name = "mdt-test005";
-    //std::string table_name = "table-kepler001";
-    std::string db_name = "z012";
-    std::string table_name = "kepler001";
-    
+    std::string db_name = FLAGS_dbname;
+    std::string table_name = FLAGS_tablename;
+
+    std::cout << "conf " << FLAGS_flagfile << std::endl;
+    if (access(FLAGS_flagfile.c_str(), F_OK)) {
+        std::cout << " ***** WRITE TEST: use default param *****\n";
+    }
+
     std::cout << "open db ..." << std::endl;
     mdt::Database* db;
     db = mdt::OpenDatabase(db_name);
@@ -112,16 +120,25 @@ int main(int ac, char* av[]) {
     mdt::Mutex mu;
     mdt::CondVar cond(&mu);
     mdt::Counter counter;
-    uint64_t num_task = 10;
-    uint64_t num_keys = 100000;
+    uint64_t num_task = 50;
+    std::vector<WriteTask*> tasks;
+    for (uint64_t i = 0; i < num_task; i++) {
+        WriteTask* task = new WriteTask;
+        tasks.push_back(task);
+    }
+    uint64_t num_keys = 1000000;
     counter.Set((int64_t)(num_task * num_keys) + 1);
     std::cout << "Test put ..." << std::endl;
-    dispatch_task(table, &mu, &cond, &counter, num_task, num_keys);
-     
+    dispatch_task(tasks, table, &mu, &cond, &counter, num_task, num_keys);
+
+    // wait finish
     if (counter.Dec() != 0) {
 	cond.Wait();
     }
-     
+
+    for (uint64_t i = 0; i < num_task; i++) {
+        delete tasks[i];
+    }
     std::cout << "done" << std::endl;
     return 0;
 }
