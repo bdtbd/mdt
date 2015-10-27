@@ -31,7 +31,7 @@ std::ostream& operator << (std::ostream& o, const FileLocation& location) {
     return o;
 }
 
-int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
+Status TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                          Table** table_ptr) {
     const std::string& table_name = table_desc.table_name;
@@ -46,25 +46,17 @@ int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt
     tera_adapter.opt_ = tera_opt;
     tera_adapter.table_prefix_ = db_name;
 
-    *table_ptr = new TableImpl(table_desc, tera_adapter, fs_adapter);
-    assert(table_ptr);
-    return 0;
+    TableImpl* table = new TableImpl(table_desc, tera_adapter, fs_adapter);
+    *table_ptr = table;
+    if (*table_ptr == NULL) {
+        return Status::IOError("table alloc, no mem");
+    }
+    return table->Init();
 }
 
-// TableImpl ops
-TableImpl::TableImpl(const TableDescription& table_desc,
-                     const TeraAdapter& tera_adapter,
-                     const FilesystemAdapter& fs_adapter)
-    : table_desc_(table_desc),
-    tera_(tera_adapter),
-    fs_(fs_adapter),
-    queue_timer_stop_(false),
-    queue_timer_cv_(&queue_timer_mu_) {
+Status TableImpl::Init() {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
-
-    // create timer
-    pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 
     // init write handle list
     nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
@@ -78,13 +70,15 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     }
 
     tera::ErrorCode error_code;
-
+    int nr_error = 0;
     // open primary key table
-    std::string primary_table_name = tera_.table_prefix_ + "#pri#" + table_desc.table_name;
-    //std::string primary_table_name = GetPrimaryTable(table_desc.table_name);
+    std::string primary_table_name = tera_.table_prefix_ + "#pri#" + table_desc_.table_name;
     LOG(INFO) << "open primary table: " << primary_table_name;
     tera::Table* primary_table = tera_.opt_.client_->OpenTable(primary_table_name, &error_code);
-    assert(primary_table);
+    if (primary_table == NULL) {
+        nr_error++;
+        LOG(WARNING) << "open table " << table_desc_.table_name << " fail, no such table\n";
+    }
     tera_.tera_table_map_[primary_table_name] = primary_table;
 
     // open index key table
@@ -92,11 +86,14 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     for (it = table_desc_.index_descriptor_list.begin();
          it != table_desc_.index_descriptor_list.end();
          ++it) {
-        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + it->index_name;
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + it->index_name;
         //std::string index_table_name = GetIndexTable(it->index_name);
         LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
-        assert(index_table);
+        if (index_table == NULL) {
+            nr_error++;
+            LOG(WARNING) << "open index table " << it->index_name << " fail, no such table\n";
+        }
         tera_.tera_table_map_[index_table_name] = index_table;
     }
     // open timestamp index table
@@ -105,12 +102,46 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     for (int i = 0; i < nr_timestamp_table_; i++) {
         char ts_name[32];
         sprintf(ts_name, "timestamp#%d", i);
-        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + ts_name;
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
         LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
-        assert(index_table);
+        if (index_table == NULL) {
+            nr_error++;
+            LOG(WARNING) << "open ts index table " << ts_name << " fail, no such table\n";
+        }
         tera_.tera_table_map_[index_table_name] = index_table;
     }
+
+    // do some error
+    if (nr_error) {
+        FreeTeraTable();
+        return Status::NotFound("index table not found");
+    }
+
+    return Status::OK();
+}
+
+void TableImpl::FreeTeraTable() {
+    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.begin();
+    for (; it != tera_.tera_table_map_.end(); ++it) {
+        tera::Table* table_ptr = it->second;
+        if (table_ptr != NULL) {
+            delete table_ptr;
+        }
+    }
+}
+
+// TableImpl ops
+TableImpl::TableImpl(const TableDescription& table_desc,
+                     const TeraAdapter& tera_adapter,
+                     const FilesystemAdapter& fs_adapter)
+    : table_desc_(table_desc),
+    tera_(tera_adapter),
+    fs_(fs_adapter),
+    queue_timer_stop_(false),
+    queue_timer_cv_(&queue_timer_mu_) {
+    // create timer
+    pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 }
 
 TableImpl::~TableImpl() {
@@ -118,6 +149,8 @@ TableImpl::~TableImpl() {
     //ReleaseDataWriter();
     // TODO: write queue release
     //
+
+    FreeTeraTable();
 
     // stop timer, flush request
     queue_timer_mu_.Lock();

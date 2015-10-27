@@ -46,6 +46,10 @@ mdt_db_t* mdt_open_db(const char* db_name, const char* conf_path) {
     google::ParseCommandLineFlags(&argc, &argv, true);
 
     mdt::Database* internal_db = mdt::OpenDatabase(db_name);
+    delete argv;
+    if (internal_db == NULL) {
+        return NULL;
+    }
     mdt_db_t* db = new mdt_db_t;
     db->rep = internal_db;
     return db;
@@ -60,6 +64,8 @@ void mdt_close_db(mdt_db_t* db) {
 // 打开表格
 mdt_table_t* mdt_open_table(mdt_db_t* db, const char* table_name) {
     mdt::Table* internal_table = mdt::OpenTable(db->rep, table_name);
+    if (internal_table == NULL)
+        return NULL;
     mdt_table_t* table = new mdt_table_t;
     table->rep = internal_table;
     return table;
