@@ -7,14 +7,15 @@
 
 #include <deque>
 #include "proto/kv.pb.h"
+#include "util/coding.h"
 #include "util/counter.h"
 #include "util/env.h"
-#include <tera.h>
-#include "util/coding.h"
 #include "util/mutex.h"
+#include "util/thread_pool.h"
 #include "sdk/option.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
+#include <tera.h>
 
 namespace mdt {
 
@@ -175,7 +176,14 @@ private:
     int32_t GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
                     std::vector<ResultStream>* row_list);
 
-    Status GetSingleRow(const std::string& primary_key, ResultStream* result);
+    typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
+
+    static void ReadPrimaryTableCallback(tera::RowReader* reader);
+
+    void ReadData(tera::RowReader* reader);
+
+    Status GetSingleRow(const std::string& primary_key, ResultStream* result,
+                        GetSingleRowCallback callback = NULL, void* callback_param = NULL);
 
     Status ReadDataFromFile(const FileLocation& location, std::string* data);
 
@@ -207,6 +215,7 @@ private:
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
+    ThreadPool thread_pool_;
 
     // file handle cache relative
     mutable Mutex file_mutex_;

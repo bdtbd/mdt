@@ -272,6 +272,4 @@ private:
 
 } // namespace mdt
 
-using common::ThreadPool;
-
 #endif  // TERA_COMMON_THREAD_POOL_H_

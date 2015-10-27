@@ -4,6 +4,7 @@
 
 #include <deque>
 
+#include <boost/bind.hpp>
 #include <glog/logging.h>
 #include <tera.h>
 
@@ -17,6 +18,7 @@ DECLARE_int64(max_write_handle_seq);
 DECLARE_int64(data_size_per_sync);
 DECLARE_bool(use_tera_async_write);
 DECLARE_int64(max_timestamp_table_num);
+DECLARE_int64(read_file_thread_num);
 
 namespace mdt {
 
@@ -53,7 +55,8 @@ TableImpl::TableImpl(const TableDescription& table_desc,
                      const FilesystemAdapter& fs_adapter)
     : table_desc_(table_desc),
     tera_(tera_adapter),
-    fs_(fs_adapter) {
+    fs_(fs_adapter),
+    thread_pool_(FLAGS_read_file_thread_num) {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
 
@@ -109,6 +112,7 @@ TableImpl::~TableImpl() {
     // free write handle
     //ReleaseDataWriter();
     // TODO: write queue release
+    thread_pool_.Stop(false);
 }
 
 /////////  batch write /////////////
@@ -417,15 +421,23 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
         tera::ErrorCode err;
         tera::ResultStream* result = ts_table->Scan(*scan_desc, &err);
 
+        std::vector<std::string> primary_key_list;
         while ((int32_t)result_list->size() < limit && !result->Done()) {
             const std::string& primary_key = result->Qualifier();
             VLOG(12) << "select op, primary key: " << primary_key;
-            ResultStream row;
-            Status s = GetSingleRow(primary_key, &row);
-            if (s.ok()) {
-                result_list->push_back(row);
+
+            primary_key_list.push_back(primary_key);
+            if ((int32_t)primary_key_list.size() >= limit) {
+                GetRows(primary_key_list, limit - result_list->size(), result_list);
+                primary_key_list.clear();
             }
+
             result->Next();
+        }
+        if (primary_key_list.size() > 0) {
+            CHECK(result->Done());
+            CHECK_LT((int32_t)result_list->size(), limit);
+            GetRows(primary_key_list, limit - result_list->size(), result_list);
         }
         delete result;
         delete scan_desc;
@@ -716,40 +728,95 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
     return Status::OK();
 }
 
+struct GetRowParam {
+    Status* status;
+    Mutex* mutex;
+    uint32_t* pending_count;
+    CondVar* cond;
+};
+
+void GetRowCallback(Status s, ResultStream* result, void* callback_param) {
+    GetRowParam* param = (GetRowParam*)callback_param;
+    (*param->status) = s;
+    MutexLock l(param->mutex);
+    --(*param->pending_count);
+    if ((*param->pending_count) == 0) {
+        param->cond->Signal();
+    }
+    delete param;
+}
+
 int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
                            std::vector<ResultStream>* row_list) {
+    std::vector<Status> status_list(primary_key_list.size());
+    std::vector<ResultStream> tmp_row_list(primary_key_list.size());
+    uint32_t pending_count = primary_key_list.size();
+    Mutex mutex;
+    CondVar cond(&mutex);
+
+    for (uint32_t i = 0; i < primary_key_list.size(); i++) {
+        GetRowParam* param = new GetRowParam;
+        param->status = &status_list[i];
+        param->pending_count = &pending_count;
+        param->mutex = &mutex;
+        param->cond = &cond;
+
+        GetSingleRow(primary_key_list[i], &tmp_row_list[i], GetRowCallback, param);
+    }
+
+    MutexLock l(&mutex);
+    while (pending_count > 0) {
+        cond.Wait();
+    }
+
     int32_t got_count = 0;
     for (uint32_t i = 0; got_count < limit && i < primary_key_list.size(); i++) {
-        const std::string& primary_key = primary_key_list[i];
-        ResultStream result;
-        Status s = GetSingleRow(primary_key, &result);
+        Status s = status_list[i];
         if (s.ok()) {
-            VLOG(5) << "get primary data: " << primary_key;
-            row_list->push_back(result);
+            VLOG(5) << "get primary data: " << primary_key_list[i];
+            row_list->push_back(tmp_row_list[i]);
             got_count++;
         } else {
-            LOG(WARNING) << "fail to get primary data: " << primary_key
+            LOG(WARNING) << "fail to get primary data: " << primary_key_list[i]
                 << ", status: " << s.ToString();
         }
     }
     return got_count;
 }
 
-Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result) {
-    tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    tera::RowReader* reader = primary_table->NewRowReader(primary_key);
-    VLOG(12) << "read primary table: " <<  table_desc_.table_name
-        << ", primary key: " << DebugString(primary_key);
-    reader->AddColumnFamily(kPrimaryTableColumnFamily);
-    primary_table->Get(reader);
+struct ReadPrimaryTableContext {
+    TableImpl* table;
+    ResultStream* result;
+    void* user_callback;
+    void* user_param;
+
+    // useful if user_callback == NULL
+    Mutex* mutex;
+    CondVar* cond;
+    bool finish;
+};
+
+void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
+    ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
+    const std::string& primary_key = reader->RowName();
+    VLOG(12) << "finish read primary table: " <<  param->table->table_desc_.table_name
+             << ", primary key: " << DebugString(primary_key);
+    param->table->thread_pool_.AddTask(boost::bind(&TableImpl::ReadData, param->table, reader));
+}
+
+void TableImpl::ReadData(tera::RowReader* reader) {
+    ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
+    const std::string& primary_key = reader->RowName();
+    VLOG(12) << "read data of primary key: " << primary_key;
+
+    ResultStream* result = param->result;
     while (!reader->Done()) {
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
         location.ParseFromString(location_buffer);
         VLOG(12) << "begin to read data from " << location;
         std::string data;
-        // TODO: async scan
-        Status s = ReadDataFromFile(location, &data);
+        Status s = param->table->ReadDataFromFile(location, &data);
         if (s.ok()) {
             VLOG(12) << "finsh read data from " << location;
             result->result_data_list.push_back(data);
@@ -759,10 +826,64 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         reader->Next();
     }
 
-    if (result->result_data_list.size() == 0) {
-        return Status::NotFound("row not found");
+    Status s;
+    if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
+        s = Status::IOError("tera error");
+    } else if (result->result_data_list.size() > 0) {
+        result->primary_key = primary_key;
+        s = Status::OK();
+    } else {
+        s = Status::NotFound("row not found");
     }
-    result->primary_key = primary_key;
+
+    if (param->user_callback != NULL) {
+        ((GetSingleRowCallback*)param->user_callback)(s, result, param->user_param);
+    } else {
+        MutexLock l(param->mutex);
+        param->finish = true;
+        param->cond->Signal();
+    }
+
+    delete param;
+    delete reader;
+}
+
+Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result,
+                               GetSingleRowCallback user_callback, void* user_param) {
+    Mutex mu;
+    CondVar cond(&mu);
+    bool finish = false;
+
+    ReadPrimaryTableContext* param = new ReadPrimaryTableContext;
+    param->table = this;
+    param->result = result;
+    param->user_callback = (void*)user_callback;
+    param->user_param = user_param;
+    if (user_callback == NULL) {
+        param->mutex = &mu;
+        param->cond = &cond;
+        param->finish = &finish;
+    }
+
+    tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
+    tera::RowReader* reader = primary_table->NewRowReader(primary_key);
+    reader->AddColumnFamily(kPrimaryTableColumnFamily);
+    reader->SetCallBack(ReadPrimaryTableCallback);
+    reader->SetContext(param);
+
+    VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
+        << ", primary key: " << DebugString(primary_key);
+    primary_table->Get(reader);
+
+    if (user_callback == NULL) {
+        MutexLock l(&mu);
+        while (!finish) {
+            cond.Wait();
+        }
+        if (result->result_data_list.size() == 0) {
+            return Status::NotFound("row not found");
+        }
+    }
     return Status::OK();
 }
 
