@@ -8,6 +8,7 @@ package mdt
 // #include "mdt_c.h"
 import "C"
 import "unsafe"
+import "fmt"
 
 // 错误码，int
 const (
@@ -18,6 +19,25 @@ const (
     InvalidArgument = 4
     IOError = 5
 )
+
+func GetError(err int) error {
+    switch err {
+    case Ok :
+        return nil
+    case NotFound :
+        return fmt.Errorf("NotFound");
+    case Corruption :
+        return fmt.Errorf("Corruption");
+    case NotSupported :
+        return fmt.Errorf("NotSupported");
+    case InvalidArgument :
+        return fmt.Errorf("InvalidArgument");
+    case IOError :
+        return fmt.Errorf("IOError");
+    default :
+        return fmt.Errorf("Unknown");
+    }
+}
 
 type DB struct {
     rep *C.struct_mdt_db_t
@@ -83,7 +103,7 @@ type BatchWriteContext struct {
     Error int
 }
 
-func ConvertWriteRequest(req *WriteContext, c_req *C.mdt_store_request_t) int {
+func ConvertWriteRequest(req *WriteContext, c_req *C.mdt_store_request_t) error {
     // convert request
     c_req.primary_key.data = C.CString(req.PrimaryKey)
     c_req.primary_key.size = C.size_t(len(req.PrimaryKey))
@@ -103,10 +123,10 @@ func ConvertWriteRequest(req *WriteContext, c_req *C.mdt_store_request_t) int {
     c_req.data.data = C.CString(req.Data)
     c_req.data.size = C.size_t(len(req.Data))
 
-    return 0
+    return nil
 }
 
-func FreeWriteRequest(c_req *C.mdt_store_request_t) int {
+func FreeWriteRequest(c_req *C.mdt_store_request_t) error {
     C.free(unsafe.Pointer(c_req.primary_key.data))
     c_index_list := (*[1 << 30]C.mdt_index_t)(unsafe.Pointer(c_req.index_list))
     for i := C.size_t(0); i < c_req.index_list_len; i++ {
@@ -115,10 +135,10 @@ func FreeWriteRequest(c_req *C.mdt_store_request_t) int {
     }
     C.free(unsafe.Pointer(c_req.index_list))
     C.free(unsafe.Pointer(c_req.data.data))
-    return 0
+    return nil
 }
 
-func ConvertBatchWriteRequest(wb *BatchWriteContext, c_wb *C.mdt_batch_write_context_t) int {
+func ConvertBatchWriteRequest(wb *BatchWriteContext, c_wb *C.mdt_batch_write_context_t) error {
     var req C.mdt_store_request_t
     c_wb.nr_batch = C.uint64_t(wb.NumberBatch)
     c_wb.error = 0
@@ -132,31 +152,31 @@ func ConvertBatchWriteRequest(wb *BatchWriteContext, c_wb *C.mdt_batch_write_con
     var resp C.mdt_store_response_t
     c_wb.resp = (*C.mdt_store_response_t)(C.malloc(C.size_t(unsafe.Sizeof(resp)) * C.size_t(c_wb.nr_batch)))
 
-    return 0
+    return nil
 }
 
-func FreeBatchWriteRequest(c_wb *C.mdt_batch_write_context_t) int {
+func FreeBatchWriteRequest(c_wb *C.mdt_batch_write_context_t) error {
     c_batch_req := (*[1 << 30]C.mdt_store_request_t)(unsafe.Pointer(c_wb.batch_req))
     for i := C.size_t(0); i < C.size_t(c_wb.nr_batch); i++ {
         FreeWriteRequest(&(c_batch_req[i]))
     }
     C.free(unsafe.Pointer(c_wb.batch_req))
     C.free(unsafe.Pointer(c_wb.resp))
-    return 0
+    return nil
 }
 
-func BatchWrite(table *Table, wb *BatchWriteContext) int {
+func BatchWrite(table *Table, wb *BatchWriteContext) error {
     // prepare request
     var c_wb C.mdt_batch_write_context_t
     ConvertBatchWriteRequest(wb, &c_wb);
 
     C.mdt_batch_write(table.rep, &c_wb, nil, nil)
-    error := int(c_wb.error)
-    wb.Error = error
+    err := int(c_wb.error)
+    wb.Error = err
 
     // do some cleanup
     FreeBatchWriteRequest(&c_wb)
-    return error
+    return GetError(err)
 }
 
 //////////////////////////
@@ -166,10 +186,10 @@ func Store(table *Table,
            primary_key string,  // key after encode
            timestamp int64,
            index_list []Index,
-           data string) int {
+           data string) error {
     var c_request C.mdt_store_request_t
     var c_response C.mdt_store_response_t
-    
+
     // convert request
     c_request.primary_key.data = C.CString(primary_key)
     c_request.primary_key.size = C.size_t(len(primary_key))
@@ -186,13 +206,13 @@ func Store(table *Table,
     }
     c_request.data.data = C.CString(data)
     c_request.data.size = C.size_t(len(data))
-    
+
     // invoke C API
     C.mdt_store(table.rep, &c_request, &c_response, nil, nil)
-    
+
     // convert result
-    error := int(c_response.error)
-    
+    err := int(c_response.error)
+
     // free request memory
     C.free(unsafe.Pointer(c_request.primary_key.data))
     for i := C.size_t(0); i < c_request.index_list_len; i++ {
@@ -201,7 +221,8 @@ func Store(table *Table,
     }
     C.free(unsafe.Pointer(c_request.index_list))
     C.free(unsafe.Pointer(c_request.data.data))
-    return error
+
+    return GetError(err)
 }
 
 // 比较器
@@ -228,26 +249,25 @@ type Result struct {
 }
 
 // 查询接口（按primary key查）
-func SearchByPrimaryKey(table *Table,
-                        primary_key string) (int, []string) {
+func SearchByPrimaryKey(table *Table, primary_key string) (error, []string) {
     var c_request C.mdt_search_request_t
     var c_response C.mdt_search_response_t
-    
+
     // convert request
     c_request.primary_key.data = C.CString(primary_key)
     c_request.primary_key.size = C.size_t(len(primary_key))
-    
+
     // invoke C api
     C.mdt_search(table.rep, &c_request, &c_response, nil, nil)
-    
+
     // convert result & free result memory
-    error := Ok
+    err := Ok
     var data_list []string
     c_result_list := (*[1<<30]C.mdt_search_result_t)(unsafe.Pointer(c_response.result_list))
     if c_response.result_list_len == C.size_t(1) {
         c_result := &c_result_list[0]
         C.free(unsafe.Pointer(c_result.primary_key.data))
-        
+
         c_data_list := (*[1<<30]C.mdt_slice_t)(unsafe.Pointer(c_result.data_list))
         for j := C.size_t(0); j < c_result.data_list_len; j++ {
             data_list = append(data_list, C.GoStringN(c_data_list[j].data, C.int(c_data_list[j].size)))
@@ -255,14 +275,14 @@ func SearchByPrimaryKey(table *Table,
         }
         C.free(unsafe.Pointer(c_result.data_list))
     } else {
-        error = NotFound
+        err = NotFound
     }
     C.free(unsafe.Pointer(c_response.result_list))
-    
+
     // free request memory
     C.free(unsafe.Pointer(c_request.primary_key.data))
-    
-    return error, data_list
+
+    return GetError(err), data_list
 }
 
 // 查询接口（按index key查）
@@ -270,10 +290,10 @@ func SearchByIndexKey(table *Table,
                       index_condition_list []IndexCondition,
                       start_timestamp int64,
                       end_timestamp int64,
-                      limit int32) (int, []Result) {
+                      limit int32) (error, []Result) {
     var c_request C.mdt_search_request_t
     var c_response C.mdt_search_response_t
-        
+
     // convert request
     c_request.primary_key.size = 0
     c_request.index_condition_list_len = C.size_t(len(index_condition_list))
@@ -291,21 +311,21 @@ func SearchByIndexKey(table *Table,
     c_request.start_timestamp = C.int64_t(start_timestamp)
     c_request.end_timestamp = C.int64_t(end_timestamp)
     c_request.limit = C.int32_t(limit)
-    
+
     // invoke C api
     C.mdt_search(table.rep, &c_request, &c_response, nil, nil)
-    
+
     // convert result & free result memory
-    error := Ok
+    err := Ok
     var result_list []Result
     c_result_list := (*[1<<30]C.mdt_search_result_t)(unsafe.Pointer(c_response.result_list))
     for i := C.size_t(0); i < c_response.result_list_len; i++ {
         c_result := &c_result_list[i]        
         result := &Result{}
-        
+
         result.PrimaryKey = C.GoStringN(c_result.primary_key.data, C.int(c_result.primary_key.size))
         C.free(unsafe.Pointer(c_result.primary_key.data))
-        
+
         c_data_list := (*[1<<30]C.mdt_slice_t)(unsafe.Pointer(c_result.data_list))
         for j := C.size_t(0); j < c_result.data_list_len; j++ {
             result.DataList = append(result.DataList, C.GoStringN(c_data_list[j].data, C.int(c_data_list[j].size)))
@@ -316,9 +336,9 @@ func SearchByIndexKey(table *Table,
     }
     C.free(unsafe.Pointer(c_response.result_list))
     if result_list == nil {
-        error = NotFound
+        err = NotFound
     }
-    
+
     // free request memory
     for i := C.size_t(0); i < c_request.index_condition_list_len; i++ {
         c_index_condition := &c_index_condition_list[i]
@@ -326,6 +346,6 @@ func SearchByIndexKey(table *Table,
         C.free(unsafe.Pointer(c_index_condition.compare_value.data))
     }
     C.free(unsafe.Pointer(c_request.index_condition_list))
-    
-    return error, result_list
+
+    return GetError(err), result_list
 }
