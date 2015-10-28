@@ -31,7 +31,7 @@ std::ostream& operator << (std::ostream& o, const FileLocation& location) {
     return o;
 }
 
-int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
+Status TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                          Table** table_ptr) {
     const std::string& table_name = table_desc.table_name;
@@ -46,25 +46,14 @@ int TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt
     tera_adapter.opt_ = tera_opt;
     tera_adapter.table_prefix_ = db_name;
 
-    *table_ptr = new TableImpl(table_desc, tera_adapter, fs_adapter);
-    assert(table_ptr);
-    return 0;
+    TableImpl* table = new TableImpl(table_desc, tera_adapter, fs_adapter);
+    *table_ptr = table;
+    return table->Init();
 }
 
-// TableImpl ops
-TableImpl::TableImpl(const TableDescription& table_desc,
-                     const TeraAdapter& tera_adapter,
-                     const FilesystemAdapter& fs_adapter)
-    : table_desc_(table_desc),
-    tera_(tera_adapter),
-    fs_(fs_adapter),
-    queue_timer_stop_(false),
-    queue_timer_cv_(&queue_timer_mu_) {
+Status TableImpl::Init() {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
-
-    // create timer
-    pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 
     // init write handle list
     nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
@@ -78,13 +67,15 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     }
 
     tera::ErrorCode error_code;
-
+    int nr_error = 0;
     // open primary key table
-    std::string primary_table_name = tera_.table_prefix_ + "#pri#" + table_desc.table_name;
-    //std::string primary_table_name = GetPrimaryTable(table_desc.table_name);
+    std::string primary_table_name = tera_.table_prefix_ + "#pri#" + table_desc_.table_name;
     LOG(INFO) << "open primary table: " << primary_table_name;
     tera::Table* primary_table = tera_.opt_.client_->OpenTable(primary_table_name, &error_code);
-    assert(primary_table);
+    if (primary_table == NULL) {
+        nr_error++;
+        LOG(WARNING) << "open table " << table_desc_.table_name << " fail, no such table\n";
+    }
     tera_.tera_table_map_[primary_table_name] = primary_table;
 
     // open index key table
@@ -92,25 +83,62 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     for (it = table_desc_.index_descriptor_list.begin();
          it != table_desc_.index_descriptor_list.end();
          ++it) {
-        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + it->index_name;
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + it->index_name;
         //std::string index_table_name = GetIndexTable(it->index_name);
         LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
-        assert(index_table);
+        if (index_table == NULL) {
+            nr_error++;
+            LOG(WARNING) << "open index table " << it->index_name << " fail, no such table\n";
+        }
         tera_.tera_table_map_[index_table_name] = index_table;
     }
     // open timestamp index table
     nr_timestamp_table_ = (int)FLAGS_max_timestamp_table_num;
     cur_timestamp_table_id_ = 0;
     for (int i = 0; i < nr_timestamp_table_; i++) {
-        char ts_name[32] = {0};
+        char ts_name[32];
         snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
-        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc.table_name + "#" + ts_name;
+        std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
         LOG(INFO) << "open index table: " << index_table_name;
         tera::Table* index_table = tera_.opt_.client_->OpenTable(index_table_name, &error_code);
-        assert(index_table);
+        if (index_table == NULL) {
+            nr_error++;
+            LOG(WARNING) << "open ts index table " << ts_name << " fail, no such table\n";
+        }
         tera_.tera_table_map_[index_table_name] = index_table;
     }
+
+    // do some error
+    if (nr_error) {
+        FreeTeraTable();
+        return Status::NotFound("index table not found");
+    }
+
+    return Status::OK();
+}
+
+void TableImpl::FreeTeraTable() {
+    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.begin();
+    for (; it != tera_.tera_table_map_.end(); ++it) {
+        tera::Table* table_ptr = it->second;
+        if (table_ptr != NULL) {
+            delete table_ptr;
+        }
+    }
+}
+
+// TableImpl ops
+TableImpl::TableImpl(const TableDescription& table_desc,
+                     const TeraAdapter& tera_adapter,
+                     const FilesystemAdapter& fs_adapter)
+    : table_desc_(table_desc),
+    tera_(tera_adapter),
+    fs_(fs_adapter),
+    queue_timer_stop_(false),
+    queue_timer_cv_(&queue_timer_mu_) {
+    // create timer
+    pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 }
 
 TableImpl::~TableImpl() {
@@ -118,6 +146,8 @@ TableImpl::~TableImpl() {
     //ReleaseDataWriter();
     // TODO: write queue release
     //
+
+    FreeTeraTable();
 
     // stop timer, flush request
     queue_timer_mu_.Lock();
@@ -227,7 +257,9 @@ int TableImpl::BatchWrite(BatchWriteContext* ctx) {
 bool TableImpl::SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue) {
     queue_mutex_.Lock();
     // only async write can use batch
+    VLOG(25) << "Batch Queue size " << batch_queue_.size() << ", new context " << (uint64_t)context;
     if (FLAGS_use_tera_async_write && (batch_queue_.size() < (uint32_t)FLAGS_write_batch_queue_size)) {
+        // req and resp will be free, after Put return
         batch_queue_.push_back(context);
         queue_mutex_.Unlock();
         return true;
@@ -272,6 +304,8 @@ void TableImpl::QueueTimerFunc() {
         GetAllRequest(&context, &local_queue);
         // Batch write
         if (context) {
+            VLOG(25) << "queue timer get req " << (uint64_t)context << ", local queue size "
+                << local_queue.size();
             InternalBatchWrite(context, local_queue);
             delete context;
         }
@@ -279,8 +313,8 @@ void TableImpl::QueueTimerFunc() {
         // timer controller
         queue_timer_mu_.Lock();
         if (queue_timer_stop_) {
-            queue_timer_mu_.Unlock();
             queue_timer_cv_.Signal();
+            queue_timer_mu_.Unlock();
             return;
         }
         queue_timer_mu_.Unlock();
@@ -354,6 +388,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
                 ready->cv_.Signal();
             } else {
                 // this write context has no context, help it free memory
+                VLOG(25) << "no write context " << (uint64_t)ready;
                 delete ready;
             }
         }
@@ -380,6 +415,8 @@ void SyncWriteCallback(Table* table, StoreRequest* request,
                        StoreResponse* response,
                        void* callback_param) {
     SyncWriteCallbackParam* param = (SyncWriteCallbackParam*)callback_param;
+    delete request;
+    delete response;
     param->cond_->Signal();
 }
 // Concurrence Put interface:
@@ -396,14 +433,24 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     SyncWriteCallbackParam param;
     param.cond_ = &cond;
     if (callback == NULL && !FLAGS_use_tera_async_write) {
+        // write tera sync
         callback = SyncWriteCallback;
         callback_param = &param;
     }
 
     // construct WriteContext
     WriteContext* context = new WriteContext(&write_mutex_);
-    context->req_ = req;
-    context->resp_ = resp;
+    StoreRequest* internal_req = (StoreRequest*)req;
+    StoreResponse* internal_resp = resp;
+    if (callback == NULL || callback == SyncWriteCallback) {
+        // sync Put: sync or async write tera
+        internal_req = new StoreRequest;
+        internal_resp = new StoreResponse;
+        *internal_req = *req;
+        *internal_resp = *resp;
+    }
+    context->req_ = internal_req;
+    context->resp_ = internal_resp;
     context->callback_ = callback;
     context->callback_param_ = callback_param;
     context->sync_ = true;
@@ -415,7 +462,6 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     if (SubmitRequest(context, &local_queue)) {
         return 0;
     }
-
     InternalBatchWrite(context, local_queue);
     // write finish, if sync write, just wait callback
     if (callback == SyncWriteCallback) {
@@ -523,6 +569,12 @@ void PutCallback(tera::RowMutation* row) {
         if (context->callback_) {
             context->callback_(context->table_, (StoreRequest*)context->req_, context->resp_,
                 context->callback_param_);
+        } else {
+            // callback is null, free req and resp
+            VLOG(25) << "tera async write finish, delete req " << (uint64_t)context->req_
+                << ", resp " << (uint64_t)context->resp_;
+            delete context->req_;
+            delete context->resp_;
         }
         VLOG(12) << "put callback";
         delete context;

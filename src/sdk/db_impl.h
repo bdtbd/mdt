@@ -28,6 +28,7 @@ public:
     std::string& DatabaseName() {return db_name_;}
 
 private:
+    Status Init();
     static Status CreateDB(const Options& options, const std::string& db_name, Database** db_ptr);
 
     int InternalCreateTable(const TableDescription& table_desc, Table** table_ptr);

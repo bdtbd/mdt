@@ -18,7 +18,7 @@ const (
     InvalidArgument = 4
     IOError = 5
 )
-  
+
 type DB struct {
     rep *C.struct_mdt_db_t
 }
