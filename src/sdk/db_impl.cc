@@ -29,13 +29,10 @@ Status DatabaseImpl::CreateDB(const Options& options,
                               Database** db_ptr) {
     *db_ptr = NULL;
     DatabaseImpl* db_impl = new DatabaseImpl(options, db_name);
-    if (db_impl == NULL) {
-        return Status::IOError("create db error");
-    }
     Status s = db_impl->Init();
     if (!s.ok()) {
         delete db_impl;
-        return Status::IOError("create dir or tera table error");
+        return s;
     }
     *db_ptr = db_impl;
     return Status::OK();

@@ -48,9 +48,6 @@ Status TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_
 
     TableImpl* table = new TableImpl(table_desc, tera_adapter, fs_adapter);
     *table_ptr = table;
-    if (*table_ptr == NULL) {
-        return Status::IOError("table alloc, no mem");
-    }
     return table->Init();
 }
 
