@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <iostream>
+
 #include "sdk/sdk.h"
 #include "sdk/db_impl.h"
 #include <tera.h>
 
 #include <gflags/gflags.h>
+
+DECLARE_string(log_file);
 
 DECLARE_string(tera_root_dir);
 DECLARE_string(tera_flag_file_path);
@@ -15,7 +19,55 @@ DECLARE_int64(max_timestamp_table_num);
 
 namespace mdt {
 
+void SetupLog(const std::string& name) {
+    std::string program_name = "mdt";
+    if (!name.empty()) {
+        program_name = name;
+    }
+
+    if (FLAGS_log_dir.size() == 0) {
+        if (access("../log", F_OK)) {
+            FLAGS_log_dir = "../log";
+        } else {
+            FLAGS_log_dir = "./log";
+        }
+    }
+
+    if (access(FLAGS_log_dir.c_str(), F_OK)) {
+        mkdir(FLAGS_log_dir.c_str(), 0777);
+    }
+
+    std::string log_filename = FLAGS_log_dir + "/" + program_name + ".INFO.";
+    std::string wf_filename = FLAGS_log_dir + "/" + program_name + ".WARNING.";
+    google::SetLogDestination(google::INFO, log_filename.c_str());
+    google::SetLogDestination(google::WARNING, wf_filename.c_str());
+    google::SetLogDestination(google::ERROR, "");
+    google::SetLogDestination(google::FATAL, "");
+
+    google::SetLogSymlink(google::INFO, program_name.c_str());
+    google::SetLogSymlink(google::WARNING, program_name.c_str());
+    google::SetLogSymlink(google::ERROR, "");
+    google::SetLogSymlink(google::FATAL, "");
+}
+
+static pthread_once_t glog_once = PTHREAD_ONCE_INIT;
+static void InternalSetupGoogleLog() {
+    // init param, setup log
+    std::string log_prefix = "mdt";
+    ::google::InitGoogleLogging(log_prefix.c_str());
+    SetupLog(log_prefix);
+    tera::Client::SetGlogIsInitialized();
+    LOG(INFO) << "start loging...";
+}
+
+void SetupGoogleLog() {
+    pthread_once(&glog_once, InternalSetupGoogleLog);
+}
+
 Status DatabaseImpl::OpenDB(const std::string& db_name, Database** db_ptr) {
+    // init log
+    SetupGoogleLog();
+
     Options options;
     options.env_ = Env::Default();
     options.tera_flag_file_path_ = FLAGS_tera_flag_file_path;
@@ -25,8 +77,13 @@ Status DatabaseImpl::OpenDB(const std::string& db_name, Database** db_ptr) {
 Status DatabaseImpl::CreateDB(const Options& options,
                               const std::string& db_name,
                               Database** db_ptr) {
+    *db_ptr = NULL;
     DatabaseImpl* db_impl = new DatabaseImpl(options, db_name);
-    assert(db_impl);
+    Status s = db_impl->Init();
+    if (!s.ok()) {
+        delete db_impl;
+        return s;
+    }
     *db_ptr = db_impl;
     return Status::OK();
 }
@@ -36,38 +93,55 @@ Options InitDefaultOptions(const Options& options, const std::string& db_name) {
     Options opt = options;
     std::string database_root_dir = FLAGS_database_root_dir + "/" + db_name;
     Status s = opt.env_->CreateDir(database_root_dir);
+    if (!s.ok()) {
+        LOG(INFO) << "open db, init default, error " << s.ToString();
+    }
     return opt;
 }
 
 DatabaseImpl::DatabaseImpl(const Options& options, const std::string& db_name)
     : db_name_(db_name),
     options_(InitDefaultOptions(options, db_name)) {
+
+}
+
+Status DatabaseImpl::Init() {
     // create fs's dir
-    fs_opt_.env_ = options.env_;
-    fs_opt_.fs_path_ = FLAGS_database_root_dir + "/" + db_name + "/Filesystem/";
+    fs_opt_.env_ = options_.env_;
+    fs_opt_.fs_path_ = FLAGS_database_root_dir + "/" + db_name_ + "/Filesystem/";
     fs_opt_.env_->CreateDir(fs_opt_.fs_path_);
 
     // create tera client
     ::tera::ErrorCode error_code;
     tera_opt_.root_path_ = FLAGS_tera_root_dir;
-    tera_opt_.tera_flag_ = options.tera_flag_file_path_;
+    tera_opt_.tera_flag_ = options_.tera_flag_file_path_;
     tera_opt_.client_ = tera::Client::NewClient(tera_opt_.tera_flag_, "mdt", &error_code);
-    assert(tera_opt_.client_);
+    if (tera_opt_.client_ == NULL) {
+        LOG(INFO) << "open db, new cli error, tera flag " << tera_opt_.tera_flag_;
+        return Status::IOError("tera client new error");
+    }
 
     // create db schema table (kv mode)
-    std::string schema_table_name = db_name + "#SchemaTable#";
+    std::string schema_table_name = db_name_ + "#SchemaTable#";
     tera::TableDescriptor schema_desc(schema_table_name);
     tera::LocalityGroupDescriptor* schema_lg = schema_desc.AddLocalityGroup("lg");
     schema_lg->SetBlockSize(32 * 1024);
+    // ignore exist error
     tera_opt_.client_->CreateTable(schema_desc, &error_code);
 
     tera_opt_.schema_table_ = tera_opt_.client_->OpenTable(schema_table_name, &error_code);
     LOG(INFO) << "open schema table, table name " << schema_table_name <<
         ", addr " << tera_opt_.schema_table_ << ", error code " << tera::strerr(error_code);
-    assert(tera_opt_.schema_table_);
+    if (tera_opt_.schema_table_ == NULL) {
+        delete tera_opt_.client_;
+        LOG(INFO) << "open db, schema open error, schema table "
+            << schema_table_name;
+        return Status::IOError("schema table open error");
+    }
 
     tera_adapter_.opt_ = tera_opt_;
     tera_adapter_.table_prefix_ = db_name_;
+    return Status::OK();
 }
 
 Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
@@ -130,11 +204,16 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
 
 Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr) {
     // read schema from schema table
+    *table_ptr = NULL;
     tera::ErrorCode error_code;
     std::string schema_value;
     TableDescription table_desc;
     LOG(INFO) << "table name " << table_name << ", schema_table " << (uint64_t)tera_adapter_.opt_.schema_table_;
-    tera_adapter_.opt_.schema_table_->Get(table_name, "", "", &schema_value, &error_code);
+    if (!tera_adapter_.opt_.schema_table_->Get(table_name, "", "", &schema_value, &error_code)) {
+        LOG(WARNING) << "OpenTable: not such table " << table_name << ", error code "
+            << tera::strerr(error_code);
+        return Status::NotFound("not such table");
+    }
     LOG(INFO) << "OpenTable: get table schema, table name " << table_name
         << ", error code " << tera::strerr(error_code);
 
@@ -150,6 +229,9 @@ Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr)
 
     // construct memory structure
     TableImpl::OpenTable(db_name_, tera_opt_, fs_opt_, table_desc, table_ptr);
+    if (*table_ptr == NULL) {
+        return Status::NotFound("db open error ");
+    }
     table_map_[table_name] = *table_ptr;
     return Status::OK();
 }

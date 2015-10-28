@@ -147,11 +147,13 @@ public:
 
     virtual const std::string& TableName() {return table_desc_.table_name;}
 
-    static int OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
+    static Status OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                          Table** table_ptr);
 
 private:
+    void FreeTeraTable();
+    Status Init();
     // write op
     int InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
     static void* TimerThreadWrapper(void* arg);
