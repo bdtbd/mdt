@@ -10,6 +10,8 @@
 
 #include <gflags/gflags.h>
 
+DECLARE_string(log_file);
+
 DECLARE_string(tera_root_dir);
 DECLARE_string(tera_flag_file_path);
 DECLARE_string(database_root_dir);
@@ -17,7 +19,51 @@ DECLARE_int64(max_timestamp_table_num);
 
 namespace mdt {
 
+void SetupLog(const std::string& name) {
+    std::string program_name = "mdt";
+    if (!name.empty()) {
+        program_name = name;
+    }
+
+    if (FLAGS_log_dir.size() == 0) {
+        if (access("../log", F_OK)) {
+            FLAGS_log_dir = "../log";
+        } else {
+            FLAGS_log_dir = "./log";
+        }
+    }
+
+    if (access(FLAGS_log_dir.c_str(), F_OK)) {
+        mkdir(FLAGS_log_dir.c_str(), 0777);
+    }
+
+    std::string log_filename = FLAGS_log_dir + "/" + program_name + ".INFO.";
+    std::string wf_filename = FLAGS_log_dir + "/" + program_name + ".WARNING.";
+    google::SetLogDestination(google::INFO, log_filename.c_str());
+    google::SetLogDestination(google::WARNING, wf_filename.c_str());
+    google::SetLogDestination(google::ERROR, "");
+    google::SetLogDestination(google::FATAL, "");
+
+    google::SetLogSymlink(google::INFO, program_name.c_str());
+    google::SetLogSymlink(google::WARNING, program_name.c_str());
+    google::SetLogSymlink(google::ERROR, "");
+    google::SetLogSymlink(google::FATAL, "");
+}
+
+static pthread_once_t glog_once = PTHREAD_ONCE_INIT;
+static void SetupGoogleLog() {
+    // init param, setup log
+    std::string log_prefix = "mdt";
+    ::google::InitGoogleLogging(log_prefix.c_str());
+    SetupLog(log_prefix);
+    tera::Client::SetGlogIsInitialized();
+    LOG(INFO) << "start loging...";
+}
+
 Status DatabaseImpl::OpenDB(const std::string& db_name, Database** db_ptr) {
+    // init log
+    pthread_once(&glog_once, SetupGoogleLog);
+
     Options options;
     options.env_ = Env::Default();
     options.tera_flag_file_path_ = FLAGS_tera_flag_file_path;
@@ -44,7 +90,7 @@ Options InitDefaultOptions(const Options& options, const std::string& db_name) {
     std::string database_root_dir = FLAGS_database_root_dir + "/" + db_name;
     Status s = opt.env_->CreateDir(database_root_dir);
     if (!s.ok()) {
-        std::cout << "open db, init default, error " << s.ToString() << std::endl;
+        LOG(INFO) << "open db, init default, error " << s.ToString();
     }
     return opt;
 }
@@ -67,7 +113,7 @@ Status DatabaseImpl::Init() {
     tera_opt_.tera_flag_ = options_.tera_flag_file_path_;
     tera_opt_.client_ = tera::Client::NewClient(tera_opt_.tera_flag_, "mdt", &error_code);
     if (tera_opt_.client_ == NULL) {
-        std::cout << "open db, new cli error, tera flag " << tera_opt_.tera_flag_ << std::endl;
+        LOG(INFO) << "open db, new cli error, tera flag " << tera_opt_.tera_flag_;
         return Status::IOError("tera client new error");
     }
 
@@ -84,8 +130,8 @@ Status DatabaseImpl::Init() {
         ", addr " << tera_opt_.schema_table_ << ", error code " << tera::strerr(error_code);
     if (tera_opt_.schema_table_ == NULL) {
         delete tera_opt_.client_;
-        std::cout << "open db, schema open error, schema table "
-            << schema_table_name << std::endl;
+        LOG(INFO) << "open db, schema open error, schema table "
+            << schema_table_name;
         return Status::IOError("schema table open error");
     }
 
