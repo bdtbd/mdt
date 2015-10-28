@@ -984,7 +984,7 @@ struct ReadPrimaryTableContext {
     // useful if user_callback == NULL
     Mutex* mutex;
     CondVar* cond;
-    bool finish;
+    bool* finish;
 };
 
 void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
@@ -1031,7 +1031,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
         ((GetSingleRowCallback*)param->user_callback)(s, result, param->user_param);
     } else {
         MutexLock l(param->mutex);
-        param->finish = true;
+        (*param->finish) = true;
         param->cond->Signal();
     }
 
