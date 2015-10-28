@@ -51,7 +51,7 @@ void SetupLog(const std::string& name) {
 }
 
 static pthread_once_t glog_once = PTHREAD_ONCE_INIT;
-static void SetupGoogleLog() {
+static void InternalSetupGoogleLog() {
     // init param, setup log
     std::string log_prefix = "mdt";
     ::google::InitGoogleLogging(log_prefix.c_str());
@@ -60,9 +60,13 @@ static void SetupGoogleLog() {
     LOG(INFO) << "start loging...";
 }
 
+void SetupGoogleLog() {
+    pthread_once(&glog_once, InternalSetupGoogleLog);
+}
+
 Status DatabaseImpl::OpenDB(const std::string& db_name, Database** db_ptr) {
     // init log
-    pthread_once(&glog_once, SetupGoogleLog);
+    SetupGoogleLog();
 
     Options options;
     options.env_ = Env::Default();
