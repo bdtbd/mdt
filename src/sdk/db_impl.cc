@@ -183,10 +183,12 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
         index_cf->SetTimeToLive(0);
         tera_adapter_.opt_.client_->CreateTable(index_table_desc, &error_code);
     }
+
+    // create timestamp table
     int nr_timestamp_table = (int)FLAGS_max_timestamp_table_num;
     for (int i = 0; i < nr_timestamp_table; i++) {
         char ts_name[32];
-        sprintf(ts_name, "timestamp#%d", i);
+        snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
         std::string index_table_name = tera_adapter_.table_prefix_ + "#" + schema.table_name() + "#" + ts_name;
         LOG(INFO) << "Create index table name " << index_table_name;
         tera::TableDescriptor index_table_desc(index_table_name);

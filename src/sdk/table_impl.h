@@ -10,15 +10,15 @@
 #include <boost/asio.hpp>
 
 #include "proto/kv.pb.h"
+#include "util/coding.h"
 #include "util/counter.h"
 #include "util/env.h"
-#include <tera.h>
-#include "util/coding.h"
 #include "util/mutex.h"
-
+#include "util/thread_pool.h"
 #include "sdk/option.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
+#include <tera.h>
 
 namespace mdt {
 
@@ -160,18 +160,45 @@ private:
     void QueueTimerFunc();
     void GetAllRequest(WriteContext** context_ptr, std::vector<WriteContext*>* local_queue);
     bool SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue);
+    Status GetByPrimaryKey(const std::string& primary_key,
+                           std::vector<ResultStream>* result_list);
+
+    Status GetByIndex(const std::vector<IndexCondition>& index_condition_list,
+                      int64_t start_timestamp, int64_t end_timestamp, int32_t limit,
+                      std::vector<ResultStream>* result_list);
+
+    Status GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
+                          int32_t limit, std::vector<ResultStream>* result_list);
 
     Status ExtendIndexCondition(const std::vector<IndexCondition>& index_condition_list,
                                 std::vector<IndexConditionExtend>* index_condition_ex_list);
 
-    Status GetPrimaryKeys(const std::vector<IndexConditionExtend>& index_condition_ex_list,
-                          const SearchRequest* req,
-                          std::vector<std::string>* primary_key_list);
+    Status GetByExtendIndex(const std::vector<IndexConditionExtend>& index_condition_ex_list,
+                            int64_t start_timestamp, int64_t end_timestamp,
+                            int32_t limit, std::vector<ResultStream>* result_list);
 
-    Status GetRows(const std::vector<std::string>& primary_key_list,
-                   std::vector<ResultStream>* row_list);
+    bool ScanMultiIndexTables(tera::Table** index_table_list,
+                              tera::ScanDescriptor** scan_desc_list,
+                              tera::ResultStream** scan_stream_list,
+                              std::vector<std::string>* primary_key_vec_list,
+                              uint32_t size, int32_t limit);
 
-    Status GetSingleRow(const std::string& primary_key, ResultStream* result);
+    tera::ResultStream* ScanIndexTable(tera::Table* index_table,
+                                       tera::ScanDescriptor* scan_desc,
+                                       tera::ResultStream* scan_stream, int32_t limit,
+                                       std::vector<std::string>* primary_key_list);
+
+    int32_t GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
+                    std::vector<ResultStream>* row_list);
+
+    typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
+
+    static void ReadPrimaryTableCallback(tera::RowReader* reader);
+
+    void ReadData(tera::RowReader* reader);
+
+    Status GetSingleRow(const std::string& primary_key, ResultStream* result,
+                        GetSingleRowCallback callback = NULL, void* callback_param = NULL);
 
     Status ReadDataFromFile(const FileLocation& location, std::string* data);
 
@@ -182,8 +209,7 @@ private:
                         FileLocation& location);
 
     Status PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pri_vec,
-                               std::vector<std::string>* primary_key_list,
-                               int32_t limit);
+                               std::vector<std::string>* primary_key_list);
     tera::Table* GetPrimaryTable(const std::string& table_name);
     tera::Table* GetIndexTable(const std::string& index_name);
     tera::Table* GetTimestampTable();
@@ -204,6 +230,7 @@ private:
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
+    ThreadPool thread_pool_;
 
     // file handle cache relative
     mutable Mutex file_mutex_;
