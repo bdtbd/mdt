@@ -473,8 +473,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     return 0;
 }
 
-void PutCallback(tera::RowMutation* row) {
-    PutContext* context = (PutContext*)row->GetContext();
+void ReleasePutContext(PutContext* context) {
     // the last one invoke user callback
     if (context->counter_.Dec() == 0) {
         if (context->callback_) {
@@ -490,6 +489,11 @@ void PutCallback(tera::RowMutation* row) {
         VLOG(12) << "put callback";
         delete context;
     }
+}
+
+void PutCallback(tera::RowMutation* row) {
+    PutContext* context = (PutContext*)row->GetContext();
+    ReleasePutContext(context);
     delete row;
 }
 
@@ -498,19 +502,25 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
                                FileLocation& location) {
     std::string null_value;
     null_value.clear();
+    // index table include: primary table, index tables, ts table
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
     context->counter_.Set(2 + req->index_list.size());
 
+    std::string primary_key = req->primary_key;
     // update primary table
     VLOG(10) << "write pri : " << req->primary_key;
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    std::string primary_key = req->primary_key;
-    VLOG(12) << " write pri table, primary key: " << primary_key;
-    tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
-    primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
-    primary_row->SetContext(context);
-    primary_row->SetCallBack(PutCallback);
-    primary_table->ApplyMutation(primary_row);
+    if (primary_table == NULL) {
+        VLOG(12) << "write primary table: " << table_desc_.table_name << ", no such table";
+        ReleasePutContext(context);
+    } else {
+        VLOG(12) << " write pri table, primary key: " << primary_key;
+        tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
+        primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
+        primary_row->SetContext(context);
+        primary_row->SetCallBack(PutCallback);
+        primary_table->ApplyMutation(primary_row);
+    }
 
     // write index tables
     std::vector<Index>::const_iterator it;
@@ -518,7 +528,11 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
          it != req->index_list.end();
          ++it) {
         tera::Table* index_table = GetIndexTable(it->index_name);
-        CHECK_NOTNULL(index_table);
+        if (index_table == NULL) {
+            VLOG(12) << "write index table: " << it->index_name << ", no such table";
+            ReleasePutContext(context);
+            continue;
+        }
         std::string index_key = it->index_key;
         VLOG(12) << " write index table: " << it->index_name << ", index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
@@ -530,17 +544,21 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 
     // write timestamp table
     tera::Table* ts_table = GetTimestampTable();
-    char buf[8];
-    EncodeBigEndian(buf, req->timestamp);
-    std::string ts_key(buf, sizeof(buf));
-    VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp
-             << ", ts string: " << DebugString(ts_key);
-    tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
-    ts_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
-    ts_row->SetContext(context);
-    ts_row->SetCallBack(PutCallback);
-    ts_table->ApplyMutation(ts_row);
-
+    if (ts_table == NULL) {
+        VLOG(12) << "timestamp table not exit";
+        ReleasePutContext(context);
+    } else {
+        char buf[8];
+        EncodeBigEndian(buf, req->timestamp);
+        std::string ts_key(buf, sizeof(buf));
+        VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp
+            << ", ts string: " << DebugString(ts_key);
+        tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
+        ts_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
+        ts_row->SetContext(context);
+        ts_row->SetCallBack(PutCallback);
+        ts_table->ApplyMutation(ts_row);
+    }
     return 0;
 }
 
@@ -594,6 +612,10 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
                                  int32_t limit, std::vector<ResultStream>* result_list) {
     std::vector<tera::Table*> ts_table_list;
     GetAllTimestampTables(&ts_table_list);
+    if (ts_table_list.size() == 0) {
+        result_list->clear();
+        return Status::NotFound("Timestamp Table not found");
+    }
 
     char buf[8];
     EncodeBigEndian(buf, start_timestamp);
@@ -602,6 +624,7 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
     std::string end_ts_key(buf, sizeof(buf));
     VLOG(10) << "get by timestamp table: " << DebugString(start_ts_key) << " ~ "
              << DebugString(end_ts_key);
+    // read trace row from ts table
     for (size_t i = 0; (int32_t)result_list->size() < limit && i < ts_table_list.size(); i++) {
         tera::Table* ts_table = ts_table_list[i];
         tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
@@ -695,18 +718,26 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
                                    int64_t start_timestamp, int64_t end_timestamp,
                                    int32_t limit, std::vector<ResultStream>* result_list) {
     size_t nr_index_table = index_condition_ex_list.size();
-    CHECK_GT(nr_index_table, 0U);
+    if (nr_index_table == 0) {
+        result_list->clear();
+        return Status::OK();
+    }
 
     std::vector<tera::Table*> index_table_vec(nr_index_table);
     std::vector<tera::ScanDescriptor*> scan_desc_vec(nr_index_table);
     std::vector<tera::ResultStream*> scan_stream_vec(nr_index_table);
     std::vector<std::vector<std::string> > pri_vec(nr_index_table);
 
+    int valid_nr_index_table = 0;
     for (size_t i = 0; i < nr_index_table; i++) {
         bool skip_scan = false;
         const IndexConditionExtend& index_cond_ex = index_condition_ex_list[i];
         const std::string& index_name = index_cond_ex.index_name;
         tera::Table* index_table = GetIndexTable(index_name);
+        if (index_table == NULL) {
+            VLOG(12) << "index table " << index_name << " not exit";
+            continue;
+        }
 
         VLOG(10) << "select op, create scan stream of index: " << index_name;
         tera::ScanDescriptor* scan_desc = NULL;
@@ -752,7 +783,6 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
             skip_scan = true;
             break;
         }
-
         if (skip_scan) continue;
 
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
@@ -761,12 +791,12 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         index_table_vec[i] = index_table;
         scan_desc_vec[i] = scan_desc;
         scan_stream_vec[i] = NULL;
+        valid_nr_index_table++;
     }
-
 
     while ((int32_t)result_list->size() < limit
            && ScanMultiIndexTables(&index_table_vec[0], &scan_desc_vec[0], &scan_stream_vec[0],
-                                   &pri_vec[0], nr_index_table, limit)) {
+                                   &pri_vec[0], valid_nr_index_table, limit)) {
         // merge sort
         std::vector<std::string> primary_key_list;
         PrimaryKeyMergeSort(pri_vec, &primary_key_list);
@@ -774,7 +804,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         GetRows(primary_key_list, limit - result_list->size(), result_list);
     }
 
-    for (size_t i = 0; i < nr_index_table; i++) {
+    for (int i = 0; i < valid_nr_index_table; i++) {
         delete scan_desc_vec[i];
         delete scan_stream_vec[i];
     }
@@ -786,8 +816,13 @@ bool TableImpl::ScanMultiIndexTables(tera::Table** index_table_list,
                                      tera::ResultStream** scan_stream_list,
                                      std::vector<std::string>* primary_key_vec_list,
                                      uint32_t size, int32_t limit) {
+    //CHECK_GT(size, 0U);
+    if (size == 0) {
+        VLOG(12) << "nr of index table " << size;
+        return false;
+    }
+
     VLOG(10) << "ScanMultiIndexTables index: " << index_table_list[0]->GetName() << ", size " << size;
-    CHECK_GT(size, 0U);
     if (size == 1) {
         primary_key_vec_list[0].clear();
     }
@@ -915,10 +950,11 @@ Status TableImpl::PrimaryKeyMergeSort(std::vector<std::vector<std::string> >& pr
             min_key = max_key;
         }
     }
-    assert(0);
+    LOG(WARNING) << "merge sort error";
     return Status::OK();
 }
 
+// read data from primary table
 struct GetRowParam {
     Status* status;
     Mutex* mutex;
@@ -987,6 +1023,17 @@ struct ReadPrimaryTableContext {
     bool* finish;
 };
 
+void ReleaseReadPrimaryTableContext(ReadPrimaryTableContext* param, ResultStream* result, Status s) {
+    if (param->user_callback != NULL) {
+        ((GetSingleRowCallback*)param->user_callback)(s, result, param->user_param);
+    } else {
+        MutexLock l(param->mutex);
+        (*param->finish) = true;
+        param->cond->Signal();
+    }
+    delete param;
+}
+
 void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
     const std::string& primary_key = reader->RowName();
@@ -997,10 +1044,9 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
 
 void TableImpl::ReadData(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
-    const std::string& primary_key = reader->RowName();
-    VLOG(12) << "read data of primary key: " << primary_key;
-
     ResultStream* result = param->result;
+
+    // Get row reader result
     while (!reader->Done()) {
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
@@ -1017,6 +1063,9 @@ void TableImpl::ReadData(tera::RowReader* reader) {
         reader->Next();
     }
 
+    // Get Row result status
+    const std::string& primary_key = reader->RowName();
+    VLOG(12) << "read data of primary key: " << primary_key;
     Status s;
     if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
         s = Status::IOError("tera error");
@@ -1026,25 +1075,23 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     } else {
         s = Status::NotFound("row not found");
     }
-
-    if (param->user_callback != NULL) {
-        ((GetSingleRowCallback*)param->user_callback)(s, result, param->user_param);
-    } else {
-        MutexLock l(param->mutex);
-        (*param->finish) = true;
-        param->cond->Signal();
-    }
-
-    delete param;
     delete reader;
+
+    // trigger user callback
+    ReleaseReadPrimaryTableContext(param, result, s);
 }
 
+/////////////////////////////////////////////////////
+////    Concurrently Read span in single row    /////
+/////////////////////////////////////////////////////
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result,
                                GetSingleRowCallback user_callback, void* user_param) {
     Mutex mu;
     CondVar cond(&mu);
     bool finish = false;
+    Status s;
 
+    // init RowReader callback param
     ReadPrimaryTableContext* param = new ReadPrimaryTableContext;
     param->table = this;
     param->result = result;
@@ -1057,14 +1104,20 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     }
 
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    tera::RowReader* reader = primary_table->NewRowReader(primary_key);
-    reader->AddColumnFamily(kPrimaryTableColumnFamily);
-    reader->SetCallBack(ReadPrimaryTableCallback);
-    reader->SetContext(param);
+    if (primary_table == NULL) {
+        VLOG(12) << "primary table " << table_desc_.table_name << " not exit";
+        s = Status::NotFound("row not found");
+        ReleaseReadPrimaryTableContext(param, result, s);
+    } else {
+        tera::RowReader* reader = primary_table->NewRowReader(primary_key);
+        reader->AddColumnFamily(kPrimaryTableColumnFamily);
+        reader->SetCallBack(ReadPrimaryTableCallback);
+        reader->SetContext(param);
 
-    VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
-        << ", primary key: " << DebugString(primary_key);
-    primary_table->Get(reader);
+        VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
+            << ", primary key: " << DebugString(primary_key);
+        primary_table->Get(reader);
+    }
 
     if (user_callback == NULL) {
         MutexLock l(&mu);
@@ -1096,15 +1149,25 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
 tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
     std::string index_table_name = tera_.table_prefix_ + "#pri#" + table_name;
     VLOG(12) << "get primary table: " << index_table_name;
-    tera::Table* table = tera_.tera_table_map_[index_table_name];
-    return table;
+    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
+    if (it != tera_.tera_table_map_.end()) {
+        return it->second;
+    } else {
+        VLOG(12) << "not index table " << index_table_name;
+        return NULL;
+    }
 }
 
 tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + index_name;
     VLOG(12) << "get index table: " << index_table_name;
-    tera::Table* table = tera_.tera_table_map_[index_table_name];
-    return table;
+    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
+    if (it != tera_.tera_table_map_.end()) {
+        return it->second;
+    } else {
+        VLOG(12) << "not index table " << index_table_name;
+        return NULL;
+    }
 }
 
 tera::Table* TableImpl::GetTimestampTable() {
@@ -1114,8 +1177,13 @@ tera::Table* TableImpl::GetTimestampTable() {
     snprintf(ts_name, sizeof(ts_name), "timestamp#%d", cur_timestamp_table_id_);
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
     VLOG(12) << "get index table: " << index_table_name;
-    tera::Table* table = tera_.tera_table_map_[index_table_name];
-    return table;
+    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
+    if (it != tera_.tera_table_map_.end()) {
+        return it->second;
+    } else {
+        VLOG(12) << "not index table " << index_table_name;
+        return NULL;
+    }
 }
 
 void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
@@ -1123,8 +1191,13 @@ void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
         char ts_name[32];
         snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
         std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
-        tera::Table* table = tera_.tera_table_map_[index_table_name];
-        table_list->push_back(table);
+
+        std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
+        if (it != tera_.tera_table_map_.end()) {
+            table_list->push_back(it->second);
+        } else {
+            VLOG(12) << "not index table " << index_table_name;
+        }
     }
 }
 
