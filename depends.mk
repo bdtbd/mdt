@@ -62,5 +62,5 @@ DEPS_LIBRARIES = $(TERA_LIBDIR)/libtera.a $(INS_LIBDIR)/libins_sdk.a \
                  $(SNAPPY_LIBDIR)/libsnappy.a $(ZOOKEEPER_LIBDIR)/libzookeeper_mt.a \
                  $(GTEST_LIBDIR)/libgtest_main.a $(GTEST_LIBDIR)/libgtest.a \
                  $(GLOG_LIBDIR)/libglog.a $(GFLAGS_LIBDIR)/libgflags.a \
-		 $(GPERFTOOLS_LIBDIR)/libtcmalloc_minimal.a
+                 $(GPERFTOOLS_LIBDIR)/libtcmalloc_minimal.a
 

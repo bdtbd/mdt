@@ -21,3 +21,6 @@ DEFINE_bool(use_tera_async_write, true, "if true, use tera async write");
 DEFINE_int64(write_batch_queue_size, 0, "the num of write request can batch in single thread");
 DEFINE_int64(request_queue_flush_internal, 10, "the number of ms wait before flush request");
 DEFINE_int64(max_timestamp_table_num, 10,  "num of timestamp index table");
+
+// read ops param
+DEFINE_int64(read_file_thread_num, 100,  "num of read file threads");
