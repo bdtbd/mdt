@@ -1065,7 +1065,6 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 
     // Get Row result status
     const std::string& primary_key = reader->RowName();
-    VLOG(12) << "read data of primary key: " << primary_key;
     Status s;
     if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
         s = Status::IOError("tera error");
