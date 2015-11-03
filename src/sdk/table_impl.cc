@@ -788,9 +788,9 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
         scan_desc->SetTimeRange(end_timestamp, start_timestamp);
 
-        index_table_vec[i] = index_table;
-        scan_desc_vec[i] = scan_desc;
-        scan_stream_vec[i] = NULL;
+        index_table_vec[valid_nr_index_table] = index_table;
+        scan_desc_vec[valid_nr_index_table] = scan_desc;
+        scan_stream_vec[valid_nr_index_table] = NULL;
         valid_nr_index_table++;
     }
 
