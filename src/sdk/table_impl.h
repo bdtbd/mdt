@@ -129,6 +129,8 @@ struct IndexConditionExtend {
     bool flag2;
 };
 
+typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
+
 class TableImpl : public Table {
 public:
     TableImpl(const TableDescription& table_desc,
@@ -190,8 +192,6 @@ private:
 
     int32_t GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
                     std::vector<ResultStream>* row_list);
-
-    typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
 
     static void ReadPrimaryTableCallback(tera::RowReader* reader);
 
