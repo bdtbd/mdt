@@ -35,7 +35,5 @@ TraceIdentify GetTraceIdentify() {
     return id;
 }
 
-void Log(int level, const char* fmt, ...);
-void Log(int level, const char* value, const char* fmt, ...);
 }
 
