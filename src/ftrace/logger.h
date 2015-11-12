@@ -3,7 +3,8 @@
 
 #include <iostream>
 #include <stdint.h>
-#include <proto/ftrace.pb.h>
+#include <google/protobuf/message.h>
+//#include <proto/ftrace.pb.h>
 
 namespace mdt {
 
@@ -22,7 +23,7 @@ void ReleaseTrace();
 void KvLog(int level, const char* value, const char* fmt, ...);
 void Log(int level, const char* fmt, ...);
 
-TraceIdentify GetTraceIdentify();
+//TraceIdentify GetTraceIdentify();
 
 // galaxy interface
 void OpenProtoBufLog(const std::string& dbname, const std::string& tablename);

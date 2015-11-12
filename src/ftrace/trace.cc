@@ -14,6 +14,9 @@ DECLARE_string(flagfile);
 DECLARE_uint64(max_text_annotation_size);
 DECLARE_uint64(log_level);
 
+DECLARE_bool(use_mdt_flag);
+DECLARE_string(mdt_flagfile);
+
 namespace mdt {
 
 pthread_key_t TraceModule::thread_key; // thread_load variable
@@ -42,6 +45,19 @@ void TraceModule::InitTraceModule(const std::string& flagfile) {
         FLAGS_flagfile = local_flagfile;
         std::cout << "ZIPLOG: use " << flagfile << " to configure lib\n";
     }
+
+    //mdt.flag enable
+    if (FLAGS_use_mdt_flag) {
+        int ac = 1;
+        char** av = new char*[2];
+        av[0] = (char*)"dummy";
+        av[1] = NULL;
+        std::string local_flagfile = FLAGS_flagfile;
+        FLAGS_flagfile = FLAGS_mdt_flagfile;
+        ::google::ParseCommandLineFlags(&ac, &av, true);
+        delete av;
+        FLAGS_flagfile = local_flagfile;
+    }
     pthread_key_create(&thread_key, NilCallback);
     return;
 }
@@ -62,7 +78,19 @@ std::string TraceModule::GetFieldValue(::google::protobuf::Message* message,
     if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_UINT64) {
         uint64_t val = (uint64_t)reflection->GetUInt64(*message, field);
         return Uint64ToString(val);
+    } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_INT64) {
+        uint64_t val = (uint64_t)reflection->GetInt64(*message, field);
+        //std::cout << "GetInt64: " << val << std::endl;
+        return Uint64ToString(val);
+    } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_INT32) {
+        uint64_t val = (uint64_t)reflection->GetInt32(*message, field);
+        //std::cout << "GetInt32: " << val << std::endl;
+        return Uint64ToString(val);
+    } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_UINT32) {
+        uint64_t val = (uint64_t)reflection->GetUInt32(*message, field);
+        return Uint64ToString(val);
     } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_STRING) {
+        //std::cout << "GetString: " << reflection->GetString(*message, field) << std::endl;
         return reflection->GetString(*message, field);
     } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_BYTES) {
         return reflection->GetString(*message, field);

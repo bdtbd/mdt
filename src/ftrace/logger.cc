@@ -9,8 +9,10 @@
 #include "ftrace/trace.h"
 #include <google/protobuf/message.h>
 #include <google/protobuf/descriptor.h>
+#include <google/protobuf/descriptor.pb.h>
 
 DECLARE_uint64(max_text_annotation_size);
+DECLARE_bool(enable_debug_put_pb);
 
 namespace mdt {
 
@@ -38,6 +40,7 @@ void ReleaseTrace() {
     Trace::ReleaseTrace();
 }
 
+/*
 TraceIdentify GetTraceIdentify() {
     TraceIdentify id;
     Trace* trace = Trace::TopThreadValue();
@@ -47,6 +50,7 @@ TraceIdentify GetTraceIdentify() {
     id.CopyFrom(trace->GetTraceID());
     return id;
 }
+*/
 
 void Log(int level, const char* fmt, ...) {
     char anno_buf[FLAGS_max_text_annotation_size];
@@ -79,33 +83,47 @@ void CloseProtoBufLog(const std::string& dbname, const std::string& tablename) {
     TraceModule::CloseProtoBufLog(dbname, tablename);
 }
 
+static ::google::protobuf::DescriptorProto descriptor_proto;
+
 void DummyPutCallback(mdt::Table* table, mdt::StoreRequest* request,
                         mdt::StoreResponse* response,
                         void* callback_param) {
+    if (FLAGS_enable_debug_put_pb) {
+        std::cout << "put callback\n";
+        const ::google::protobuf::Descriptor* descriptor = descriptor_proto.descriptor();
+        std::cout << descriptor->DebugString();
+    }
     delete request;
     delete response;
 }
 void LogProtoBuf(const std::string& primary_key_name, ::google::protobuf::Message* message) {
     const ::google::protobuf::Descriptor* descriptor = message->GetDescriptor();
-    const std::string& dbname = descriptor->full_name();
     const std::string& tablename = descriptor->name();
+    const std::string& fullname = descriptor->full_name();
+    std::string dbname(fullname, 0, fullname.size() - tablename.size() - 1);
     ::mdt::Table* table = TraceModule::GetProtoBufTable(dbname, tablename);
     if (table == NULL) return ;
 
+    descriptor_proto.Clear();
+    descriptor->CopyTo(&descriptor_proto);
+
     // store pb
-    bool log_invalid = false;
+    bool log_valid = false;
     ::mdt::StoreRequest* req = new ::mdt::StoreRequest;
     ::mdt::StoreResponse* resp = new ::mdt::StoreResponse;
     for (int i = 0; i < descriptor->field_count(); i++) {
         const ::google::protobuf::FieldDescriptor* field = descriptor->field(i);
-        if (field == NULL) continue;
+        const ::google::protobuf::Reflection* reflection = message->GetReflection();
+        if (field == NULL || !reflection->HasField(*message, field)) continue;
         if (primary_key_name == field->name()) {
             req->primary_key = TraceModule::GetFieldValue(message, field);
             req->timestamp = ::mdt::timer::get_micros();
             std::ostringstream ostr;
             if (message->SerializeToOstream(&ostr)) {
                 req->data = ostr.str();
-                log_invalid = true;
+                log_valid = true;
+            } else {
+                std::cout << "serialstring fail\n";
             }
         } else {
             ::mdt::Index idx;
@@ -117,7 +135,7 @@ void LogProtoBuf(const std::string& primary_key_name, ::google::protobuf::Messag
     }
 
     ::mdt::StoreCallback callback = DummyPutCallback;
-    if (!log_invalid) {
+    if (log_valid) {
         table->Put(req, resp, callback, NULL);
     } else {
         callback(table, req, resp, NULL);
