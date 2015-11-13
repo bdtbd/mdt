@@ -3,6 +3,8 @@
 #include "ftrace/logger.h"
 #include "util/mutex.h"
 
+#include "proto/ftrace_test.pb.h"
+
 typedef void* (*ThreadFunc)(void*);
 struct ThreadQueue {
     mdt::Mutex mu;
@@ -102,8 +104,32 @@ void* FuncA(void* arg) {
 }
 ThreadQueue prepare_queue(FuncA);
 
+void TEST_case002() {
+    ::mdt::galaxy::test::PodStat pod_stat;
+    std::cout << "case002...\n";
+    ::mdt::OpenProtoBufLog("mdt.galaxy.test", "PodStat");
+    ::mdt::LogProtoBuf("id", &pod_stat);
+    //::mdt::CloseProtoBufLog("mdt.galaxy.test", "PodStat");
+}
+
+void TEST_case003() {
+    ::mdt::galaxy::test::PodStat pod_stat;
+    std::cout << "case003...\n";
+    pod_stat.set_id("88880000aaaa");
+    pod_stat.set_jobid("ddddeeeeffff");
+    pod_stat.set_cpu_used(80);
+    pod_stat.set_mem_used(1000000000);
+    pod_stat.set_cpu_quota(90);
+    pod_stat.set_mem_quota(2000000000);
+    pod_stat.set_dynamic_cpu_quota(85);
+    pod_stat.set_dynamic_mem_quota(1500000000);
+    ::mdt::OpenProtoBufLog("mdt.galaxy.test", "PodStat");
+    ::mdt::LogProtoBuf("id", &pod_stat);
+    //::mdt::CloseProtoBufLog("mdt.galaxy.test", "PodStat");
+}
+
 int main(int ac, char* av[]) {
-    ::mdt::InitTraceModule("./conf/trace.flag");
+    ::mdt::InitTraceModule("../conf/ftrace.flag");
 
     // construct request
     char* ctx = new char[100];
@@ -138,6 +164,10 @@ int main(int ac, char* av[]) {
     pthread_join(h_tid, NULL);
     pthread_join(c_tid, NULL);
     delete ctx;
+
+    // test case
+    TEST_case003();
+    TEST_case002();
     return 0;
 }
 
