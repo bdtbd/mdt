@@ -128,6 +128,15 @@ void TEST_case003() {
     //::mdt::CloseProtoBufLog("mdt.galaxy.test", "PodStat");
 }
 
+void TEST_case004() {
+    std::cout << "test case4 ..., open 4 table, begin\n";
+    ::mdt::OpenProtoBufLog("baidu.galaxy", "PodStat");
+    ::mdt::OpenProtoBufLog("baidu.galaxy", "PodEvent");
+    ::mdt::OpenProtoBufLog("baidu.galaxy", "JobStat");
+    ::mdt::OpenProtoBufLog("baidu.galaxy", "JobEvent");
+    std::cout << "test case4 ..., open 4 table, success\n";
+}
+
 int main(int ac, char* av[]) {
     ::mdt::InitTraceModule("../conf/ftrace.flag");
 
@@ -168,6 +177,7 @@ int main(int ac, char* av[]) {
     // test case
     TEST_case003();
     TEST_case002();
+    TEST_case004();
     return 0;
 }
 

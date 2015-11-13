@@ -128,6 +128,8 @@ void TraceModule::OpenProtoBufLog(const std::string& dbname, const std::string& 
             return;
         }
         dbmap.insert(std::pair<std::string, ::mdt::Database*>(dbname, db_ptr));
+    } else {
+        db_ptr = db_it->second;
     }
 
     // open table
