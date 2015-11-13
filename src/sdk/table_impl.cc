@@ -625,6 +625,7 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
     VLOG(10) << "get by timestamp table: " << DebugString(start_ts_key) << " ~ "
              << DebugString(end_ts_key);
     // read trace row from ts table
+    std::set<std::string> primary_key_set;
     for (size_t i = 0; (int32_t)result_list->size() < limit && i < ts_table_list.size(); i++) {
         tera::Table* ts_table = ts_table_list[i];
         tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
@@ -640,12 +641,15 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
             const std::string& primary_key = result->Qualifier();
             VLOG(12) << "select op, primary key: " << primary_key;
 
-            primary_key_list.push_back(primary_key);
+            // if primary_key has not been read, read it.
+            if (primary_key_set.find(primary_key) == primary_key_set.end()) {
+                primary_key_set.insert(primary_key);
+                primary_key_list.push_back(primary_key);
+            }
             if ((int32_t)primary_key_list.size() >= limit) {
                 GetRows(primary_key_list, limit - result_list->size(), result_list);
                 primary_key_list.clear();
             }
-
             result->Next();
         }
         if (primary_key_list.size() > 0) {
