@@ -1121,7 +1121,9 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     } else {
         tera::RowReader* reader = primary_table->NewRowReader(primary_key);
         reader->AddColumnFamily(kPrimaryTableColumnFamily);
-        reader->SetTimeRange(start_timestamp, end_timestamp);
+        // if end_timestamp == 0, then read the whole trace row
+        if (end_timestamp > 0)
+            reader->SetTimeRange(start_timestamp, end_timestamp);
         reader->SetCallBack(ReadPrimaryTableCallback);
         reader->SetContext(param);
 
