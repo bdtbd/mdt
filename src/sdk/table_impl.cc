@@ -501,28 +501,56 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
     context->counter_.Set(2 + req->index_list.size());
 
+    // sort indexes
+    std::map<std::string, std::string> index_map;
+    std::vector<Index>::const_iterator it;
+    for (it = req->index_list.begin(); it != req->index_list.end(); ++it) {
+        const std::string& index_name = it->index_name;
+        const std::string& index_key = it->index_key;
+        if (index_name == "" || index_key == "") {
+            LOG(WARNING) << "invalid index : " << index_name << " : " << index_key;
+            continue;
+        }
+        index_map[index_name] = index_key;
+    }
+
+    // convert indexes to buffer
+    std::string index_pack;
+    std::map<std::string, std::string>::iterator map_it;
+    for (map_it = index_map.begin(); map_it != index_map.end(); ++map_it) {
+        const std::string& index_name = map_it->first;
+        const std::string& index_key = map_it->second;
+        uint32_t index_len = index_name.size() + 1 + index_key.size();
+        index_pack.append((char*)&index_len, sizeof(index_len));
+        index_pack.append(index_name);
+        index_pack.append(":");
+        index_pack.append(index_key);
+    }
+
     // update primary table
     VLOG(10) << "write pri : " << req->primary_key;
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     std::string primary_key = req->primary_key;
     VLOG(12) << " write pri table, primary key: " << primary_key;
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
-    primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
+    primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, index_pack);
     primary_row->SetContext(context);
     primary_row->SetCallBack(PutCallback);
     primary_table->ApplyMutation(primary_row);
 
     // write index tables
-    std::vector<Index>::const_iterator it;
-    for (it = req->index_list.begin();
-         it != req->index_list.end();
-         ++it) {
-        tera::Table* index_table = GetIndexTable(it->index_name);
+    char buf[8];
+    EncodeBigEndian(buf, req->timestamp);
+    std::string ts_key(buf, sizeof(buf));
+    std::string time_primay_key = ts_key + primary_key;
+    for (map_it = index_map.begin(); map_it != index_map.end(); ++map_it) {
+        const std::string& index_name = map_it->first;
+        const std::string& index_key = map_it->second;
+        tera::Table* index_table = GetIndexTable(index_name);
         CHECK_NOTNULL(index_table);
-        std::string index_key = it->index_key;
-        VLOG(12) << " write index table: " << it->index_name << ", index key: " << index_key;
+        VLOG(12) << " write index table: " << index_name << ", index key: " << index_key;
         tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
-        index_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
+        index_row->Put(kIndexTableColumnFamily, time_primay_key, req->timestamp, null_value);
         index_row->SetContext(context);
         index_row->SetCallBack(PutCallback);
         index_table->ApplyMutation(index_row);
@@ -530,9 +558,6 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 
     // write timestamp table
     tera::Table* ts_table = GetTimestampTable();
-    char buf[8];
-    EncodeBigEndian(buf, req->timestamp);
-    std::string ts_key(buf, sizeof(buf));
     VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< req->timestamp
              << ", ts string: " << DebugString(ts_key);
     tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
@@ -833,7 +858,7 @@ tera::ResultStream* TableImpl::ScanIndexTable(tera::Table* index_table,
     }
     CHECK_NOTNULL(result);
     while (!result->Done() && (int32_t)primary_key_list->size() < limit) {
-        const std::string& primary_key = result->Qualifier();
+        std::string primary_key(result->Qualifier(), 8, std::string::npos);
         primary_key_list->push_back(primary_key);
         VLOG(12) << "select op, primary key: " << primary_key;
         result->Next();
