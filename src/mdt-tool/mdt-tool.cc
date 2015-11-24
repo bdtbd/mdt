@@ -180,11 +180,20 @@ int CreateTableOp(std::vector<std::string>& cmd_vec) {
     std::cout << "create table ..." << std::endl;
     mdt::TableDescription table_desc;
     table_desc.table_name = cmd_vec[2];
-    if (cmd_vec[3].compare("kBytes") != 0) {
-        std::cout << "create table fail, primary key type not support!\n";
+    if (cmd_vec[3].compare("kBytes") == 0) {
+        table_desc.primary_key_type = mdt::kBytes;
+    } else if (cmd_vec[3].compare("kUInt64") == 0) {
+        table_desc.primary_key_type = mdt::kUInt64;
+    } else if (cmd_vec[3].compare("kInt64") == 0) {
+        table_desc.primary_key_type = mdt::kInt64;
+    } else if (cmd_vec[3].compare("kUInt32") == 0) {
+        table_desc.primary_key_type = mdt::kUInt32;
+    } else if (cmd_vec[3].compare("kInt32") == 0) {
+        table_desc.primary_key_type = mdt::kInt32;
+    } else {
+        std::cout << "create table fail, primary key type not support!, support kBytes, kUInt64...\n";
         return 0;
     }
-    table_desc.primary_key_type = mdt::kBytes;
 
     int num_index = cmd_vec.size() - 4;
     if (num_index % 2 != 0) {
@@ -194,12 +203,21 @@ int CreateTableOp(std::vector<std::string>& cmd_vec) {
     for (int i = 0; i < num_index; i += 2) {
         mdt::IndexDescription table_index;
         table_index.index_name = cmd_vec[i + 4];
-        if (cmd_vec[i + 5].compare("kBytes") != 0) {
+        if (cmd_vec[i + 5].compare("kBytes") == 0) {
+            table_index.index_key_type = mdt::kBytes;
+        } else if (cmd_vec[i + 5].compare("kUInt64") == 0) {
+            table_index.index_key_type = mdt::kUInt64;
+        } else if (cmd_vec[i + 5].compare("kInt64") == 0) {
+            table_index.index_key_type = mdt::kInt64;
+        } else if (cmd_vec[i + 5].compare("kUInt32") == 0) {
+            table_index.index_key_type = mdt::kUInt32;
+        } else if (cmd_vec[i + 5].compare("kInt32") == 0) {
+            table_index.index_key_type = mdt::kInt32;
+        } else {
             std::cout << "create table fail, index key: " << cmd_vec[i + 4]
                 << ", key type not support!\n";
             return 0;
         }
-        table_index.index_key_type = mdt::kBytes;
         table_desc.index_descriptor_list.push_back(table_index);
     }
     CreateTable(db, table_desc);
