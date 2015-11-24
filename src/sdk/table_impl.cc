@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <deque>
+#include <sstream>
 
 #include <boost/bind.hpp>
 #include <glog/logging.h>
@@ -583,8 +584,8 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 }
 
 Status TableImpl::StringToTypeString(const std::string& index_table,
-                                      const std::string& key,
-                                      std::string* type_key) {
+                                     const std::string& key,
+                                     std::string* type_key) {
     // primary key
     if (index_table == "pri") {
         if (table_desc_.primary_key_type == ::mdt::kBytes) {
@@ -630,6 +631,51 @@ Status TableImpl::StringToTypeString(const std::string& index_table,
         }
     }
     *type_key = key;
+    return Status::OK();
+}
+
+Status TableImpl::TypeStringToString(const std::string& index_table,
+                                     const std::string& type_key,
+                                     std::string* key) {
+    if (index_table == "pri") {
+        if (table_desc_.primary_key_type == ::mdt::kBytes) {
+            *key = type_key;
+            return Status::OK();
+        } else if (table_desc_.primary_key_type == ::mdt::kUInt32 ||
+                   table_desc_.primary_key_type == ::mdt::kUInt64 ||
+                   table_desc_.primary_key_type == ::mdt::kInt32 ||
+                   table_desc_.primary_key_type == ::mdt::kInt64) {
+            uint64_t ikey = DecodeBigEndain(type_key.c_str());
+            std::ostringstream convert;
+            convert << ikey;
+            *key = convert.str();
+            return Status::OK();
+        }
+    } else {
+        std::vector<IndexDescription>::iterator it = table_desc_.index_descriptor_list.begin();
+        for (; it != table_desc_.index_descriptor_list.end(); ++it) {
+            IndexDescription& desc = *it;
+            if (desc.index_name == index_table) {
+                if (desc.index_key_type == ::mdt::kBytes) {
+                    *key = type_key;
+                    return Status::OK();
+                } else if (desc.index_key_type == ::mdt::kUInt32 ||
+                           desc.index_key_type == ::mdt::kUInt64 ||
+                           desc.index_key_type == ::mdt::kInt32 ||
+                           desc.index_key_type == ::mdt::kInt64) {
+                    uint64_t ikey = DecodeBigEndain(type_key.c_str());
+                    std::ostringstream convert;
+                    convert << ikey;
+                    *key = convert.str();
+                    return Status::OK();
+                } else {
+                    *key = type_key;
+                    return Status::OK();
+                }
+            }
+        }
+    }
+    *key = type_key;
     return Status::OK();
 }
 
@@ -1145,7 +1191,9 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
         s = Status::IOError("tera error");
     } else if (result->result_data_list.size() > 0) {
-        result->primary_key = primary_key;
+        std::string primary_key_readable;
+        TypeStringToString("pri", primary_key, &primary_key_readable);
+        result->primary_key = primary_key_readable;
         s = Status::OK();
     } else {
         s = Status::NotFound("row not found");
@@ -1178,14 +1226,16 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         param->finish = &finish;
     }
 
+    std::string typed_primary_key;
+    StringToTypeString("pri", primary_key, &typed_primary_key);
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    tera::RowReader* reader = primary_table->NewRowReader(primary_key);
+    tera::RowReader* reader = primary_table->NewRowReader(typed_primary_key);
     reader->AddColumnFamily(kPrimaryTableColumnFamily);
     reader->SetCallBack(ReadPrimaryTableCallback);
     reader->SetContext(param);
 
     VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
-        << ", primary key: " << DebugString(primary_key);
+        << ", primary key: " << DebugString(typed_primary_key);
     primary_table->Get(reader);
 
     if (user_callback == NULL) {
