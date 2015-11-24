@@ -1102,20 +1102,14 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     }
 
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    if (primary_table == NULL) {
-        VLOG(12) << "primary table " << table_desc_.table_name << " not exit";
-        s = Status::NotFound("row not found");
-        ReleaseReadPrimaryTableContext(param, result, s);
-    } else {
-        tera::RowReader* reader = primary_table->NewRowReader(primary_key);
-        reader->AddColumnFamily(kPrimaryTableColumnFamily);
-        reader->SetCallBack(ReadPrimaryTableCallback);
-        reader->SetContext(param);
+    tera::RowReader* reader = primary_table->NewRowReader(primary_key);
+    reader->AddColumnFamily(kPrimaryTableColumnFamily);
+    reader->SetCallBack(ReadPrimaryTableCallback);
+    reader->SetContext(param);
 
-        VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
-            << ", primary key: " << DebugString(primary_key);
-        primary_table->Get(reader);
-    }
+    VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
+        << ", primary key: " << DebugString(primary_key);
+    primary_table->Get(reader);
 
     if (user_callback == NULL) {
         MutexLock l(&mu);
