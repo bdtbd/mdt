@@ -530,6 +530,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         index_pack.append((char*)&index_len, sizeof(index_len));
         index_pack.append(index_name);
         index_pack.append(":");
+        // TODO: need convert to type_string??
         index_pack.append(index_key);
     }
 
