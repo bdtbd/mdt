@@ -510,17 +510,12 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     // update primary table
     VLOG(10) << "write pri : " << req->primary_key;
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    if (primary_table == NULL) {
-        VLOG(12) << "write primary table: " << table_desc_.table_name << ", no such table";
-        ReleasePutContext(context);
-    } else {
-        VLOG(12) << " write pri table, primary key: " << primary_key;
-        tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
-        primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
-        primary_row->SetContext(context);
-        primary_row->SetCallBack(PutCallback);
-        primary_table->ApplyMutation(primary_row);
-    }
+    VLOG(12) << " write pri table, primary key: " << primary_key;
+    tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
+    primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, null_value);
+    primary_row->SetContext(context);
+    primary_row->SetCallBack(PutCallback);
+    primary_table->ApplyMutation(primary_row);
 
     // write index tables
     std::vector<Index>::const_iterator it;
@@ -1152,13 +1147,8 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
 tera::Table* TableImpl::GetPrimaryTable(const std::string& table_name) {
     std::string index_table_name = tera_.table_prefix_ + "#pri#" + table_name;
     VLOG(12) << "get primary table: " << index_table_name;
-    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
-    if (it != tera_.tera_table_map_.end()) {
-        return it->second;
-    } else {
-        VLOG(12) << "not index table " << index_table_name;
-        return NULL;
-    }
+    tera::Table* table = tera_.tera_table_map_[index_table_name];
+    return table;
 }
 
 tera::Table* TableImpl::GetIndexTable(const std::string& index_name) {
@@ -1180,13 +1170,8 @@ tera::Table* TableImpl::GetTimestampTable() {
     snprintf(ts_name, sizeof(ts_name), "timestamp#%d", cur_timestamp_table_id_);
     std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
     VLOG(12) << "get index table: " << index_table_name;
-    std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
-    if (it != tera_.tera_table_map_.end()) {
-        return it->second;
-    } else {
-        VLOG(12) << "not index table " << index_table_name;
-        return NULL;
-    }
+    tera::Table* table = tera_.tera_table_map_[index_table_name];
+    return table;
 }
 
 void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
@@ -1194,13 +1179,8 @@ void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
         char ts_name[32];
         snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
         std::string index_table_name = tera_.table_prefix_ + "#" + table_desc_.table_name + "#" + ts_name;
-
-        std::map<std::string, tera::Table*>::iterator it = tera_.tera_table_map_.find(index_table_name);
-        if (it != tera_.tera_table_map_.end()) {
-            table_list->push_back(it->second);
-        } else {
-            VLOG(12) << "not index table " << index_table_name;
-        }
+        tera::Table* table = tera_.tera_table_map_[index_table_name];
+        table_list->push_back(table);
     }
 }
 
