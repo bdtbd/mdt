@@ -506,7 +506,6 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     PutContext* context = new PutContext(this, req, resp, callback, callback_param);
     context->counter_.Set(2 + req->index_list.size());
 
-    std::string primary_key = req->primary_key;
     // sort indexes
     std::map<std::string, std::string> index_map;
     std::vector<Index>::const_iterator it;
@@ -534,9 +533,11 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     }
 
     // update primary table
-    VLOG(10) << "write pri : " << req->primary_key;
+    std::string primary_key;
+    StringToTypeString("pri", req->primary_key, &primary_key);
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    VLOG(12) << " write pri table, primary key: " << primary_key;
+    VLOG(12) << " write pri table, primary key: " << req->primary_key
+        << ", typed_primary_key " << DebugString(primary_key);
     tera::RowMutation* primary_row = primary_table->NewRowMutation(primary_key);
     primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), req->timestamp, index_pack);
     primary_row->SetContext(context);
@@ -557,8 +558,11 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
             ReleasePutContext(context);
             continue;
         }
-        VLOG(12) << " write index table: " << index_name << ", index key: " << index_key;
-        tera::RowMutation* index_row = index_table->NewRowMutation(index_key);
+        std::string typed_index_key;
+        StringToTypeString(index_name, index_key, &typed_index_key);
+        VLOG(12) << " write index table: " << index_name << ", index key: " << index_key
+            << ", typed_index_key " << DebugString(typed_index_key);
+        tera::RowMutation* index_row = index_table->NewRowMutation(typed_index_key);
         index_row->Put(kIndexTableColumnFamily, time_primay_key, req->timestamp, null_value);
         index_row->SetContext(context);
         index_row->SetCallBack(PutCallback);
@@ -578,6 +582,58 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     return 0;
 }
 
+Status TableImpl::StringToTypeString(const std::string& index_table,
+                                      const std::string& key,
+                                      std::string* type_key) {
+    // primary key
+    if (index_table == "pri") {
+        if (table_desc_.primary_key_type == ::mdt::kBytes) {
+            *type_key = key;
+            return Status::OK();
+        } else if (table_desc_.primary_key_type == ::mdt::kUInt32 ||
+                   table_desc_.primary_key_type == ::mdt::kUInt64 ||
+                   table_desc_.primary_key_type == ::mdt::kInt32 ||
+                   table_desc_.primary_key_type == ::mdt::kInt64) {
+            uint64_t ikey = (uint64_t)atol(key.c_str());
+            char buf[8];
+            EncodeBigEndian(buf, ikey);
+            std::string ikey_str(buf, sizeof(buf));
+            *type_key = ikey_str;
+            return Status::OK();
+        } else {
+            *type_key = key;
+            return Status::OK();
+        }
+    } else {
+        std::vector<IndexDescription>::iterator it = table_desc_.index_descriptor_list.begin();
+        for (; it != table_desc_.index_descriptor_list.end(); ++it) {
+            IndexDescription& desc = *it;
+            if (desc.index_name == index_table) {
+                if (desc.index_key_type == ::mdt::kBytes) {
+                    *type_key = key;
+                    return Status::OK();
+                } else if (desc.index_key_type == ::mdt::kUInt32 ||
+                           desc.index_key_type == ::mdt::kUInt64 ||
+                           desc.index_key_type == ::mdt::kInt32 ||
+                           desc.index_key_type == ::mdt::kInt64) {
+                    uint64_t ikey = (uint64_t)atol(key.c_str());
+                    char buf[8];
+                    EncodeBigEndian(buf, ikey);
+                    std::string ikey_str(buf, sizeof(buf));
+                    *type_key = ikey_str;
+                    return Status::OK();
+                } else {
+                    *type_key = key;
+                    return Status::OK();
+                }
+            }
+        }
+    }
+    *type_key = key;
+    return Status::OK();
+}
+
+// search interface
 Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
                       void* callback_param) {
     Status s;
