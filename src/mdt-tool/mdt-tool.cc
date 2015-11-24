@@ -20,6 +20,7 @@
 #include "util/env.h"
 #include "util/coding.h"
 
+DECLARE_string(flagfile);
 
 char* StripWhite(char* line) {
     char *s, *t;
@@ -77,9 +78,10 @@ int GetOp(std::vector<std::string>& cmd_vec) {
 
     // search test
     mdt::SearchRequest* search_req = new mdt::SearchRequest;
+    //search_req->primary_key = cmd_vec[];
+    search_req->limit = 10;
     search_req->start_timestamp = 0;
     search_req->end_timestamp = time(NULL);
-
     int num_index = cmd_vec.size() - 6;
     if (num_index % 3 != 0) {
         std::cout << "num of condition index not match\n";
@@ -204,7 +206,23 @@ int CreateTableOp(std::vector<std::string>& cmd_vec) {
     return 0;
 }
 
+void ParseFlagFile(const std::string& flagfile) {
+    int ac = 1;
+    char** av = new char*[2];
+    av[0] = (char*)"dummy";
+    av[1] = NULL;
+    std::string local_flagfile = FLAGS_flagfile;
+    FLAGS_flagfile = flagfile;
+    ::google::ParseCommandLineFlags(&ac, &av, true);
+    delete av;
+    FLAGS_flagfile = local_flagfile;
+    return;
+}
+
 int main(int ac, char* av[]) {
+    // Parse flagfile
+    std::cout << "default configure path, ../conf/mdt.flag\n";
+    ParseFlagFile("../conf/mdt.flag");
     while (1) {
         char *line = readline("mdt:");
         char *cmd = StripWhite(line);
@@ -223,7 +241,7 @@ int main(int ac, char* av[]) {
             HelpManue();
             free(line);
             continue;
-        } else if (cmd_vec[0].compare("CreateTable") == 0 && cmd_vec.size() >= 6) {
+        } else if (cmd_vec[0].compare("CreateTable") == 0 && cmd_vec.size() >= 4) {
             // cmd: CreateTable dbname tablename primary_key_type [index_name index_type]...
             std::cout << "create table: dbname " << cmd_vec[1]
                 << "tablename " << cmd_vec[2]
@@ -236,7 +254,7 @@ int main(int ac, char* av[]) {
             PutOp(cmd_vec);
             free(line);
             continue;
-        } else if (cmd_vec[0].compare("Get") == 0 && cmd_vec.size() >= 9) {
+        } else if (cmd_vec[0].compare("Get") == 0 && cmd_vec.size() >= 6) {
             // cmd: Get dbname tablename start_ts(ignore) end_ts(ignore) limit(ignore) [index_name cmp(=, >=, >, <=, <) index_key]
             GetOp(cmd_vec);
             free(line);
