@@ -687,9 +687,21 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
                       void* callback_param) {
     Status s;
     if (!req->primary_key.empty()) {
-        GetByPrimaryKey(req->primary_key, &resp->result_stream);
+        // convert primary key
+        std::string type_primary_key;
+        StringToTypeString("pri", req->primary_key, &type_primary_key);
+        GetByPrimaryKey(type_primary_key, &resp->result_stream);
     } else if (req->index_condition_list.size() > 0) {
-        GetByIndex(req->index_condition_list, req->start_timestamp, req->end_timestamp,
+        // convert index key
+        std::vector<struct IndexCondition> index_condition_list = req->index_condition_list;
+        std::vector<struct IndexCondition>::iterator it = index_condition_list.begin();
+        for (; it != index_condition_list.end(); ++it) {
+            IndexCondition& index = *it;
+            std::string type_index_key;
+            StringToTypeString(index.index_name, index.compare_value, &type_index_key);
+            index.compare_value = type_index_key;
+        }
+        GetByIndex(index_condition_list, req->start_timestamp, req->end_timestamp,
                    req->limit, &resp->result_stream);
     } else {
         GetByTimestamp(req->start_timestamp, req->end_timestamp,
@@ -698,6 +710,15 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
 
     if (resp->result_stream.size() == 0) {
         s = Status::NotFound("not found");
+    } else {
+        std::vector<ResultStream>& result_stream = resp->result_stream;
+        std::vector<ResultStream>::iterator it = result_stream.begin();
+        for (; it != result_stream.end(); ++it) {
+            ResultStream& ret = *it;
+            std::string primary_key_readable;
+            TypeStringToString("pri", ret.primary_key, &primary_key_readable);
+            ret.primary_key = primary_key_readable;
+        }
     }
     return s;
 }
@@ -1313,9 +1334,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
         s = Status::IOError("tera error");
     } else if (result->result_data_list.size() > 0) {
-        std::string primary_key_readable;
-        TypeStringToString("pri", primary_key, &primary_key_readable);
-        result->primary_key = primary_key_readable;
+        result->primary_key = primary_key;
         s = Status::OK();
     } else {
         s = Status::NotFound("row not found");
@@ -1441,16 +1460,14 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         param->finish = &finish;
     }
 
-    std::string typed_primary_key;
-    StringToTypeString("pri", primary_key, &typed_primary_key);
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
-    tera::RowReader* reader = primary_table->NewRowReader(typed_primary_key);
+    tera::RowReader* reader = primary_table->NewRowReader(primary_key);
     reader->AddColumnFamily(kPrimaryTableColumnFamily);
     reader->SetCallBack(ReadPrimaryTableCallback);
     reader->SetContext(param);
 
     VLOG(12) << "begin to read primary table: " <<  table_desc_.table_name
-        << ", primary key: " << DebugString(typed_primary_key);
+        << ", primary key: " << DebugString(primary_key);
     primary_table->Get(reader);
 
     if (user_callback == NULL) {
