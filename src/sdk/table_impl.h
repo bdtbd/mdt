@@ -177,6 +177,12 @@ private:
                             int64_t start_timestamp, int64_t end_timestamp,
                             int32_t limit, std::vector<ResultStream>* result_list);
 
+    void GetByFilterIndex(tera::Table* index_table,
+                          tera::ScanDescriptor* scan_desc,
+                          int32_t limit, Mutex* mutex, int32_t* counter, bool* finish,
+                          const std::vector<IndexConditionExtend>* index_cond_list,
+                          std::map<std::string, ResultStream>* results);
+
     bool ScanMultiIndexTables(tera::Table** index_table_list,
                               tera::ScanDescriptor** scan_desc_list,
                               tera::ResultStream** scan_stream_list,
@@ -198,6 +204,7 @@ private:
     void ReadData(tera::RowReader* reader);
 
     Status GetSingleRow(const std::string& primary_key, ResultStream* result,
+                        const std::vector<IndexConditionExtend>* index_cond_list = NULL,
                         GetSingleRowCallback callback = NULL, void* callback_param = NULL);
 
     Status ReadDataFromFile(const FileLocation& location, std::string* data);
@@ -215,6 +222,10 @@ private:
     tera::Table* GetTimestampTable();
     void GetAllTimestampTables(std::vector<tera::Table*>* table_list);
     std::string TimeToString();
+    void ParseIndexesFromString(const std::string& index_buffer,
+                                std::multimap<std::string, std::string>* indexes);
+    bool TestIndexCondition(const std::vector<IndexConditionExtend>& index_cond_list,
+                            const std::multimap<std::string, std::string>& index_list);
 
 private:
     // NOTE： WriteHandle can not operator in race condition
