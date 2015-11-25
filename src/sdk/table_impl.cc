@@ -22,6 +22,7 @@ DECLARE_int64(write_batch_queue_size);
 DECLARE_int64(request_queue_flush_internal);
 DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(read_file_thread_num);
+DECLARE_bool(read_by_index_filter);
 
 namespace mdt {
 
@@ -526,12 +527,13 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     for (map_it = index_map.begin(); map_it != index_map.end(); ++map_it) {
         const std::string& index_name = map_it->first;
         const std::string& index_key = map_it->second;
-        uint32_t index_len = index_name.size() + 1 + index_key.size();
+        std::string typed_index_key;
+        StringToTypeString(index_name, index_key, &typed_index_key);
+        uint32_t index_len = index_name.size() + 1 + typed_index_key.size();
         index_pack.append((char*)&index_len, sizeof(index_len));
         index_pack.append(index_name);
         index_pack.append(":");
-        // TODO: need convert to type_string??
-        index_pack.append(index_key);
+        index_pack.append(typed_index_key);
     }
 
     // update primary table
@@ -917,14 +919,34 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         valid_nr_index_table++;
     }
 
-    while ((int32_t)result_list->size() < limit
-           && ScanMultiIndexTables(&index_table_vec[0], &scan_desc_vec[0], &scan_stream_vec[0],
-                                   &pri_vec[0], valid_nr_index_table, limit)) {
-        // merge sort
-        std::vector<std::string> primary_key_list;
-        PrimaryKeyMergeSort(pri_vec, &primary_key_list);
-        VLOG(10) << "select op, primary key merge sort: " << primary_key_list.size();
-        GetRows(primary_key_list, limit - result_list->size(), result_list);
+    if (FLAGS_read_by_index_filter) {
+        Mutex mutex;
+        int32_t counter = 0; // num of primary data read totally
+        bool finish = false; // set true after any index table scanned done
+        std::map<std::string, ResultStream> result_map;
+        ThreadPool scan_threads(valid_nr_index_table);
+        for (int i = 0; i < valid_nr_index_table; i++) {
+            scan_threads.AddTask(boost::bind(&TableImpl::GetByFilterIndex, this, index_table_vec[i],
+                                             scan_desc_vec[i], limit, &mutex, &counter, &finish,
+                                             &index_condition_ex_list, &result_map));
+        }
+        scan_threads.Stop(true);
+        std::map<std::string, ResultStream>::iterator it = result_map.begin();
+        for (; (int32_t)result_list->size() < limit && it != result_map.end(); ++it) {
+            if (it->second.primary_key != "") {
+                result_list->push_back(it->second);
+            }
+        }
+    } else {
+        while ((int32_t)result_list->size() < limit
+               && ScanMultiIndexTables(&index_table_vec[0], &scan_desc_vec[0], &scan_stream_vec[0],
+                                       &pri_vec[0], valid_nr_index_table, limit)) {
+            // merge sort
+            std::vector<std::string> primary_key_list;
+            PrimaryKeyMergeSort(pri_vec, &primary_key_list);
+            VLOG(10) << "select op, primary key merge sort: " << primary_key_list.size();
+            GetRows(primary_key_list, limit - result_list->size(), result_list);
+        }
     }
 
     for (int i = 0; i < valid_nr_index_table; i++) {
@@ -932,6 +954,92 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         delete scan_stream_vec[i];
     }
     return Status::OK();
+}
+
+struct FilterIndexParam {
+    Mutex* mutex;
+
+    // statistics
+    int32_t* counter;
+    int32_t* got_count;
+
+    // use for wakeup caller
+    CondVar* cond;
+    int32_t* pending_count;
+};
+
+void FilterIndexCallback(Status s, ResultStream* result, void* callback_param) {
+    FilterIndexParam* param = (FilterIndexParam*)callback_param;
+    MutexLock l(param->mutex);
+    if (s.ok()) {
+        ++(*param->counter);
+        ++(*param->got_count);
+    }
+    --(*param->pending_count);
+    if ((*param->pending_count) == 0) {
+        param->cond->Signal();
+    }
+    delete param;
+}
+
+void TableImpl::GetByFilterIndex(tera::Table* index_table,
+                                 tera::ScanDescriptor* scan_desc,
+                                 int32_t limit, Mutex* mutex, int32_t* counter, bool* finish,
+                                 const std::vector<IndexConditionExtend>* index_cond_list,
+                                 std::map<std::string, ResultStream>* results) {
+    tera::ErrorCode err;
+    tera::ResultStream* stream = index_table->Scan(*scan_desc, &err);
+    CHECK_NOTNULL(stream);
+    int32_t got_count = 0;
+    int32_t pending_count = 0;
+    CondVar cond(mutex);
+
+    VLOG(10) << "begin scan index: " << index_table->GetName();
+    while (!stream->Done()) {
+        std::string primary_key(stream->Qualifier(), 8, std::string::npos);
+        {
+            MutexLock l(mutex);
+            if (*finish || *counter >= limit) {
+                break;
+            }
+            VLOG(12) << "select op, primary key: " << primary_key;
+            if (results->find(primary_key) != results->end()) {
+                continue;
+            }
+            (*results)[primary_key].primary_key = ""; // mark as invalid
+            pending_count++;
+        }
+
+        FilterIndexParam* param = new FilterIndexParam;
+        param->mutex = mutex;
+        param->counter = counter;
+        param->got_count = &got_count;
+        param->pending_count = &pending_count;
+        param->cond = &cond;
+        GetSingleRow(primary_key, &(*results)[primary_key], index_cond_list,
+                     FilterIndexCallback, param);
+
+        stream->Next();
+    }
+
+    VLOG(10) << "finish scan index: " << index_table->GetName() << ", get data num: " << got_count;
+    // stop other index table scan streams
+    if (stream->Done()) {
+        VLOG(10) << "finish scan index: " << index_table->GetName()
+                 << ", notify other index table scan streams to stop";
+        MutexLock l(mutex);
+        *finish = true;
+    }
+    delete stream;
+
+    // wait for background read
+    VLOG(10) << "finish scan index: " << index_table->GetName()
+             << ", wait for background read completion";
+    MutexLock l(mutex);
+    while (pending_count > 0) {
+        cond.Wait();
+    }
+    VLOG(10) << "finish scan index: " << index_table->GetName() << ", all done";
 }
 
 bool TableImpl::ScanMultiIndexTables(tera::Table** index_table_list,
@@ -1111,7 +1219,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
         param->mutex = &mutex;
         param->cond = &cond;
 
-        GetSingleRow(primary_key_list[i], &tmp_row_list[i], GetRowCallback, param);
+        GetSingleRow(primary_key_list[i], &tmp_row_list[i], NULL, GetRowCallback, param);
     }
 
     MutexLock l(&mutex);
@@ -1137,6 +1245,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
 struct ReadPrimaryTableContext {
     TableImpl* table;
     ResultStream* result;
+    const std::vector<IndexConditionExtend>* index_cond_list;
     void* user_callback;
     void* user_param;
 
@@ -1167,27 +1276,39 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
 
 void TableImpl::ReadData(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
-    ResultStream* result = param->result;
+    const std::string& primary_key = reader->RowName();
 
-    // Get row reader result
+    std::vector<FileLocation> locations;
+    std::multimap<std::string, std::string> indexes;
     while (!reader->Done()) {
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
         location.ParseFromString(location_buffer);
-        VLOG(12) << "begin to read data from " << location;
-        std::string data;
-        Status s = param->table->ReadDataFromFile(location, &data);
-        if (s.ok()) {
-            VLOG(12) << "finsh read data from " << location;
-            result->result_data_list.push_back(data);
-        } else {
-            LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
-        }
+        locations.push_back(location);
+
+        const std::string& index_buffer = reader->Value();
+        ParseIndexesFromString(index_buffer, &indexes);
         reader->Next();
     }
 
-    // Get Row result status
-    const std::string& primary_key = reader->RowName();
+    ResultStream* result = param->result;
+    VLOG(12) << "test indexes of primary key: " << primary_key;
+    if (param->index_cond_list == NULL || TestIndexCondition(*param->index_cond_list, indexes)) {
+        VLOG(12) << "read data of primary key: " << primary_key;
+        for (size_t i = 0; i < locations.size(); ++i) {
+            FileLocation& location = locations[i];
+            VLOG(12) << "begin to read data from " << location;
+            std::string data;
+            Status s = param->table->ReadDataFromFile(location, &data);
+            if (s.ok()) {
+                VLOG(12) << "finsh read data from " << location;
+                result->result_data_list.push_back(data);
+            } else {
+                LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
+            }
+        }
+    }
+
     Status s;
     if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
         s = Status::IOError("tera error");
@@ -1205,10 +1326,102 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     ReleaseReadPrimaryTableContext(param, result, s);
 }
 
-/////////////////////////////////////////////////////
-////    Concurrently Read span in single row    /////
-/////////////////////////////////////////////////////
+void TableImpl::ParseIndexesFromString(const std::string& index_buffer,
+                                       std::multimap<std::string, std::string>* indexes) {
+    const char* buf = index_buffer.data();
+    uint32_t left = index_buffer.size();
+    while (left > sizeof(uint32_t)) {
+        uint32_t index_len = *(uint32_t*)buf;
+        buf += sizeof(uint32_t);
+        left -= sizeof(uint32_t);
+        if (index_len == 0 || index_len > left) {
+            break;
+        }
+
+        const char* delim = buf;
+        for (; delim < buf + index_len && *delim != ':'; delim++) { }
+        if (delim <= buf || delim >= buf + index_len - 1) {
+            break;
+        }
+
+        std::string index_name(buf, delim - buf);
+        std::string index_key(delim + 1, buf + index_len - delim - 1);
+        indexes->insert(std::pair<std::string, std::string>(index_name, index_key));
+        buf += index_len;
+        left -= index_len;
+    }
+}
+
+bool TableImpl::TestIndexCondition(const std::vector<IndexConditionExtend>& index_cond_list,
+                                   const std::multimap<std::string, std::string>& index_list) {
+    for (size_t i = 0; i < index_cond_list.size(); i++) {
+        const IndexConditionExtend& index_cond = index_cond_list[i];
+        const std::string& index_cond_name = index_cond.index_name;
+
+        bool match = false;
+        std::multimap<std::string, std::string>::const_iterator it = index_list.begin();
+        for (; it != index_list.end(); ++it) {
+            const std::string& index_name = it->first;
+            const std::string& index_key = it->second;
+
+            if (index_cond_name == index_name) {
+                switch ((int)index_cond.comparator) {
+                case kEqualTo:
+                    if (index_key == index_cond.compare_value1) {
+                        match = true;
+                    }
+                    break;
+                case kNotEqualTo:
+                    LOG(WARNING) << "Scan not support !=";
+                    break;
+                case kLess:
+                    if (index_key < index_cond.compare_value1) {
+                        match = true;
+                    }
+                    break;
+                case kLessEqual:
+                    if (index_key <= index_cond.compare_value1) {
+                        match = true;
+                    }
+                    break;
+                case kGreater:
+                    if (index_key > index_cond.compare_value1) {
+                        match = true;
+                    }
+                    break;
+                case kGreaterEqual:
+                    if (index_key >= index_cond.compare_value1) {
+                        match = true;
+                    }
+                    break;
+                case kBetween:
+                    if (((index_cond.flag1 && index_key >= index_cond.compare_value1)
+                            || (!index_cond.flag1 && index_key > index_cond.compare_value1))
+                        && ((index_cond.flag2 && index_key <= index_cond.compare_value2)
+                            || (!index_cond.flag2 && index_key < index_cond.compare_value2))) {
+                        match = true;
+                    }
+                    break;
+                default:
+                    LOG(WARNING) << "Scan: unknown cmp";
+                    break;
+                }
+
+                if (match) {
+                    break;
+                }
+            }
+        }
+
+        if (!match) {
+            return false;
+        }
+    }
+    return true;
+}
+
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result,
+                               const std::vector<IndexConditionExtend>* index_cond_list,
                                GetSingleRowCallback user_callback, void* user_param) {
     Mutex mu;
     CondVar cond(&mu);
@@ -1219,6 +1432,7 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     ReadPrimaryTableContext* param = new ReadPrimaryTableContext;
     param->table = this;
     param->result = result;
+    param->index_cond_list = index_cond_list;
     param->user_callback = (void*)user_callback;
     param->user_param = user_param;
     if (user_callback == NULL) {
