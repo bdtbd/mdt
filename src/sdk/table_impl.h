@@ -216,6 +216,14 @@ private:
     void GetAllTimestampTables(std::vector<tera::Table*>* table_list);
     std::string TimeToString();
 
+    Status StringToTypeString(const std::string& index_table,
+                              const std::string& key,
+                              std::string* type_key);
+
+    Status TypeStringToString(const std::string& index_table,
+                              const std::string& type_key,
+                              std::string* key);
+
 private:
     // NOTE： WriteHandle can not operator in race condition
     struct WriteHandle {
