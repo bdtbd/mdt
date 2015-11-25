@@ -129,6 +129,8 @@ struct IndexConditionExtend {
     bool flag2;
 };
 
+typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
+
 class TableImpl : public Table {
 public:
     TableImpl(const TableDescription& table_desc,
@@ -197,8 +199,6 @@ private:
     int32_t GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
                     std::vector<ResultStream>* row_list);
 
-    typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
-
     static void ReadPrimaryTableCallback(tera::RowReader* reader);
 
     void ReadData(tera::RowReader* reader);
@@ -226,6 +226,14 @@ private:
                                 std::multimap<std::string, std::string>* indexes);
     bool TestIndexCondition(const std::vector<IndexConditionExtend>& index_cond_list,
                             const std::multimap<std::string, std::string>& index_list);
+
+    Status StringToTypeString(const std::string& index_table,
+                              const std::string& key,
+                              std::string* type_key);
+
+    Status TypeStringToString(const std::string& index_table,
+                              const std::string& type_key,
+                              std::string* key);
 
 private:
     // NOTE： WriteHandle can not operator in race condition
