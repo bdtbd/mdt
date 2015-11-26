@@ -4,6 +4,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <sstream>
 
 #include <gflags/gflags.h>
 
@@ -105,21 +106,35 @@ inline std::string Uint64ToString(uint64_t val) {
 std::string TraceModule::GetFieldValue(::google::protobuf::Message* message,
                                        const ::google::protobuf::FieldDescriptor* field) {
     const ::google::protobuf::Reflection* reflection = message->GetReflection();
+    std::ostringstream os;
+    std::string s;
 
     if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_UINT64) {
         uint64_t val = (uint64_t)reflection->GetUInt64(*message, field);
-        return Uint64ToString(val);
+        //return Uint64ToString(val);
+        os << val;
+        s = os.str();
+        return s;
     } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_INT64) {
         uint64_t val = (uint64_t)reflection->GetInt64(*message, field);
         //std::cout << "GetInt64: " << val << std::endl;
-        return Uint64ToString(val);
+        //return Uint64ToString(val);
+        os << val;
+        s = os.str();
+        return s;
     } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_INT32) {
         uint64_t val = (uint64_t)reflection->GetInt32(*message, field);
         //std::cout << "GetInt32: " << val << std::endl;
-        return Uint64ToString(val);
+        //return Uint64ToString(val);
+        os << val;
+        s = os.str();
+        return s;
     } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_UINT32) {
         uint64_t val = (uint64_t)reflection->GetUInt32(*message, field);
-        return Uint64ToString(val);
+        //return Uint64ToString(val);
+        os << val;
+        s = os.str();
+        return s;
     } else if (field->type() == ::google::protobuf::FieldDescriptor::TYPE_STRING) {
         //std::cout << "GetString: " << reflection->GetString(*message, field) << std::endl;
         return reflection->GetString(*message, field);
