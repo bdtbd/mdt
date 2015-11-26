@@ -7,8 +7,8 @@
 
 #include <gflags/gflags.h>
 
-#include "ftrace/trace.h"
-#include "util/coding.h"
+#include "ftrace/collector/trace.h"
+//#include "util/coding.h"
 
 DECLARE_string(flagfile);
 DECLARE_uint64(max_text_annotation_size);
@@ -23,7 +23,7 @@ pthread_key_t TraceModule::thread_key; // thread_load variable
 Mutex TraceModule::kmutex;
 std::map<uint64_t, Trace*> TraceModule::ktrace_map;
 std::map<uint64_t, Trace*> TraceModule::kspan_map; // gobal span map
-DBMap TraceModule::kDBMap;
+::sofa::pbrpc::RpcClient TraceModule::rpc_client;
 
 ///////////////////////
 ///// TraceModule /////
@@ -59,10 +59,41 @@ void TraceModule::InitTraceModule(const std::string& flagfile) {
         FLAGS_flagfile = local_flagfile;
     }
     pthread_key_create(&thread_key, NilCallback);
+
+    // init rpc channel
+    ::sofa::pbrpc::RpcClientOptions client_options;
+    client_options.max_throughput_in = -1;
+    client_options.max_throughput_out = -1;
+    client_options.work_thread_num = 10;
+    TraceModule::rpc_client.ResetOptions(client_options);
     return;
 }
 
 // galaxy interface
+inline uint32_t DecodeBigEndain32(const char* ptr) {
+    return ((static_cast<uint32_t>(static_cast<unsigned char>(ptr[3])))
+        | (static_cast<uint32_t>(static_cast<unsigned char>(ptr[2])) << 8)
+        | (static_cast<uint32_t>(static_cast<unsigned char>(ptr[1])) << 16)
+        | (static_cast<uint32_t>(static_cast<unsigned char>(ptr[0])) << 24));
+}
+
+inline uint64_t DecodeBigEndain(const char* ptr) {
+    uint64_t lo = DecodeBigEndain32(ptr + 4);
+    uint64_t hi = DecodeBigEndain32(ptr);
+    return (hi << 32) | lo;
+}
+
+inline void EncodeBigEndian(char* buf, uint64_t value) {
+    buf[0] = (value >> 56) & 0xff;
+    buf[1] = (value >> 48) & 0xff;
+    buf[2] = (value >> 40) & 0xff;
+    buf[3] = (value >> 32) & 0xff;
+    buf[4] = (value >> 24) & 0xff;
+    buf[5] = (value >> 16) & 0xff;
+    buf[6] = (value >> 8) & 0xff;
+    buf[7] = value & 0xff;
+}
+
 inline std::string Uint64ToString(uint64_t val) {
     char buf[8];
     char* p = buf;
@@ -100,71 +131,12 @@ std::string TraceModule::GetFieldValue(::google::protobuf::Message* message,
     return "";
 }
 
-::mdt::Table* TraceModule::GetProtoBufTable(const std::string& dbname, const std::string& tablename) {
-    MutexLock mu(&TraceModule::kDBMap.mutex);
-    std::map<std::string, ::mdt::Table*>& tablemap = TraceModule::kDBMap.table; // dbname#tablename
-
-    std::string internal_tablename = dbname + "#" + tablename;
-    std::map<std::string, ::mdt::Table*>::iterator table_it = tablemap.find(internal_tablename);
-    ::mdt::Table* table_ptr = NULL;
-    if (table_it != tablemap.end()) {
-        table_ptr = table_it->second;
-    }
-    return table_ptr;
-}
-
 // TODO: do io in lock, but Open not frequent
 void TraceModule::OpenProtoBufLog(const std::string& dbname, const std::string& tablename) {
-    MutexLock mu(&TraceModule::kDBMap.mutex);
-    std::map<std::string, ::mdt::Database*>& dbmap = TraceModule::kDBMap.db; // dbname
-    std::map<std::string, ::mdt::Table*>& tablemap = TraceModule::kDBMap.table; // dbname#tablename
-
-    // open db
-    ::mdt::Database* db_ptr = NULL;
-    std::map<std::string, mdt::Database*>::iterator db_it = dbmap.find(dbname);
-    if (db_it == dbmap.end()) {
-        db_ptr = ::mdt::OpenDatabase(dbname);
-        if (db_ptr == NULL) {
-            return;
-        }
-        dbmap.insert(std::pair<std::string, ::mdt::Database*>(dbname, db_ptr));
-    } else {
-        db_ptr = db_it->second;
-    }
-
-    // open table
-    std::string internal_tablename = dbname + "#" + tablename;
-    ::mdt::Table* table_ptr = NULL;
-    std::map<std::string, ::mdt::Table*>::iterator table_it = tablemap.find(internal_tablename);
-    if (table_it == tablemap.end()) {
-        table_ptr = ::mdt::OpenTable(db_ptr, tablename);
-        if (table_ptr == NULL) {
-            return;
-        }
-        tablemap.insert(std::pair<std::string, ::mdt::Table*>(internal_tablename, table_ptr));
-    }
     return;
 }
 
 void TraceModule::CloseProtoBufLog(const std::string& dbname, const std::string& tablename) {
-    MutexLock mu(&TraceModule::kDBMap.mutex);
-    std::map<std::string, ::mdt::Database*>& dbmap = TraceModule::kDBMap.db; // dbname
-    std::map<std::string, ::mdt::Table*>& tablemap = TraceModule::kDBMap.table; // dbname#tablename
-
-    // close table
-    std::string internal_tablename = dbname + "#" + tablename;
-    std::map<std::string, ::mdt::Table*>::iterator table_it = tablemap.find(internal_tablename);
-    if (table_it != tablemap.end()) {
-        tablemap.erase(table_it);
-        ::mdt::CloseTable(table_it->second);
-    }
-
-    // close db
-    std::map<std::string, mdt::Database*>::iterator db_it = dbmap.find(dbname);
-    if (db_it != dbmap.end()) {
-        dbmap.erase(db_it);
-        ::mdt::CloseDatabase(db_it->second);
-    }
     return;
 }
 

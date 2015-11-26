@@ -21,6 +21,7 @@ DECLARE_int64(write_batch_queue_size);
 DECLARE_int64(request_queue_flush_internal);
 DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(read_file_thread_num);
+DECLARE_bool(enable_row_read_with_timestamp);
 
 namespace mdt {
 
@@ -586,7 +587,9 @@ Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
                                   std::vector<ResultStream>* result_list) {
     VLOG(10) << "get by primary key(with timestamp range): " << DebugString(primary_key);
     ResultStream result;
-    Status s = GetSingleRow(primary_key, &result, start_timestamp, end_timestamp, NULL, NULL);
+    Status s = GetSingleRow(primary_key, &result,
+                            start_timestamp, FLAGS_enable_row_read_with_timestamp ? end_timestamp : 0,
+                            NULL, NULL);
     if (s.ok()) {
         result_list->push_back(result);
     }
@@ -750,6 +753,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         case kEqualTo:
             scan_desc = new tera::ScanDescriptor(index_cond_ex.compare_value1);
             scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            VLOG(30) << "select val = " << index_cond_ex.compare_value1;
             break;
         case kNotEqualTo:
             LOG(WARNING) << "Scan not support !=";
@@ -997,7 +1001,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
         param->cond = &cond;
 
         GetSingleRow(primary_key_list[i], &tmp_row_list[i],
-                     start_timestamp, end_timestamp,
+                     start_timestamp, FLAGS_enable_row_read_with_timestamp ? end_timestamp : 0,
                      GetRowCallback, param);
     }
 
