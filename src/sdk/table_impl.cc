@@ -1025,6 +1025,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
             }
             VLOG(12) << "select op, primary key: " << primary_key;
             if (results->find(primary_key) != results->end()) {
+                stream->Next();
                 continue;
             }
             (*results)[primary_key].primary_key = ""; // mark as invalid
