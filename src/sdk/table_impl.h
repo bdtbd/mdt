@@ -163,6 +163,7 @@ private:
     void GetAllRequest(WriteContext** context_ptr, std::vector<WriteContext*>* local_queue);
     bool SubmitRequest(WriteContext* context, std::vector<WriteContext*>* local_queue);
     Status GetByPrimaryKey(const std::string& primary_key,
+                           int64_t start_timestamp, int64_t end_timestamp,
                            std::vector<ResultStream>* result_list);
 
     Status GetByIndex(const std::vector<IndexCondition>& index_condition_list,
@@ -204,6 +205,7 @@ private:
     void ReadData(tera::RowReader* reader);
 
     Status GetSingleRow(const std::string& primary_key, ResultStream* result,
+                        int64_t start_timestamp = 0, int64_t end_timestamp = 0,
                         const std::vector<IndexConditionExtend>* index_cond_list = NULL,
                         GetSingleRowCallback callback = NULL, void* callback_param = NULL);
 

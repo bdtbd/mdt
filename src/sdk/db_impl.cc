@@ -11,6 +11,7 @@
 #include <gflags/gflags.h>
 
 DECLARE_string(log_file);
+DECLARE_string(flagfile);
 
 DECLARE_string(tera_root_dir);
 DECLARE_string(tera_flag_file_path);
@@ -115,17 +116,21 @@ Status DatabaseImpl::Init() {
     ::tera::ErrorCode error_code;
     tera_opt_.root_path_ = FLAGS_tera_root_dir;
     tera_opt_.tera_flag_ = options_.tera_flag_file_path_;
+    std::string local_flagfile = FLAGS_flagfile;
     tera_opt_.client_ = tera::Client::NewClient(tera_opt_.tera_flag_, "mdt", &error_code);
     if (tera_opt_.client_ == NULL) {
         LOG(INFO) << "open db, new cli error, tera flag " << tera_opt_.tera_flag_;
+        FLAGS_flagfile = local_flagfile;
         return Status::IOError("tera client new error");
     }
+    FLAGS_flagfile = local_flagfile;
 
     // create db schema table (kv mode)
     std::string schema_table_name = db_name_ + "#SchemaTable#";
     tera::TableDescriptor schema_desc(schema_table_name);
     tera::LocalityGroupDescriptor* schema_lg = schema_desc.AddLocalityGroup("lg");
     schema_lg->SetBlockSize(32 * 1024);
+    schema_desc.SetRawKey(tera::kGeneralKv);
     // ignore exist error
     tera_opt_.client_->CreateTable(schema_desc, &error_code);
 
@@ -142,6 +147,12 @@ Status DatabaseImpl::Init() {
     tera_adapter_.opt_ = tera_opt_;
     tera_adapter_.table_prefix_ = db_name_;
     return Status::OK();
+}
+
+DatabaseImpl::~DatabaseImpl() {
+    ReleaseTables();
+    delete tera_opt_.schema_table_;
+    delete tera_opt_.client_;
 }
 
 Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
@@ -235,6 +246,14 @@ Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr)
         return Status::NotFound("db open error ");
     }
     table_map_[table_name] = *table_ptr;
+    return Status::OK();
+}
+
+Status DatabaseImpl::ReleaseTables() {
+    std::map<std::string, Table*>::iterator it = table_map_.begin();
+    for (; it != table_map_.end(); ++it) {
+        delete it->second;
+    }
     return Status::OK();
 }
 

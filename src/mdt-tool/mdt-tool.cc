@@ -64,6 +64,37 @@ int GetCmp(std::string& cmp_str) {
     return -1;
 }
 
+// GetPri dbname tablename start_ts end_ts limit primary_key
+int SearchPrimaryKey(std::vector<std::string>& cmd_vec) {
+    // create db
+    std::cout << "open db ..." << std::endl;
+    mdt::Database* db;
+    std::string db_name = cmd_vec[1];
+    db = mdt::OpenDatabase(db_name);
+
+    std::cout << "open table ..." << std::endl;
+    mdt::Table* table;
+    std::string table_name = cmd_vec[2];
+    table = OpenTable(db, table_name);
+
+    mdt::SearchRequest* search_req = new mdt::SearchRequest;
+    search_req->primary_key = cmd_vec[6];
+    search_req->limit = 10;
+    search_req->start_timestamp = 0;
+    search_req->end_timestamp = time(NULL);
+    mdt::SearchResponse* search_resp = new mdt::SearchResponse;
+
+    table->Get(search_req, search_resp);
+    for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
+        const mdt::ResultStream& result = search_resp->result_stream[i];
+        std::cout << "primary key: " << result.primary_key << std::endl;
+        for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
+            std::cout << "        data: " << result.result_data_list[j] << std::endl;
+        }
+    }
+    return 0;
+}
+
 int GetOp(std::vector<std::string>& cmd_vec) {
     // create db
     std::cout << "open db ..." << std::endl;
@@ -275,6 +306,11 @@ int main(int ac, char* av[]) {
         } else if (cmd_vec[0].compare("Get") == 0 && cmd_vec.size() >= 6) {
             // cmd: Get dbname tablename start_ts(ignore) end_ts(ignore) limit(ignore) [index_name cmp(=, >=, >, <=, <) index_key]
             GetOp(cmd_vec);
+            free(line);
+            continue;
+        } else if (cmd_vec[0].compare("GetPri") == 0 && cmd_vec.size() == 7) {
+            // cmd: GetPri dbname tablename start_ts(ignore) end_ts(ignore) limit(ignore) primary_key
+            SearchPrimaryKey(cmd_vec);
             free(line);
             continue;
         } else {

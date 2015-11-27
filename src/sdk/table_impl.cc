@@ -22,6 +22,7 @@ DECLARE_int64(write_batch_queue_size);
 DECLARE_int64(request_queue_flush_internal);
 DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(read_file_thread_num);
+DECLARE_bool(enable_multi_version_read);
 DECLARE_bool(read_by_index_filter);
 
 namespace mdt {
@@ -149,7 +150,6 @@ TableImpl::~TableImpl() {
     // free write handle
     //ReleaseDataWriter();
     // TODO: write queue release
-
     thread_pool_.Stop(false);
     FreeTeraTable();
 
@@ -167,7 +167,6 @@ TableImpl::~TableImpl() {
         InternalBatchWrite(context, local_queue);
         delete context;
     }
-
     return;
 }
 
@@ -690,7 +689,9 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
         // convert primary key
         std::string type_primary_key;
         StringToTypeString("pri", req->primary_key, &type_primary_key);
-        GetByPrimaryKey(type_primary_key, &resp->result_stream);
+        GetByPrimaryKey(type_primary_key,
+                        req->start_timestamp, req->end_timestamp,
+                        &resp->result_stream);
     } else if (req->index_condition_list.size() > 0) {
         // convert index key
         std::vector<struct IndexCondition> index_condition_list = req->index_condition_list;
@@ -723,11 +724,15 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
     return s;
 }
 
+// with timestamp
 Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
+                                  int64_t start_timestamp, int64_t end_timestamp,
                                   std::vector<ResultStream>* result_list) {
-    VLOG(10) << "get by primary key: " << DebugString(primary_key);
+    VLOG(10) << "get by primary key(with timestamp range): " << DebugString(primary_key);
     ResultStream result;
-    Status s = GetSingleRow(primary_key, &result);
+    Status s = GetSingleRow(primary_key, &result,
+                            start_timestamp, end_timestamp,
+                            NULL, NULL, NULL);
     if (s.ok()) {
         result_list->push_back(result);
     }
@@ -789,7 +794,8 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
                 primary_key_list.push_back(primary_key);
             }
             if ((int32_t)primary_key_list.size() >= limit) {
-                GetRows(primary_key_list, limit - result_list->size(), result_list);
+                GetRows(primary_key_list, limit - result_list->size(),
+                        result_list);
                 primary_key_list.clear();
             }
             result->Next();
@@ -797,7 +803,8 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
         if (primary_key_list.size() > 0) {
             CHECK(result->Done());
             CHECK_LT((int32_t)result_list->size(), limit);
-            GetRows(primary_key_list, limit - result_list->size(), result_list);
+            GetRows(primary_key_list, limit - result_list->size(),
+                    result_list);
         }
         delete result;
         delete scan_desc;
@@ -891,6 +898,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         case kEqualTo:
             scan_desc = new tera::ScanDescriptor(index_cond_ex.compare_value1);
             scan_desc->SetEnd(index_cond_ex.compare_value1 + '\0');
+            VLOG(30) << "select val = " << index_cond_ex.compare_value1;
             break;
         case kNotEqualTo:
             LOG(WARNING) << "Scan not support !=";
@@ -1015,6 +1023,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     int32_t pending_count = 0;
     CondVar cond(mutex);
 
+    // filter by timestamp
     VLOG(10) << "begin scan index: " << index_table->GetName();
     while (!stream->Done()) {
         std::string primary_key(stream->Qualifier(), 8, std::string::npos);
@@ -1038,7 +1047,9 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
         param->got_count = &got_count;
         param->pending_count = &pending_count;
         param->cond = &cond;
-        GetSingleRow(primary_key, &(*results)[primary_key], index_cond_list,
+        GetSingleRow(primary_key, &(*results)[primary_key],
+                     0, 0,
+                     index_cond_list,
                      FilterIndexCallback, param);
 
         stream->Next();
@@ -1241,7 +1252,9 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
         param->mutex = &mutex;
         param->cond = &cond;
 
-        GetSingleRow(primary_key_list[i], &tmp_row_list[i], NULL, GetRowCallback, param);
+        GetSingleRow(primary_key_list[i], &tmp_row_list[i],
+                     0, 0,
+                     NULL, GetRowCallback, param);
     }
 
     MutexLock l(&mutex);
@@ -1441,6 +1454,7 @@ bool TableImpl::TestIndexCondition(const std::vector<IndexConditionExtend>& inde
 }
 
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result,
+                               int64_t start_timestamp, int64_t end_timestamp,
                                const std::vector<IndexConditionExtend>* index_cond_list,
                                GetSingleRowCallback user_callback, void* user_param) {
     Mutex mu;
@@ -1464,6 +1478,9 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     tera::RowReader* reader = primary_table->NewRowReader(primary_key);
     reader->AddColumnFamily(kPrimaryTableColumnFamily);
+    // [default] not use timestamp filter to get  span in same row
+    if (FLAGS_enable_multi_version_read)
+        reader->SetTimeRange(start_timestamp, end_timestamp);
     reader->SetCallBack(ReadPrimaryTableCallback);
     reader->SetContext(param);
 
