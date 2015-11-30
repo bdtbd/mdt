@@ -1005,7 +1005,7 @@ void FilterIndexCallback(Status s, ResultStream* result, void* callback_param) {
         ++(*param->got_count);
     }
     --(*param->pending_count);
-    VLOG(12) << "filter index callback, priamry key " << result->primary_key 
+    VLOG(12) << "filter index callback, priamry key " << result->primary_key
 	<< ", pending_count " << (*param->pending_count);
     if ((*param->pending_count) == 0) {
         param->cond->Signal();
@@ -1050,7 +1050,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
         param->pending_count = &pending_count;
         param->cond = &cond;
         GetSingleRow(primary_key, &(*results)[primary_key],
-                     0, 0,
+                     0, (uint64_t)timer::get_micros(),
                      index_cond_list,
                      FilterIndexCallback, param);
 
@@ -1065,8 +1065,8 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
        	    VLOG(10) << "finish scan index: " << index_table->GetName()
                  << ", notify other index table scan streams to stop";
 	    *finish = true;
-	}	
-    } 
+	}
+    }
 
     // wait for background read
     VLOG(10) << "finish scan index: " << index_table->GetName()
@@ -1256,7 +1256,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
         param->cond = &cond;
 
         GetSingleRow(primary_key_list[i], &tmp_row_list[i],
-                     0, 0,
+                     0, (uint64_t)timer::get_micros(),
                      NULL, GetRowCallback, param);
     }
 
