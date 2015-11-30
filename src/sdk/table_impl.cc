@@ -1031,14 +1031,22 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
         std::string primary_key(stream->Qualifier(), 8, std::string::npos);
         {
             MutexLock l(mutex);
+            // :(,  compile optimistic may cause error
+            int32_t* pending_count_ptr = &pending_count;
+            if ((int32_t)(*pending_count_ptr) >= limit) {
+                // if has limit getrow flying, wait for finish
+                VLOG(12) << "wait flying GetSingleRow finish, pending count " << *pending_count_ptr
+                    << ", limit " << limit;
+	        while ((int32_t)(*pending_count_ptr) > 0) {cond.Wait();}
+            }
             if (*finish || *counter >= limit) {
                 break;
             }
-            VLOG(12) << "select op, primary key: " << primary_key;
             if (results->find(primary_key) != results->end()) {
                 stream->Next();
                 continue;
             }
+            VLOG(12) << "select op, primary key: " << DebugString(primary_key);
             (*results)[primary_key].primary_key = ""; // mark as invalid
             pending_count++;
         }
@@ -1073,7 +1081,9 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
              << ", wait for background read completion";
     {
 	MutexLock l(mutex);
-	while (pending_count > 0) {cond.Wait();}
+        // :(,  compile optimistic may cause error
+        int32_t* pending_count_ptr = &pending_count;
+	while ((int32_t)(*pending_count_ptr) > 0) {cond.Wait();}
     	VLOG(10) << "finish scan index: " << index_table->GetName() << ", all done, get data_num " << got_count;
     }
 }
