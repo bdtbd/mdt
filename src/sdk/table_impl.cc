@@ -24,6 +24,7 @@ DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(read_file_thread_num);
 DECLARE_bool(enable_multi_version_read);
 DECLARE_bool(read_by_index_filter);
+DECLARE_bool(enable_scan_control);
 
 namespace mdt {
 
@@ -732,7 +733,7 @@ Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
     ResultStream result;
     Status s = GetSingleRow(primary_key, &result,
                             start_timestamp, end_timestamp,
-                            NULL, NULL, NULL);
+                            NULL, NULL, NULL, NULL);
     if (s.ok()) {
         result_list->push_back(result);
     }
@@ -988,13 +989,14 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
 struct FilterIndexParam {
     Mutex* mutex;
 
+    int32_t limit;
     // statistics
     int32_t* counter;
     int32_t* got_count;
 
     // use for wakeup caller
     CondVar* cond;
-    int32_t* pending_count;
+    volatile int32_t* pending_count;
 };
 
 void FilterIndexCallback(Status s, ResultStream* result, void* callback_param) {
@@ -1013,6 +1015,15 @@ void FilterIndexCallback(Status s, ResultStream* result, void* callback_param) {
     delete param;
 }
 
+bool FilterIndexBreak(Status s, ResultStream* result, void* callback_param) {
+    FilterIndexParam* param = (FilterIndexParam*)callback_param;
+    MutexLock l(param->mutex);
+    if (*param->counter >= param->limit) {
+        return true;
+    }
+    return false;
+}
+
 void TableImpl::GetByFilterIndex(tera::Table* index_table,
                                  tera::ScanDescriptor* scan_desc,
                                  int32_t limit, Mutex* mutex, int32_t* counter, bool* finish,
@@ -1022,7 +1033,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     tera::ResultStream* stream = index_table->Scan(*scan_desc, &err);
     CHECK_NOTNULL(stream);
     int32_t got_count = 0;
-    int32_t pending_count = 0;
+    volatile int32_t pending_count = 0;
     CondVar cond(mutex);
 
     // filter by timestamp
@@ -1031,20 +1042,30 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
         std::string primary_key(stream->Qualifier(), 8, std::string::npos);
         {
             MutexLock l(mutex);
+            if (FLAGS_enable_scan_control) {
+                // :(,  compile optimistic may cause error
+                if (pending_count >= limit) {
+                    // if has limit getrow flying, wait for finish
+                    VLOG(12) << "wait flying GetSingleRow finish, pending count " << pending_count
+                        << ", limit " << limit;
+                    while (pending_count > 0) {cond.Wait();}
+                }
+            }
             if (*finish || *counter >= limit) {
                 break;
             }
-            VLOG(12) << "select op, primary key: " << primary_key;
             if (results->find(primary_key) != results->end()) {
                 stream->Next();
                 continue;
             }
+            VLOG(12) << "select op, primary key: " << DebugString(primary_key);
             (*results)[primary_key].primary_key = ""; // mark as invalid
             pending_count++;
         }
 
         FilterIndexParam* param = new FilterIndexParam;
         param->mutex = mutex;
+        param->limit = limit;
         param->counter = counter;
         param->got_count = &got_count;
         param->pending_count = &pending_count;
@@ -1052,7 +1073,8 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
         GetSingleRow(primary_key, &(*results)[primary_key],
                      0, (uint64_t)timer::get_micros(),
                      index_cond_list,
-                     FilterIndexCallback, param);
+                     FilterIndexCallback, param,
+                     FilterIndexBreak);
 
         stream->Next();
     }
@@ -1073,6 +1095,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
              << ", wait for background read completion";
     {
 	MutexLock l(mutex);
+        // :(,  compile optimistic may cause error
 	while (pending_count > 0) {cond.Wait();}
     	VLOG(10) << "finish scan index: " << index_table->GetName() << ", all done, get data_num " << got_count;
     }
@@ -1257,7 +1280,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
 
         GetSingleRow(primary_key_list[i], &tmp_row_list[i],
                      0, (uint64_t)timer::get_micros(),
-                     NULL, GetRowCallback, param);
+                     NULL, GetRowCallback, param, NULL);
     }
 
     MutexLock l(&mutex);
@@ -1285,6 +1308,7 @@ struct ReadPrimaryTableContext {
     ResultStream* result;
     const std::vector<IndexConditionExtend>* index_cond_list;
     void* user_callback;
+    void* user_break_func; // break read primary table
     void* user_param;
 
     // useful if user_callback == NULL
@@ -1304,6 +1328,14 @@ void ReleaseReadPrimaryTableContext(ReadPrimaryTableContext* param, ResultStream
     delete param;
 }
 
+bool ReadPrimaryTableBreak(ReadPrimaryTableContext* param, ResultStream* result, Status s) {
+    bool should_break = false;
+    if (param->user_break_func != NULL) {
+        should_break = ((GetSingleRowBreak*)param->user_break_func)(s, result, param->user_param);
+    }
+    return should_break;
+}
+
 void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
     const std::string& primary_key = reader->RowName();
@@ -1315,10 +1347,18 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
 void TableImpl::ReadData(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
     const std::string& primary_key = reader->RowName();
+    bool should_break = false;
+
+    // check break
+    should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
 
     std::vector<FileLocation> locations;
     std::multimap<std::string, std::string> indexes;
     while (!reader->Done()) {
+        // check break
+        should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
+        if (should_break) { break; }
+
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
         location.ParseFromString(location_buffer);
@@ -1331,9 +1371,13 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 
     ResultStream* result = param->result;
     VLOG(12) << "test indexes of primary key: " << primary_key;
-    if (param->index_cond_list == NULL || TestIndexCondition(*param->index_cond_list, indexes)) {
+    if (!should_break && (param->index_cond_list == NULL || TestIndexCondition(*param->index_cond_list, indexes))) {
         VLOG(12) << "read data of primary key: " << primary_key;
         for (size_t i = 0; i < locations.size(); ++i) {
+            // check break
+            should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
+            if (should_break) { break; }
+
             FileLocation& location = locations[i];
             VLOG(12) << "begin to read data from " << location;
             std::string data;
@@ -1348,7 +1392,9 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     }
 
     Status s;
-    if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
+    if (should_break) {
+        s = Status::NotFound("break from read data");
+    } else if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
 	LOG(WARNING) << "tera row reader error, primary key " << primary_key;
         s = Status::IOError("tera error");
     } else if (result->result_data_list.size() > 0) {
@@ -1461,7 +1507,8 @@ bool TableImpl::TestIndexCondition(const std::vector<IndexConditionExtend>& inde
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result,
                                int64_t start_timestamp, int64_t end_timestamp,
                                const std::vector<IndexConditionExtend>* index_cond_list,
-                               GetSingleRowCallback user_callback, void* user_param) {
+                               GetSingleRowCallback user_callback, void* user_param,
+                               GetSingleRowBreak user_break_func) {
     Mutex mu;
     CondVar cond(&mu);
     bool finish = false;
@@ -1473,6 +1520,7 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     param->result = result;
     param->index_cond_list = index_cond_list;
     param->user_callback = (void*)user_callback;
+    param->user_break_func = (void*)user_break_func;
     param->user_param = user_param;
     if (user_callback == NULL) {
         param->mutex = &mu;

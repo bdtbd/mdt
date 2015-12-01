@@ -130,6 +130,7 @@ struct IndexConditionExtend {
 };
 
 typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
+typedef bool GetSingleRowBreak(Status s, ResultStream* result, void* callback_param);
 
 class TableImpl : public Table {
 public:
@@ -207,7 +208,8 @@ private:
     Status GetSingleRow(const std::string& primary_key, ResultStream* result,
                         int64_t start_timestamp = 0, int64_t end_timestamp = 0,
                         const std::vector<IndexConditionExtend>* index_cond_list = NULL,
-                        GetSingleRowCallback callback = NULL, void* callback_param = NULL);
+                        GetSingleRowCallback callback = NULL, void* callback_param = NULL,
+                        GetSingleRowBreak break_func = NULL);
 
     Status ReadDataFromFile(const FileLocation& location, std::string* data);
 
