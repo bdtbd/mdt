@@ -1392,7 +1392,9 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     }
 
     Status s;
-    if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
+    if (should_break) {
+        s = Status::NotFound("break from read data");
+    } else if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
 	LOG(WARNING) << "tera row reader error, primary key " << primary_key;
         s = Status::IOError("tera error");
     } else if (result->result_data_list.size() > 0) {
