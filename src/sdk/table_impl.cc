@@ -1360,6 +1360,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     // check break
     if (ReadPrimaryTableBreak(param, param->result, Status::OK())) {
         VLOG(12) << "break from read primary table, primary key: " << primary_key;
+        delete reader;
         return;
     }
 
