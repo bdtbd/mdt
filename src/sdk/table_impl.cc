@@ -996,7 +996,7 @@ struct FilterIndexParam {
 
     // use for wakeup caller
     CondVar* cond;
-    int32_t* pending_count;
+    volatile int32_t* pending_count;
 };
 
 void FilterIndexCallback(Status s, ResultStream* result, void* callback_param) {
@@ -1019,13 +1019,6 @@ bool FilterIndexBreak(Status s, ResultStream* result, void* callback_param) {
     FilterIndexParam* param = (FilterIndexParam*)callback_param;
     MutexLock l(param->mutex);
     if (*param->counter >= param->limit) {
-        --(*param->pending_count);
-        VLOG(12) << "filter index callback, priamry key " << result->primary_key
-            << ", pending_count " << (*param->pending_count);
-        if ((*param->pending_count) == 0) {
-            param->cond->Signal();
-        }
-        delete param;
         return true;
     }
     return false;
@@ -1040,7 +1033,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     tera::ResultStream* stream = index_table->Scan(*scan_desc, &err);
     CHECK_NOTNULL(stream);
     int32_t got_count = 0;
-    int32_t pending_count = 0;
+    volatile int32_t pending_count = 0;
     CondVar cond(mutex);
 
     // filter by timestamp
@@ -1051,12 +1044,11 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
             MutexLock l(mutex);
             if (FLAGS_enable_scan_control) {
                 // :(,  compile optimistic may cause error
-                int32_t* pending_count_ptr = &pending_count;
-                if ((int32_t)(*pending_count_ptr) >= limit) {
+                if (pending_count >= limit) {
                     // if has limit getrow flying, wait for finish
-                    VLOG(12) << "wait flying GetSingleRow finish, pending count " << *pending_count_ptr
+                    VLOG(12) << "wait flying GetSingleRow finish, pending count " << pending_count
                         << ", limit " << limit;
-                    while ((int32_t)(*pending_count_ptr) > 0) {cond.Wait();}
+                    while (pending_count > 0) {cond.Wait();}
                 }
             }
             if (*finish || *counter >= limit) {
@@ -1104,8 +1096,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     {
 	MutexLock l(mutex);
         // :(,  compile optimistic may cause error
-        int32_t* pending_count_ptr = &pending_count;
-	while ((int32_t)(*pending_count_ptr) > 0) {cond.Wait();}
+	while (pending_count > 0) {cond.Wait();}
     	VLOG(10) << "finish scan index: " << index_table->GetName() << ", all done, get data_num " << got_count;
     }
 }
@@ -1356,23 +1347,17 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
 void TableImpl::ReadData(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
     const std::string& primary_key = reader->RowName();
+    bool should_break = false;
 
     // check break
-    if (ReadPrimaryTableBreak(param, param->result, Status::OK())) {
-        VLOG(12) << "break from read primary table, primary key: " << primary_key;
-        delete reader;
-        return;
-    }
+    should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
 
     std::vector<FileLocation> locations;
     std::multimap<std::string, std::string> indexes;
     while (!reader->Done()) {
         // check break
-        if (ReadPrimaryTableBreak(param, param->result, Status::OK())) {
-            VLOG(12) << "break from read primary table, primary key: " << primary_key;
-            delete reader;
-            return;
-        }
+        should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
+        if (should_break) { break; }
 
         const std::string& location_buffer = reader->Qualifier();
         FileLocation location;
@@ -1386,15 +1371,12 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 
     ResultStream* result = param->result;
     VLOG(12) << "test indexes of primary key: " << primary_key;
-    if (param->index_cond_list == NULL || TestIndexCondition(*param->index_cond_list, indexes)) {
+    if (!should_break && (param->index_cond_list == NULL || TestIndexCondition(*param->index_cond_list, indexes))) {
         VLOG(12) << "read data of primary key: " << primary_key;
         for (size_t i = 0; i < locations.size(); ++i) {
             // check break
-            if (ReadPrimaryTableBreak(param, param->result, Status::OK())) {
-                VLOG(12) << "break from read primary table, primary key: " << primary_key;
-                delete reader;
-                return;
-            }
+            should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
+            if (should_break) { break; }
 
             FileLocation& location = locations[i];
             VLOG(12) << "begin to read data from " << location;
