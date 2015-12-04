@@ -785,7 +785,7 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
         tera::ResultStream* result = ts_table->Scan(*scan_desc, &err);
 
         std::vector<std::string> primary_key_list;
-        while ((int32_t)result_list->size() < limit && !result->Done()) {
+        while ((int32_t)result_list->size() < limit && !result->Done(&err)) {
             const std::string& primary_key = result->Qualifier();
             VLOG(12) << "select op, primary key: " << primary_key;
 
@@ -802,7 +802,7 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
             result->Next();
         }
         if (primary_key_list.size() > 0) {
-            CHECK(result->Done());
+            CHECK(result->Done(&err));
             CHECK_LT((int32_t)result_list->size(), limit);
             GetRows(primary_key_list, limit - result_list->size(),
                     result_list);
@@ -1152,14 +1152,14 @@ tera::ResultStream* TableImpl::ScanIndexTable(tera::Table* index_table,
                                               tera::ScanDescriptor* scan_desc,
                                               tera::ResultStream* result, int32_t limit,
                                               std::vector<std::string>* primary_key_list) {
+    tera::ErrorCode err;
     CHECK_EQ(primary_key_list->size(), 0U);
     VLOG(10) << "begin scan index: " << index_table->GetName();
     if (result == NULL) {
-        tera::ErrorCode err;
         result = index_table->Scan(*scan_desc, &err);
     }
     CHECK_NOTNULL(result);
-    while (!result->Done() && (int32_t)primary_key_list->size() < limit) {
+    while (!result->Done(&err) && (int32_t)primary_key_list->size() < limit) {
         std::string primary_key(result->Qualifier(), 8, std::string::npos);
         primary_key_list->push_back(primary_key);
         VLOG(12) << "select op, primary key: " << primary_key;
