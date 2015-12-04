@@ -942,6 +942,12 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
 
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
         scan_desc->SetTimeRange(end_timestamp, start_timestamp);
+        char sbuf[8], ebuf[8];
+        EncodeBigEndian(sbuf, start_timestamp);
+        EncodeBigEndian(ebuf, end_timestamp);
+        std::string start_qu(sbuf, sizeof(sbuf));
+        std::string end_qu(ebuf, sizeof(ebuf));
+        scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
 
         index_table_vec[valid_nr_index_table] = index_table;
         scan_desc_vec[valid_nr_index_table] = scan_desc;
@@ -1038,7 +1044,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
 
     // filter by timestamp
     VLOG(10) << "begin scan index: " << index_table->GetName();
-    while (!stream->Done()) {
+    while (!stream->Done(&err)) {
         std::string primary_key(stream->Qualifier(), 8, std::string::npos);
         {
             MutexLock l(mutex);
