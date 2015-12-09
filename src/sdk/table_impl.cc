@@ -947,7 +947,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         EncodeBigEndian(ebuf, end_timestamp);
         std::string start_qu(sbuf, sizeof(sbuf));
         std::string end_qu(ebuf, sizeof(ebuf));
-        scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
+        //scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
 
         index_table_vec[valid_nr_index_table] = index_table;
         scan_desc_vec[valid_nr_index_table] = scan_desc;
@@ -1312,7 +1312,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
 struct ReadPrimaryTableContext {
     TableImpl* table;
     ResultStream* result;
-    const std::vector<IndexConditionExtend>* index_cond_list;
+    std::vector<IndexConditionExtend> index_cond_list;
     void* user_callback;
     void* user_break_func; // break read primary table
     void* user_param;
@@ -1377,7 +1377,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 
     ResultStream* result = param->result;
     VLOG(12) << "test indexes of primary key: " << primary_key;
-    if (!should_break && (param->index_cond_list == NULL || TestIndexCondition(*param->index_cond_list, indexes))) {
+    if (!should_break && (TestIndexCondition(param->index_cond_list, indexes))) {
         VLOG(12) << "read data of primary key: " << primary_key;
         for (size_t i = 0; i < locations.size(); ++i) {
             // check break
@@ -1524,7 +1524,7 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     ReadPrimaryTableContext* param = new ReadPrimaryTableContext;
     param->table = this;
     param->result = result;
-    param->index_cond_list = index_cond_list;
+    param->index_cond_list = *index_cond_list;
     param->user_callback = (void*)user_callback;
     param->user_break_func = (void*)user_break_func;
     param->user_param = user_param;
