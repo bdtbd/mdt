@@ -27,6 +27,7 @@ DECLARE_bool(read_by_index_filter);
 DECLARE_bool(enable_scan_control);
 DECLARE_int64(batch_scan_buffer_size);
 DECLARE_bool(enable_qu_range);
+DECLARE_int64(tera_scan_pack_interval);
 
 namespace mdt {
 
@@ -953,6 +954,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
             scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
         }
         scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
+        scan_desc->SetPackInterval(FLAGS_tera_scan_pack_interval);
 
         index_table_vec[valid_nr_index_table] = index_table;
         scan_desc_vec[valid_nr_index_table] = scan_desc;
