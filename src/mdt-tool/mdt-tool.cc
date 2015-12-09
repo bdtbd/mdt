@@ -262,7 +262,12 @@ int GetOp(std::vector<std::string>& cmd_vec) {
     std::cout << "=============================================\n";
     std::cout << "              Get by Index Key               \n";
     std::cout << "=============================================\n";
+    // calulate time
+    struct timeval now_ts, finish_ts;
+    gettimeofday(&now_ts, NULL);
     table->Get(search_req, search_resp);
+    gettimeofday(&finish_ts, NULL);
+
     for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
         const mdt::ResultStream& result = search_resp->result_stream[i];
         const std::string& pri_key = result.primary_key;
@@ -270,6 +275,10 @@ int GetOp(std::vector<std::string>& cmd_vec) {
             std::cout << "###PrimaryKey :" << pri_key << ", ###Value :" << result.result_data_list[j] << std::endl;
         }
     }
+    std::cout << "\n=============================================\n";
+    std::cout << "search time: begin: tv_sec " << now_ts.tv_sec << ", tv_usec " << now_ts.tv_usec
+        << ", now: tv_sec " << finish_ts.tv_sec << ", tv_usec " << finish_ts.tv_usec;
+    std::cout << "=============================================\n";
     return 0;
 }
 
