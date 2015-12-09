@@ -28,4 +28,5 @@ DEFINE_int64(read_file_thread_num, 100,  "num of read file threads");
 DEFINE_bool(enable_multi_version_read, false, "enable search specify time version primary key row");
 DEFINE_bool(read_by_index_filter, true, "read by index filter instead of index merger");
 DEFINE_bool(enable_scan_control, false, "if true, batch scan in limit number");
+DEFINE_int64(batch_scan_buffer_size, 1048576, "scan buffer size");
 

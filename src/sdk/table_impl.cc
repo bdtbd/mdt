@@ -25,6 +25,7 @@ DECLARE_int64(read_file_thread_num);
 DECLARE_bool(enable_multi_version_read);
 DECLARE_bool(read_by_index_filter);
 DECLARE_bool(enable_scan_control);
+DECLARE_int64(batch_scan_buffer_size);
 
 namespace mdt {
 
@@ -948,6 +949,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         std::string start_qu(sbuf, sizeof(sbuf));
         std::string end_qu(ebuf, sizeof(ebuf));
         scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
+        scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
 
         index_table_vec[valid_nr_index_table] = index_table;
         scan_desc_vec[valid_nr_index_table] = scan_desc;
