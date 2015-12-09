@@ -1021,11 +1021,21 @@ void FilterIndexCallback(Status s, ResultStream* result, void* callback_param) {
     delete param;
 }
 
-bool FilterIndexBreak(Status s, ResultStream* result, void* callback_param) {
+bool FilterIndexBreak(Status s, ResultStream* result, void* callback_param,
+                      const std::string& data,
+                      const std::string& primary_key) {
     FilterIndexParam* param = (FilterIndexParam*)callback_param;
     MutexLock l(param->mutex);
     if (*param->counter >= param->limit) {
         return true;
+    }
+
+    // enqueue data in lock
+    if (s.ok() && (data.size() > 0)) {
+        result->result_data_list.push_back(data);
+    }
+    if (s.ok() && (primary_key.size() > 0)) {
+        result->primary_key = primary_key;
     }
     return false;
 }
@@ -1311,11 +1321,11 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
 
 struct ReadPrimaryTableContext {
     TableImpl* table;
-    ResultStream* result;
     std::vector<IndexConditionExtend> index_cond_list;
     void* user_callback;
     void* user_break_func; // break read primary table
     void* user_param;
+    ResultStream* result; // user context
 
     // useful if user_callback == NULL
     Mutex* mutex;
@@ -1334,10 +1344,12 @@ void ReleaseReadPrimaryTableContext(ReadPrimaryTableContext* param, ResultStream
     delete param;
 }
 
-bool ReadPrimaryTableBreak(ReadPrimaryTableContext* param, ResultStream* result, Status s) {
+bool ReadPrimaryTableBreak(ReadPrimaryTableContext* param, ResultStream* result, Status s,
+                           const std::string& data, const std::string& primary_key) {
     bool should_break = false;
     if (param->user_break_func != NULL) {
-        should_break = ((GetSingleRowBreak*)param->user_break_func)(s, result, param->user_param);
+        should_break = ((GetSingleRowBreak*)param->user_break_func)(s, result, param->user_param,
+                                            data, primary_key);
     }
     return should_break;
 }
@@ -1356,13 +1368,13 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     bool should_break = false;
 
     // check break
-    should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
+    should_break = ReadPrimaryTableBreak(param, param->result, Status::OK(), "", "");
 
     std::vector<FileLocation> locations;
     std::multimap<std::string, std::string> indexes;
     while (!reader->Done()) {
         // check break
-        should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
+        should_break = ReadPrimaryTableBreak(param, param->result, Status::OK(), "", "");
         if (should_break) { break; }
 
         const std::string& location_buffer = reader->Qualifier();
@@ -1375,22 +1387,21 @@ void TableImpl::ReadData(tera::RowReader* reader) {
         reader->Next();
     }
 
-    ResultStream* result = param->result;
+    int nr_record = 0;
     VLOG(12) << "test indexes of primary key: " << primary_key;
     if (!should_break && (TestIndexCondition(param->index_cond_list, indexes))) {
         VLOG(12) << "read data of primary key: " << primary_key;
         for (size_t i = 0; i < locations.size(); ++i) {
-            // check break
-            should_break = ReadPrimaryTableBreak(param, param->result, Status::OK());
-            if (should_break) { break; }
-
             FileLocation& location = locations[i];
             VLOG(12) << "begin to read data from " << location;
             std::string data;
             Status s = param->table->ReadDataFromFile(location, &data);
             if (s.ok()) {
                 VLOG(12) << "finish read data from " << location;
-                result->result_data_list.push_back(data);
+                // check break
+                should_break = ReadPrimaryTableBreak(param, param->result, Status::OK(), data, "");
+                if (should_break) { break; }
+                nr_record++;
             } else {
                 LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
             }
@@ -1403,8 +1414,8 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     } else if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
 	LOG(WARNING) << "tera row reader error, primary key " << primary_key;
         s = Status::IOError("tera error");
-    } else if (result->result_data_list.size() > 0) {
-        result->primary_key = primary_key;
+    } else if (nr_record > 0) {
+        ReadPrimaryTableBreak(param, param->result, Status::OK(), "", primary_key);
         s = Status::OK();
     } else {
 	LOG(WARNING) << "row not found, priamry key " << primary_key;
@@ -1413,7 +1424,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     delete reader;
 
     // trigger user callback
-    ReleaseReadPrimaryTableContext(param, result, s);
+    ReleaseReadPrimaryTableContext(param, param->result, s);
 }
 
 void TableImpl::ParseIndexesFromString(const std::string& index_buffer,

@@ -130,7 +130,8 @@ struct IndexConditionExtend {
 };
 
 typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
-typedef bool GetSingleRowBreak(Status s, ResultStream* result, void* callback_param);
+typedef bool GetSingleRowBreak(Status s, ResultStream* result, void* callback_param,
+                               const std::string& data, const std::string& primary_key);
 
 class TableImpl : public Table {
 public:
