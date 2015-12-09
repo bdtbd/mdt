@@ -278,7 +278,7 @@ int GetOp(std::vector<std::string>& cmd_vec) {
     std::cout << "\n=============================================\n";
     std::cout << "search time: begin: tv_sec " << now_ts.tv_sec << ", tv_usec " << now_ts.tv_usec
         << ", now: tv_sec " << finish_ts.tv_sec << ", tv_usec " << finish_ts.tv_usec;
-    std::cout << "=============================================\n";
+    std::cout << "\n=============================================\n";
     return 0;
 }
 
