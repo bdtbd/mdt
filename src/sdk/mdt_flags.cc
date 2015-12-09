@@ -29,4 +29,4 @@ DEFINE_bool(enable_multi_version_read, false, "enable search specify time versio
 DEFINE_bool(read_by_index_filter, true, "read by index filter instead of index merger");
 DEFINE_bool(enable_scan_control, false, "if true, batch scan in limit number");
 DEFINE_int64(batch_scan_buffer_size, 1048576, "scan buffer size");
-
+DEFINE_bool(enable_qu_range, true, "use qu to filter");

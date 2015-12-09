@@ -26,6 +26,7 @@ DECLARE_bool(enable_multi_version_read);
 DECLARE_bool(read_by_index_filter);
 DECLARE_bool(enable_scan_control);
 DECLARE_int64(batch_scan_buffer_size);
+DECLARE_bool(enable_qu_range);
 
 namespace mdt {
 
@@ -943,12 +944,14 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
 
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
         scan_desc->SetTimeRange(end_timestamp, start_timestamp);
-        char sbuf[8], ebuf[8];
-        EncodeBigEndian(sbuf, start_timestamp);
-        EncodeBigEndian(ebuf, end_timestamp);
-        std::string start_qu(sbuf, sizeof(sbuf));
-        std::string end_qu(ebuf, sizeof(ebuf));
-        scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
+        if (FLAGS_enable_qu_range) {
+            char sbuf[8], ebuf[8];
+            EncodeBigEndian(sbuf, start_timestamp);
+            EncodeBigEndian(ebuf, end_timestamp);
+            std::string start_qu(sbuf, sizeof(sbuf));
+            std::string end_qu(ebuf, sizeof(ebuf));
+            scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
+        }
         scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
 
         index_table_vec[valid_nr_index_table] = index_table;
