@@ -1395,7 +1395,7 @@ void ReleaseReadPrimaryTableContext(ReadPrimaryTableContext* param, ResultStream
     delete param;
 }
 
-bool ReadPrimaryTableBreak(ReadPrimaryTableContext* param, ResultStream* result, Status s,
+bool BreakOrPushData(ReadPrimaryTableContext* param, ResultStream* result, Status s,
                            const std::string& data, const std::string& primary_key) {
     bool should_break = false;
     if (param->user_break_func != NULL) {
@@ -1427,13 +1427,13 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     bool should_break = false;
 
     // check break
-    should_break = ReadPrimaryTableBreak(param, param->result, Status::OK(), "", "");
+    should_break = BreakOrPushData(param, param->result, Status::OK(), "", "");
 
     std::vector<FileLocation> locations;
     std::multimap<std::string, std::string> indexes;
     while (!reader->Done()) {
         // check break
-        should_break = ReadPrimaryTableBreak(param, param->result, Status::OK(), "", "");
+        should_break = BreakOrPushData(param, param->result, Status::OK(), "", "");
         if (should_break) { break; }
 
         const std::string& location_buffer = reader->Qualifier();
@@ -1458,7 +1458,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
             if (s.ok()) {
                 VLOG(12) << "finish read data from " << location;
                 // check break
-                should_break = ReadPrimaryTableBreak(param, param->result, Status::OK(), data, "");
+                should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
                 if (should_break) { break; }
                 nr_record++;
             } else {
@@ -1474,7 +1474,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 	LOG(WARNING) << "tera row reader error, primary key " << primary_key;
         s = Status::IOError("tera error");
     } else if (nr_record > 0) {
-        ReadPrimaryTableBreak(param, param->result, Status::OK(), "", primary_key);
+        BreakOrPushData(param, param->result, Status::OK(), "", primary_key);
         s = Status::OK();
     } else {
 	LOG(WARNING) << "row not found, priamry key " << primary_key;
