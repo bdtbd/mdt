@@ -1401,6 +1401,14 @@ bool ReadPrimaryTableBreak(ReadPrimaryTableContext* param, ResultStream* result,
     if (param->user_break_func != NULL) {
         should_break = ((GetSingleRowBreak*)param->user_break_func)(s, result, param->user_param,
                                             data, primary_key);
+    } else {
+        // enqueue data in lock
+        if (s.ok() && (data.size() > 0)) {
+            result->result_data_list.push_back(data);
+        }
+        if (s.ok() && (primary_key.size() > 0)) {
+            result->primary_key = primary_key;
+        }
     }
     return should_break;
 }
