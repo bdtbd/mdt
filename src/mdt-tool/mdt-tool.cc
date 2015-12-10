@@ -174,7 +174,7 @@ int DumpCacheOp(std::vector<std::string>& cmd_vec) {
         param.client = client;
         param.table_name = tname;
         param_vec.push_back(param);
-        pthread_create(&tid, NULL, DumpCacheThread, &table_list[i]);
+        pthread_create(&tid, NULL, DumpCacheThread, &param_vec[i]);
         tid_vec.push_back(tid);
     }
     for (int32_t i = 0; i < (int32_t)table_list.size(); i++) {
