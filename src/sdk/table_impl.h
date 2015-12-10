@@ -130,7 +130,15 @@ struct IndexConditionExtend {
 };
 
 typedef void GetSingleRowCallback(Status s, ResultStream* result, void* callback_param);
-typedef bool GetSingleRowBreak(Status s, ResultStream* result, void* callback_param);
+typedef bool GetSingleRowBreak(Status s, ResultStream* result, void* callback_param,
+                               const std::string& data, const std::string& primary_key);
+struct MultiIndexParam {
+    Mutex mutex;
+    int32_t limit;
+    int32_t counter;
+    bool finish;
+    int32_t ref;
+};
 
 class TableImpl : public Table {
 public:
@@ -183,7 +191,7 @@ private:
 
     void GetByFilterIndex(tera::Table* index_table,
                           tera::ScanDescriptor* scan_desc,
-                          int32_t limit, Mutex* mutex, int32_t* counter, bool* finish,
+                          MultiIndexParam* multi_param,
                           const std::vector<IndexConditionExtend>* index_cond_list,
                           std::map<std::string, ResultStream>* results);
 
