@@ -424,6 +424,9 @@ int UpdateTableProperty(tera::Client* client,
     } else if (table_prop_key == "splitsize") {
         int64_t splitsize = (int64_t)atoi(table_prop_value.c_str());
         desc->SetSplitSize(splitsize);
+    } else if (table_prop_key == "mergesize") {
+        int64_t mergesize = (int64_t)atoi(table_prop_value.c_str());
+        desc->SetMergeSize(mergesize);
     } else {
         std::cout << "not support " << table_prop_key << ", value " << table_prop_value << std::endl;
         return -1;
