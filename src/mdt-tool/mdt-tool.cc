@@ -66,7 +66,121 @@ void HelpManue() {
             "<cf_prop_key> <cf_prop_value>\n\n");
     printf("cmd: showschema dbname tablename\n\n");
     printf("cmd: UpdateSingleTable internaltablename <table_prop_key> <tale_prop_value>\n\n");
+    printf("cmd: dumpcache dbname tablename\n\n");
     printf("===========================\n");
+}
+
+int GetClientAndTableList(const std::string& db_name,
+                          const std::string& table_name,
+                          tera::Client** client_ptr,
+                          std::vector<std::string>& table_list) {
+    // new tera client
+    tera::ErrorCode error;
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    if (client == NULL) {
+        std::cout << "new tera::Client error\n";
+        return -1;
+    }
+    *client_ptr = client;
+
+    // get schema
+    std::string schema_table = db_name + "#SchemaTable#";
+    tera::Table* table = client->OpenTable(schema_table, &error);
+    if (table == NULL) {
+        std::cout << "mdt: schema table " << schema_table << " not exist\n";
+        return -1;
+    }
+    std::string schema_value;
+    if (!table->Get(table_name, "", "", &schema_value, &error)) {
+        delete table;
+        std::cout << " Get index table name from " << schema_table << " fail\n";
+        return -1;
+    }
+    delete table;
+    mdt::BigQueryTableSchema schema;
+    schema.ParseFromString(schema_value);
+    std::cout << "SCHEMA:\n" << schema.DebugString() << "\n";
+
+    // update primary table
+    std::string primary_table = db_name + "#pri#" + table_name;
+    table_list.push_back(primary_table);
+
+    // update index table
+    for (int i = 0; i < (int)(schema.index_descriptor_list_size()); i++) {
+        const mdt::IndexSchema& index = schema.index_descriptor_list(i);
+        std::string index_name = index.index_name();
+        std::string index_table = db_name + "#" + table_name + "#" + index_name;
+        table_list.push_back(index_table);
+    }
+
+    // update ts table
+    for (int i = 0; i < (int)(FLAGS_max_timestamp_tables); i++) {
+        char ts_name[32];
+        snprintf(ts_name, sizeof(ts_name), "timestamp#%d", i);
+        std::string timestamp_table = db_name + "#" + table_name + "#" + ts_name;
+        table_list.push_back(timestamp_table);
+    }
+    return 0;
+}
+
+// dumpcache with scan op
+struct DumpCacheParam {
+    tera::Client* client;
+    std::string table_name;
+};
+
+int DumpCache(tera::Client* client, const std::string& table_name) {
+    tera::ErrorCode err;
+    tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor("");
+    scan_desc->SetEnd("");
+
+    tera::Table* tera_table = client->OpenTable(table_name, &err);
+    if (tera_table == NULL) {
+        std::cout << "open tera table error\n";
+        return -1;
+    }
+    tera::ResultStream* result = tera_table->Scan(*scan_desc, &err);
+    while (!result->Done(&err)) {
+        result->Next();
+    }
+    delete result;
+    return 0;
+}
+
+void* DumpCacheThread(void* arg) {
+    DumpCacheParam* param = (DumpCacheParam*)arg;
+    DumpCache(param->client, param->table_name);
+    return NULL;
+}
+
+int DumpCacheOp(std::vector<std::string>& cmd_vec) {
+    // parse param
+    std::string db_name = cmd_vec[1];
+    std::string table_name = cmd_vec[2];
+
+    tera::Client* client = NULL;
+    std::vector<std::string> table_list;
+    if (GetClientAndTableList(db_name, table_name, &client, table_list) < 0) {
+        std::cout << "dump cache, open client or get table list error\n";
+        return -1;
+    }
+    std::vector<pthread_t> tid_vec;
+    std::vector<DumpCacheParam> param_vec;
+    for (int32_t i = 0; i < (int32_t)table_list.size(); i++) {
+        const std::string& tname = table_list[i];
+        pthread_t tid;
+        DumpCacheParam param;
+
+        param.client = client;
+        param.table_name = tname;
+        param_vec.push_back(param);
+        pthread_create(&tid, NULL, DumpCacheThread, &table_list[i]);
+        tid_vec.push_back(tid);
+    }
+    for (int32_t i = 0; i < (int32_t)table_list.size(); i++) {
+        pthread_join(tid_vec[i], NULL);
+    }
+    return 0;
 }
 
 // showschema dbname tablename
@@ -836,6 +950,11 @@ int main(int ac, char* av[]) {
             continue;
         } else if (cmd_vec[0].compare("UpdateSingleTable") == 0 && cmd_vec.size() == 4) {
             UpdateSingleTableProp(cmd_vec);
+            add_history(line);
+            free(line);
+            continue;
+    } else if (cmd_vec[0].compare("dumpcache") == 0 && cmd_vec.size() == 3) {
+            DumpCacheOp(cmd_vec);
             add_history(line);
             free(line);
             continue;
