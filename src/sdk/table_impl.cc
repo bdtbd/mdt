@@ -1586,7 +1586,9 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     ReadPrimaryTableContext* param = new ReadPrimaryTableContext;
     param->table = this;
     param->result = result;
-    param->index_cond_list = *index_cond_list;
+    if (index_cond_list) {
+        param->index_cond_list = *index_cond_list;
+    }
     param->user_callback = (void*)user_callback;
     param->user_break_func = (void*)user_break_func;
     param->user_param = user_param;
