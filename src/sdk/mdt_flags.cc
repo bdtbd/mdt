@@ -32,3 +32,6 @@ DEFINE_int64(batch_scan_buffer_size, 1048576, "scan buffer size");
 DEFINE_bool(enable_qu_range, true, "use qu to filter");
 DEFINE_int64(tera_scan_pack_interval, 50000000, "scan timeout in one round");
 
+// create table param
+DEFINE_int64(tera_table_ttl, 0, "max time to keep data, current time > ttl, delete data");
+

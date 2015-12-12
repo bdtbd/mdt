@@ -553,7 +553,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
 
     // write index tables
     char buf[8];
-    EncodeBigEndian(buf, req->timestamp);
+    EncodeBigEndian(buf, 0x7fffffffffffffff - req->timestamp);
     std::string ts_key(buf, sizeof(buf));
     std::string time_primay_key = ts_key + primary_key;
     for (map_it = index_map.begin(); map_it != index_map.end(); ++map_it) {
@@ -769,9 +769,9 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
     }
 
     char buf[8];
-    EncodeBigEndian(buf, start_timestamp);
+    EncodeBigEndian(buf, 0x7fffffffffffffff - start_timestamp);
     std::string start_ts_key(buf, sizeof(buf));
-    EncodeBigEndian(buf, end_timestamp);
+    EncodeBigEndian(buf, 0x7fffffffffffffff - end_timestamp);
     std::string end_ts_key(buf, sizeof(buf));
     VLOG(10) << "get by timestamp table: " << DebugString(start_ts_key) << " ~ "
              << DebugString(end_ts_key);
@@ -779,8 +779,8 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
     std::set<std::string> primary_key_set;
     for (size_t i = 0; (int32_t)result_list->size() < limit && i < ts_table_list.size(); i++) {
         tera::Table* ts_table = ts_table_list[i];
-        tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
-        scan_desc->SetEnd(end_ts_key + '\0');
+        tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(end_ts_key);
+        scan_desc->SetEnd(start_ts_key + '\0');
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
 
         VLOG(10) << "scan timestamp table: " << i;
@@ -805,7 +805,7 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
             result->Next();
         }
         if (primary_key_list.size() > 0) {
-            CHECK(result->Done(&err));
+            //CHECK(result->Done(&err));
             CHECK_LT((int32_t)result_list->size(), limit);
             GetRows(primary_key_list, limit - result_list->size(),
                     result_list);
@@ -947,11 +947,11 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         scan_desc->SetTimeRange(end_timestamp, start_timestamp);
         if (FLAGS_enable_qu_range) {
             char sbuf[8], ebuf[8];
-            EncodeBigEndian(sbuf, start_timestamp);
-            EncodeBigEndian(ebuf, end_timestamp);
+            EncodeBigEndian(sbuf, 0x7fffffffffffffff - start_timestamp);
+            EncodeBigEndian(ebuf, 0x7fffffffffffffff - end_timestamp);
             std::string start_qu(sbuf, sizeof(sbuf));
             std::string end_qu(ebuf, sizeof(ebuf));
-            scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
+            scan_desc->AddQualifierRange(kIndexTableColumnFamily, end_qu, start_qu);
         }
         scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
         scan_desc->SetPackInterval(FLAGS_tera_scan_pack_interval);
@@ -1092,6 +1092,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     FilterIndexParam* param = new FilterIndexParam(multi_param);
     param->pending_count = 1;
     while (!stream->Done(&err)) {
+        // skip 8 bytes's 0x7fffffffffffffff - ts
         std::string primary_key(stream->Qualifier(), 8, std::string::npos);
         {
             MutexLock l(&multi_param->mutex);

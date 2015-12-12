@@ -17,6 +17,7 @@ DECLARE_string(tera_root_dir);
 DECLARE_string(tera_flag_file_path);
 DECLARE_string(database_root_dir);
 DECLARE_int64(max_timestamp_table_num);
+DECLARE_int64(tera_table_ttl);
 
 namespace mdt {
 
@@ -171,11 +172,12 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
     tera::TableDescriptor primary_table_desc(primary_table_name);
     LOG(INFO) << "Create primary table name " << primary_table_name;
     primary_table_desc.SetRawKey(tera::kBinary);
+    primary_table_desc.SetSplitSize(10240);
     tera::LocalityGroupDescriptor* lg = primary_table_desc.AddLocalityGroup("lg");
     lg->SetBlockSize(32 * 1024);
     lg->SetCompress(tera::kSnappyCompress);
     tera::ColumnFamilyDescriptor* cf = primary_table_desc.AddColumnFamily("Location", "lg");
-    cf->SetTimeToLive(0);
+    cf->SetTimeToLive(FLAGS_tera_table_ttl);
     tera_adapter_.opt_.client_->CreateTable(primary_table_desc, &error_code);
 
     // create index key table
@@ -187,11 +189,12 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
         LOG(INFO) << "Create index table name " << index_table_name;
         tera::TableDescriptor index_table_desc(index_table_name);
         index_table_desc.SetRawKey(tera::kBinary);
+        index_table_desc.SetSplitSize(10240);
         tera::LocalityGroupDescriptor* index_lg = index_table_desc.AddLocalityGroup("lg");
         index_lg->SetBlockSize(32 * 1024);
         index_lg->SetCompress(tera::kSnappyCompress);
         tera::ColumnFamilyDescriptor* index_cf = index_table_desc.AddColumnFamily("PrimaryKey", "lg");
-        index_cf->SetTimeToLive(0);
+        index_cf->SetTimeToLive(FLAGS_tera_table_ttl);
         tera_adapter_.opt_.client_->CreateTable(index_table_desc, &error_code);
     }
 
@@ -204,11 +207,12 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
         LOG(INFO) << "Create index table name " << index_table_name;
         tera::TableDescriptor index_table_desc(index_table_name);
         index_table_desc.SetRawKey(tera::kBinary);
+        index_table_desc.SetSplitSize(10240);
         tera::LocalityGroupDescriptor* index_lg = index_table_desc.AddLocalityGroup("lg");
         index_lg->SetBlockSize(32 * 1024);
         index_lg->SetCompress(tera::kSnappyCompress);
         tera::ColumnFamilyDescriptor* index_cf = index_table_desc.AddColumnFamily("PrimaryKey", "lg");
-        index_cf->SetTimeToLive(0);
+        index_cf->SetTimeToLive(FLAGS_tera_table_ttl);
         tera_adapter_.opt_.client_->CreateTable(index_table_desc, &error_code);
     }
 
