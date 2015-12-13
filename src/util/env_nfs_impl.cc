@@ -22,7 +22,7 @@ public:
         :fs_(fs), filename_(fname), file_(NULL) {
         fs_->Delete(filename_);
         file_ = fs_->OpenFile(filename_, WRONLY);
-        assert(file_);
+        //assert(file_);
     }
 
     virtual ~DfsWritableFile() {
@@ -37,6 +37,10 @@ public:
     }
 
     Status Append(const Slice& data) {
+        if (file_ == NULL) {
+            return Status::IOError("no such file");
+        }
+
         const char* src = data.data();
         size_t size = data.size();
 
@@ -50,6 +54,9 @@ public:
     Status Flush() {return Status::OK();}
 
     Status Sync() {
+        if (file_ == NULL) {
+            return Status::IOError("no such file");
+        }
         Status s;
         if (file_->Sync() == -1) {
             s = IOError(filename_, errno);
@@ -221,7 +228,7 @@ public:
             std::vector<std::string>* result,
             std::vector<int64_t>* ctime = NULL) {
         if (0 != dfs_->ListDirectory(dir, result, ctime)) {
-            abort();
+            LOG(ERROR) << "nfs cannot list dir, " << dir;
         }
         return Status::OK();
     }

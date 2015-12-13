@@ -62,6 +62,9 @@ Status TableImpl::Init() {
     // create fs dir
     fs_.env_->CreateDir(fs_.root_path_);
 
+    // read cache
+    seq_cnt_ = 1;
+
     // init write handle list
     nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
     cur_write_handle_id_ = 0;
@@ -1643,6 +1646,7 @@ Status TableImpl::ReadDataFromFile(const FileLocation& location, std::string* da
     if (s.ok()) {
         data->assign(result.data(), result.size());
     }
+    ReleaseDataReader(location.fname_);
     delete[] scratch;
     return s;
 }
@@ -1687,7 +1691,7 @@ void TableImpl::GetAllTimestampTables(std::vector<tera::Table*>* table_list) {
     }
 }
 
-std::string TableImpl::TimeToString() {
+std::string TableImpl::TimeToString(struct timeval* filetime) {
 #ifdef OS_LINUX
     pid_t tid = syscall(SYS_gettid);
 #else
@@ -1714,6 +1718,7 @@ std::string TableImpl::TimeToString() {
             static_cast<int>(now_tv.tv_usec),
             (unsigned long)thread_id);
     std::string time_buf(buf, 33);
+    *filetime = now_tv;
     return time_buf;
 }
 
@@ -1722,10 +1727,21 @@ RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
     MutexLock l(&file_mutex_);
 
     // get file from cache
-    std::map<std::string, RandomAccessFile*>::iterator it = file_map_.find(filename);
+    std::map<std::string, DataReader>::iterator it = file_map_.find(filename);
     if (it != file_map_.end()) {
+        DataReader& reader = it->second;
+        // update lru
+        std::map<uint64_t, std::string>::iterator lru_it = file_lru_.find(reader.seq_);
+        if (lru_it != file_lru_.end()) {
+            file_lru_.erase(lru_it);
+        }
+        uint64_t seq_no = seq_cnt_++;
+        file_lru_[seq_no] = filename;
+
+        reader.seq_ = seq_no;
+        reader.ref_.Inc();
         VLOG(5) << "find file in cache: " << filename;
-        return it->second;
+        return reader.file_;
     }
 
     // open file
@@ -1742,24 +1758,93 @@ RandomAccessFile* TableImpl::OpenFileForRead(const std::string& filename) {
     VLOG(5) << "open file: " << filename;
     it = file_map_.find(filename);
     if (file_map_.find(filename) == file_map_.end()) {
-        file_map_[filename] = file;
+        uint64_t seq_no = seq_cnt_++;
+        DataReader reader;
+        reader.seq_ = seq_no;
+        reader.file_ = file;
+        reader.ref_.Set(1); // init to be 1
+        reader.ref_.Inc();
+
+        file_map_[filename] = reader;
+        // insert into lru list
+        std::map<uint64_t, std::string>::iterator lru_it = file_lru_.find(reader.seq_);
+        if (lru_it != file_lru_.end()) {
+            file_lru_.erase(lru_it);
+        }
+        file_lru_[seq_no] = filename;
+
+        // try to evict cache if the num of cache item > 1M
+        if (file_lru_.size() > 1000000) {
+            std::map<uint64_t, std::string>::iterator erase_it = file_lru_.begin();
+            // delete top 1000 oldest cache item
+            for (; erase_it != file_lru_.end(); ++ erase_it) {
+                std::map<std::string, DataReader>::iterator file_map_tmp_it = file_map_.find(erase_it->second);
+                if (file_map_tmp_it == file_map_.end()) {
+                    LOG(ERROR) << "file " << erase_it->second << ", seq " << erase_it->first
+                        << ", in lru, not in file map";
+                    file_lru_.erase(erase_it);
+                    break;
+                }
+
+                DataReader& erase_reader = file_map_tmp_it->second;
+                if ((erase_reader.ref_.Get() == 0) || (erase_reader.ref_.Dec() == 0)) {
+                    // do something cleanup
+                    file_lru_.erase(erase_it);
+                    delete erase_reader.file_;
+                    file_map_.erase(file_map_tmp_it);
+                    break;
+                }
+            }
+        }
+
     } else {
         delete file;
-        file = it->second;
+        DataReader& reader = it->second;
+
+        // update lru
+        std::map<uint64_t, std::string>::iterator lru_it = file_lru_.find(reader.seq_);
+        if (lru_it != file_lru_.end()) {
+            file_lru_.erase(lru_it);
+        }
+        uint64_t seq_no = seq_cnt_++;
+        file_lru_[seq_no] = filename;
+
+        reader.seq_ = seq_no;
+        reader.ref_.Inc();
+        file = reader.file_;
     }
     return file;
+}
+
+void TableImpl::ReleaseDataReader(const std::string& filename) {
+    MutexLock l(&file_mutex_);
+    std::map<std::string, DataReader>::iterator it = file_map_.find(filename);
+    if (it != file_map_.end()) {
+        DataReader& reader = it->second;
+
+        if ((reader.ref_.Get() == 0) && (reader.ref_.Dec() == 0)) {
+            // do something cleanup
+            std::map<uint64_t, std::string>::iterator lru_it = file_lru_.find(reader.seq_);
+            if (lru_it != file_lru_.end()) {
+                file_lru_.erase(lru_it);
+            }
+            delete reader.file_;
+            file_map_.erase(it);
+        }
+    }
 }
 
 // DataWriter Impl
 DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
     DataWriter* writer = NULL;
+    struct timeval filetime;
     if (write_handle->writer_ && write_handle->writer_->SwitchDataFile()) {
         LOG(INFO) << "data file too large, switch";
         delete write_handle->writer_;
         write_handle->writer_ = NULL;
     }
     if (write_handle->writer_ == NULL) {
-        std::string fname = fs_.root_path_ + "/" + TimeToString() + ".data";
+        std::string fname = fs_.root_path_ + "/" + TimeToString(&filetime) + ".data";
         WritableFile* file;
         fs_.env_->NewWritableFile(fname, &file);
         write_handle->writer_ = new DataWriter(fname, file);
@@ -1808,6 +1893,20 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     LOG(INFO) << "add record, offset " << location->offset_
         << ", size " << location->size_;
     return 0;
+}
+
+// file > 1G or has been create 1 hour, create an new file
+bool DataWriter::SwitchDataFile() {
+    bool shouldswitch = offset_ > 1000000000;
+    if (!shouldswitch) {
+        int64_t nowts = timer::get_micros();
+        int64_t filets = filetime_.tv_sec * 1000000 + filetime_.tv_usec;
+        if (nowts > filets + 3600000000) {
+            shouldswitch = true;
+        }
+    }
+
+    return shouldswitch;
 }
 
 // WriteBatch format

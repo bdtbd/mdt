@@ -98,12 +98,12 @@ public:
         }
     }
 
-    bool SwitchDataFile() { return offset_ > 1000000000; }
-
+    bool SwitchDataFile();
     int AddRecord(const std::string& data, FileLocation* location);
 
 private:
     // write data to filesystem
+    struct timeval filetime_;
     std::string fname_;
     WritableFile* file_;
     int32_t offset_; // TODO: no more than 4G per file
@@ -233,7 +233,7 @@ private:
     tera::Table* GetIndexTable(const std::string& index_name);
     tera::Table* GetTimestampTable();
     void GetAllTimestampTables(std::vector<tera::Table*>* table_list);
-    std::string TimeToString();
+    std::string TimeToString(struct timeval* filetime);
     void ParseIndexesFromString(const std::string& index_buffer,
                                 std::multimap<std::string, std::string>* indexes);
     bool TestIndexCondition(const std::vector<IndexConditionExtend>& index_cond_list,
@@ -257,6 +257,13 @@ private:
     DataWriter* GetDataWriter(WriteHandle* write_handle);
     void ReleaseDataWriter(WriteHandle* write_handle);
 
+    struct DataReader {
+        RandomAccessFile* file_;
+        uint64_t seq_;
+        Counter ref_;
+    };
+    void ReleaseDataReader(const std::string& filename);
+
 private:
     TableDescription table_desc_;
     TeraAdapter tera_;
@@ -265,7 +272,9 @@ private:
 
     // file handle cache relative
     mutable Mutex file_mutex_;
-    std::map<std::string, RandomAccessFile*> file_map_;
+    std::map<std::string, DataReader> file_map_;
+    std::map<uint64_t, std::string> file_lru_; // cache file handle for read. <seq_, filename>
+    uint64_t seq_cnt_; // seq number generator
 
     // use for put
     mutable Mutex write_mutex_;
