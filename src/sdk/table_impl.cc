@@ -1996,9 +1996,7 @@ TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
 // fail tolerant filesystem error, and small span write tera
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     Status s;
-    if (file_ && (data.size() > (uint32_t)FLAGS_tera_span_size)) {
-        s = file_->Append(data);
-    }
+    s = file_->Append(data);
     if (!s.ok()) {
         return -1;
     }
@@ -2009,9 +2007,7 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     // per 256KB, trigger sync
     assert(offset_ >= cur_sync_offset_);
     if ((offset_ - cur_sync_offset_) > (int32_t)FLAGS_data_size_per_sync) {
-        if (file_ && (data.size() > (uint32_t)FLAGS_tera_span_size)) {
-            file_->Sync();
-        }
+        file_->Sync();
         cur_sync_offset_ = offset_;
     }
     LOG(INFO) << "add record, offset " << location->offset_
