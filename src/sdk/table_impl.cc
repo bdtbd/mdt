@@ -1467,7 +1467,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 
         const std::string& index_buffer = reader->Value();
         item.second.clear();
-        ParseIndexesFromString(index_buffer, &indexes, item.second);
+        ParseIndexesFromString(index_buffer, &indexes, &(item.second));
 
         value_locations.push_back(item);
 
@@ -1528,7 +1528,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 
 void TableImpl::ParseIndexesFromString(const std::string& index_buffer,
                                        std::multimap<std::string, std::string>* indexes,
-                                       std::string& value) {
+                                       std::string* value) {
     const char* buf = index_buffer.data();
     uint32_t left = index_buffer.size();
     while (left > sizeof(uint32_t)) {
@@ -1550,7 +1550,7 @@ void TableImpl::ParseIndexesFromString(const std::string& index_buffer,
         std::string index_key(delim + 1, buf + index_len - delim - 1);
         // try get data from tera
         if (index_name == kTeraValue) {
-            value = index_key;
+            *value = index_key;
         } else {
             indexes->insert(std::pair<std::string, std::string>(index_name, index_key));
         }
@@ -1996,9 +1996,7 @@ TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
 // fail tolerant filesystem error, and small span write tera
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     Status s;
-    if (file_ && (data.size() > (uint32_t)FLAGS_tera_span_size)) {
-        s = file_->Append(data);
-    }
+    s = file_->Append(data);
     if (!s.ok()) {
         return -1;
     }
@@ -2009,9 +2007,7 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     // per 256KB, trigger sync
     assert(offset_ >= cur_sync_offset_);
     if ((offset_ - cur_sync_offset_) > (int32_t)FLAGS_data_size_per_sync) {
-        if (file_ && (data.size() > (uint32_t)FLAGS_tera_span_size)) {
-            file_->Sync();
-        }
+        file_->Sync();
         cur_sync_offset_ = offset_;
     }
     LOG(INFO) << "add record, offset " << location->offset_
