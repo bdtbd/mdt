@@ -22,6 +22,7 @@ DECLARE_int64(write_batch_queue_size);
 DECLARE_int64(request_queue_flush_internal);
 DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(read_file_thread_num);
+DECLARE_int64(cleaner_thread_num);
 DECLARE_bool(enable_multi_version_read);
 DECLARE_bool(read_by_index_filter);
 DECLARE_bool(enable_scan_control);
@@ -146,10 +147,12 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     tera_(tera_adapter),
     fs_(fs_adapter),
     thread_pool_(FLAGS_read_file_thread_num),
+    cleaner_thread_(FLAGS_cleaner_thread_num),
     queue_timer_stop_(false),
     queue_timer_cv_(&queue_timer_mu_) {
     // create timer
     pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
+
 }
 
 TableImpl::~TableImpl() {
@@ -158,6 +161,8 @@ TableImpl::~TableImpl() {
     // TODO: write queue release
     thread_pool_.Stop(false);
     FreeTeraTable();
+
+    cleaner_thread_.Stop(false);
 
     // stop timer, flush request
     queue_timer_mu_.Lock();
@@ -174,6 +179,11 @@ TableImpl::~TableImpl() {
         delete context;
     }
     return;
+}
+
+void TableImpl::CleanerThread(tera::ResultStream* stream) {
+    delete stream;
+    VLOG(30) << "do something to clean up";
 }
 
 /////////  batch write /////////////
@@ -1131,7 +1141,9 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
 
         stream->Next();
     }
-    delete stream;
+    // batch scan must wait other rpc callback
+    //delete stream;
+    cleaner_thread_.AddTask(boost::bind(&TableImpl::CleanerThread, this, stream));
 
     // stop other index table scan streams
     {
