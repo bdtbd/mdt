@@ -31,4 +31,6 @@ DEFINE_bool(enable_scan_control, false, "if true, batch scan in limit number");
 DEFINE_int64(batch_scan_buffer_size, 1048576, "scan buffer size");
 DEFINE_bool(enable_qu_range, true, "use qu to filter");
 DEFINE_int64(tera_scan_pack_interval, 50000000, "scan timeout in one round");
+DEFINE_bool(enable_number_limit, true, "use scan number limit");
+DEFINE_int64(scan_number_limit, 30, "number of scan limit");
 

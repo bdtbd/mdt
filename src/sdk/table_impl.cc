@@ -28,6 +28,8 @@ DECLARE_bool(enable_scan_control);
 DECLARE_int64(batch_scan_buffer_size);
 DECLARE_bool(enable_qu_range);
 DECLARE_int64(tera_scan_pack_interval);
+DECLARE_bool(enable_number_limit);
+DECLARE_int64(scan_number_limit);
 
 namespace mdt {
 
@@ -953,6 +955,9 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
             std::string end_qu(ebuf, sizeof(ebuf));
             scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
         }
+	if (FLAGS_enable_number_limit) {
+	    scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
+	}
         scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
         scan_desc->SetPackInterval(FLAGS_tera_scan_pack_interval);
 
