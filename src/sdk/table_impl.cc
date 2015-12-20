@@ -36,6 +36,7 @@ DECLARE_int64(async_read_thread_num);
 DECLARE_int64(tera_table_ttl);
 DECLARE_int64(gc_interval);
 DECLARE_int64(tera_span_size);
+DECLARE_bool(delete_unknow_file);
 
 namespace mdt {
 
@@ -1996,10 +1997,12 @@ void TableImpl::GarbageClean() {
     std::string dummyfname = fs_.root_path_ + "/" + TimeToString(&dummyfiletime) + ".data";
 
     // random sleep
+    /* 
     struct timeval randtime;
     gettimeofday(&randtime, NULL);
     uint64_t sleep_duration = (randtime.tv_usec % 60) * 60000;
     usleep(sleep_duration);
+    */
 
     // enable gc
     while (1) {
@@ -2016,18 +2019,16 @@ void TableImpl::GarbageClean() {
         fs_.env_->GetChildren(fs_.root_path_, &result, NULL);
 
         for (uint64_t i = 0; i < result.size(); i++) {
-            std::string& filename = result[i];
+            std::string filename = fs_.root_path_ + "/" + result[i];
             if (filename.size() == dummyfname.size()) {
                 // ttl check , ttl + 1hour be should index data has been invalid
                 struct timeval now_tv;
                 gettimeofday(&now_tv, NULL);
-                int64_t ts = static_cast<int64_t>(now_tv.tv_sec) * 1000000 + now_tv.tv_usec;
-                int64_t file_time = (int64_t)(ts - ttl_ - 3600000000);
-                if (file_time < 0) {
+                if ((uint64_t)now_tv.tv_sec < (uint64_t)(ttl_ + 3600)) {
                     continue;
                 }
 
-                const time_t seconds = file_time / 1000000;
+                const time_t seconds = now_tv.tv_sec - ttl_ - 3600;
                 struct tm t;
                 localtime_r(&seconds, &t);
                 char buf[34];
@@ -2043,18 +2044,22 @@ void TableImpl::GarbageClean() {
                         static_cast<int>(0),
                         (unsigned long)(0));
                 std::string time_buf(buf, 33);
-                std::string delete_file = fs_.root_path_ + time_buf + ".data";
+                std::string delete_file = fs_.root_path_ + "/" + time_buf + ".data";
                 if (delete_file.size() != dummyfname.size()) {
                     LOG(INFO) << "Garbage Clean, error, max delete file " << delete_file << ", unkown";
                     continue;
                 }
-
+		
                 if (filename < delete_file) {
+		    VLOG(30) << "Garbage Clean, ttl " << ttl_ << ", file " << filename << ", delete " << delete_file;
                     fs_.env_->DeleteFile(filename);
-                }
+		}
 
             } else {
                 LOG(INFO) << "Garbage Clean, unknow file " << filename;
+		if (FLAGS_delete_unknow_file) {
+               	    fs_.env_->DeleteFile(filename);
+		}
             }
         }
     }
