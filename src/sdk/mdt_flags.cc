@@ -38,3 +38,12 @@ DEFINE_int64(scan_number_limit, 30, "number of scan limit");
 DEFINE_bool(enable_async_read, true, "use multithread for async filesystem read");
 DEFINE_int64(async_read_thread_num, 50,  "num of async read threads");
 
+// create table param
+DEFINE_int64(tera_table_ttl, 0, "(usec) max time to keep data, current time > ttl, delete data");
+
+// gc
+DEFINE_int64(gc_interval, 3600000, "(ms) time interval between two gc operation");
+
+// small span write into tera
+DEFINE_int64(tera_span_size, 0, "(bytes) if span size < tera_span_size, write span into tera");
+
