@@ -798,6 +798,9 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
         tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
         scan_desc->SetEnd(end_ts_key + '\0');
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
+	if (FLAGS_enable_number_limit) {
+	    scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
+	}
 
         VLOG(10) << "scan timestamp table: " << i;
         tera::ErrorCode err;
@@ -826,7 +829,8 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
             GetRows(primary_key_list, limit - result_list->size(),
                     result_list);
         }
-        delete result;
+        //delete result;
+	cleaner_thread_.AddTask(boost::bind(&TableImpl::CleanerThread, this, result));
         delete scan_desc;
     }
 
