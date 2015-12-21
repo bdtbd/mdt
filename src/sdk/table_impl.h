@@ -98,7 +98,8 @@ public:
             delete file_;
         }
     }
-
+    void SetFileTime(struct timeval val) { filetime_ = val;}
+    int64_t GetFileTime() { return (int64_t)(filetime_.tv_sec * 1000000 + filetime_.tv_usec);}
     bool SwitchDataFile();
     int AddRecord(const std::string& data, FileLocation* location);
 

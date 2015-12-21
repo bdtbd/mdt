@@ -2079,6 +2079,8 @@ DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
         WritableFile* file;
         fs_.env_->NewWritableFile(fname, &file);
         write_handle->writer_ = new DataWriter(fname, file);
+        write_handle->writer_->SetFileTime(filetime);
+	LOG(INFO) << "nowts " << timer::get_micros() << ", filetime " << write_handle->writer_->GetFileTime();
     }
     writer = write_handle->writer_;
     return writer;
@@ -2135,6 +2137,7 @@ bool DataWriter::SwitchDataFile() {
         int64_t nowts = timer::get_micros();
         int64_t filets = filetime_.tv_sec * 1000000 + filetime_.tv_usec;
         if (nowts > filets + 3600000000) {
+	    VLOG(30) << "time switch file, nowts " << nowts << ", filetime " << filets;
             shouldswitch = true;
         }
     }
