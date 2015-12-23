@@ -18,6 +18,7 @@ DECLARE_string(tera_flag_file_path);
 DECLARE_string(database_root_dir);
 DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(tera_table_ttl);
+DECLARE_bool(multi_table_enable);
 
 namespace mdt {
 
@@ -244,11 +245,19 @@ Status DatabaseImpl::OpenTable(const std::string& table_name, Table** table_ptr)
         return Status::OK();
     }
 
-    // construct memory structure
-    TableImpl::OpenTable(db_name_, tera_opt_, fs_opt_, table_desc, table_ptr);
-    if (*table_ptr == NULL) {
-        return Status::NotFound("db open error ");
+    if (FLAGS_multi_table_enable) {
+        MultiTableImpl::OpenTable(db_name_, tera_opt_, fs_opt_, table_desc, table_ptr);
+        if (*table_ptr == NULL) {
+            return Status::NotFound("db open error ");
+        }
+    } else {
+        // construct memory structure
+        TableImpl::OpenTable(db_name_, tera_opt_, fs_opt_, table_desc, table_ptr);
+        if (*table_ptr == NULL) {
+            return Status::NotFound("db open error ");
+        }
     }
+
     table_map_[table_name] = *table_ptr;
     return Status::OK();
 }
