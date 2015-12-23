@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include <iostream>
-
+#include <sstream>
 #include "sdk/sdk.h"
 #include "sdk/db_impl.h"
 #include <tera.h>
@@ -19,6 +19,7 @@ DECLARE_string(database_root_dir);
 DECLARE_int64(max_timestamp_table_num);
 DECLARE_int64(tera_table_ttl);
 DECLARE_bool(multi_table_enable);
+DECLARE_int32(multi_table_nr);
 
 namespace mdt {
 
@@ -125,6 +126,23 @@ Status DatabaseImpl::Init() {
         FLAGS_flagfile = local_flagfile;
         return Status::IOError("tera client new error");
     }
+    // multi client
+    if (FLAGS_multi_table_enable) {
+        for (int32_t i = 0; i < FLAGS_multi_table_nr; i++) {
+            std::ostringstream ss;
+            ss << "mdt";
+            ss << i;
+            std::string client_name = ss.str();
+            tera::Client* tera_client = tera::Client::NewClient(tera_opt_.tera_flag_, client_name, &error_code);
+            if (tera_client == NULL) {
+                LOG(INFO) << "open db, new cli error, tera flag " << tera_opt_.tera_flag_;
+                FLAGS_flagfile = local_flagfile;
+                return Status::IOError("tera client new error");
+            }
+            tera_opt_.extra_client_.push_back(tera_client);
+        }
+    }
+
     FLAGS_flagfile = local_flagfile;
 
     // create db schema table (kv mode)

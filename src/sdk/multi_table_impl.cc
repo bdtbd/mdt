@@ -32,7 +32,9 @@ Status MultiTableImpl::OpenTable(const std::string& db_name, const TeraOptions& 
     MultiTableImpl* multi_table = new MultiTableImpl;
     for (int i = 0; i < FLAGS_multi_table_nr; i++) {
         Table* table;
-        TableImpl::OpenTable(db_name, tera_opt, fs_opt, table_desc, &table);
+        TeraOptions opt = tera_opt;
+        opt.client_ = opt.extra_client_[i];
+        TableImpl::OpenTable(db_name, opt, fs_opt, table_desc, &table);
         if (table == NULL) {
             return Status::NotFound("table open error ");
         }
