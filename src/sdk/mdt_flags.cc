@@ -42,13 +42,13 @@ DEFINE_int64(async_read_thread_num, 50,  "num of async read threads");
 DEFINE_int64(tera_table_ttl, 604800, "(sec) max time to keep data, current time > ttl, delete data");
 
 // gc
-DEFINE_int64(gc_interval, 3600000, "(ms) time interval between two gc operation");
+DEFINE_int64(gc_interval, 3600000000, "(us) time interval between two gc operation");
 DEFINE_bool(delete_unknow_file, false, "delete unknow file");
 
 // small span write into tera
 DEFINE_int64(tera_span_size, 0, "(bytes) if span size < tera_span_size, write span into tera");
 
 // multi table impl
-DEFINE_bool(multi_table_enable, true, "use multi table enhance write");
-DEFINE_int32(multi_table_nr, 10, "number of tableimpl");
+DEFINE_bool(multi_table_enable, false, "use multi table enhance write");
+DEFINE_int32(multi_table_nr, 2, "number of tableimpl");
 

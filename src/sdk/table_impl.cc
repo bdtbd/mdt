@@ -77,6 +77,7 @@ Status TableImpl::Init() {
     // init write handle list
     nr_write_handle_ = (int)FLAGS_concurrent_write_handle_num;
     cur_write_handle_id_ = 0;
+    cur_write_handle_seq_ = 0;
     write_handle_list_.clear();
     WriteHandle write_handle;
     write_handle.write_queue_.clear();
@@ -2051,15 +2052,15 @@ void TableImpl::GarbageClean() {
                 }
 		
                 if (filename < delete_file) {
-		    VLOG(30) << "Garbage Clean, ttl " << ttl_ << ", file " << filename << ", delete " << delete_file;
+                    VLOG(30) << "Garbage Clean, ttl " << ttl_ << ", file " << filename << ", delete " << delete_file;
                     fs_.env_->DeleteFile(filename);
-		}
+                }
 
             } else {
                 LOG(INFO) << "Garbage Clean, unknow file " << filename;
-		if (FLAGS_delete_unknow_file) {
-               	    fs_.env_->DeleteFile(filename);
-		}
+                if (FLAGS_delete_unknow_file) {
+                    fs_.env_->DeleteFile(filename);
+                }
             }
         }
     }
