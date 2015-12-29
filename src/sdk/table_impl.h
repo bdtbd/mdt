@@ -24,6 +24,7 @@ namespace mdt {
 
 const std::string kPrimaryTableColumnFamily = "Location";
 const std::string kIndexTableColumnFamily = "PrimaryKey";
+const std::string kTeraValue = "kTeraValue";
 
 ///////////////////////////////
 //      TableImpl class      //
@@ -97,13 +98,14 @@ public:
             delete file_;
         }
     }
-
-    bool SwitchDataFile() { return offset_ > 1000000000; }
-
+    void SetFileTime(struct timeval val) { filetime_ = val;}
+    int64_t GetFileTime() { return (int64_t)(filetime_.tv_sec * 1000000 + filetime_.tv_usec);}
+    bool SwitchDataFile();
     int AddRecord(const std::string& data, FileLocation* location);
 
 private:
     // write data to filesystem
+    struct timeval filetime_;
     std::string fname_;
     WritableFile* file_;
     int32_t offset_; // TODO: no more than 4G per file
@@ -165,6 +167,11 @@ public:
 private:
     void FreeTeraTable();
     Status Init();
+    void CleanerThread(tera::ResultStream* stream);
+
+    // filesystem async reader
+    void AsyncRead(void* async_read_param);
+
     // write op
     int InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
     static void* TimerThreadWrapper(void* arg);
@@ -233,9 +240,10 @@ private:
     tera::Table* GetIndexTable(const std::string& index_name);
     tera::Table* GetTimestampTable();
     void GetAllTimestampTables(std::vector<tera::Table*>* table_list);
-    std::string TimeToString();
+    std::string TimeToString(struct timeval* filetime);
     void ParseIndexesFromString(const std::string& index_buffer,
-                                std::multimap<std::string, std::string>* indexes);
+                                std::multimap<std::string, std::string>* indexes,
+                                std::string* value);
     bool TestIndexCondition(const std::vector<IndexConditionExtend>& index_cond_list,
                             const std::multimap<std::string, std::string>& index_list);
 
@@ -247,6 +255,10 @@ private:
                               const std::string& type_key,
                               std::string* key);
 
+    // gc impl
+    static void* GarbageCleanThreadWrapper(void* arg);
+    void GarbageClean();
+
 private:
     // NOTE： WriteHandle can not operator in race condition
     struct WriteHandle {
@@ -257,15 +269,28 @@ private:
     DataWriter* GetDataWriter(WriteHandle* write_handle);
     void ReleaseDataWriter(WriteHandle* write_handle);
 
+    struct DataReader {
+        RandomAccessFile* file_;
+        uint64_t seq_;
+        Counter ref_;
+    };
+    void ReleaseDataReader(const std::string& filename);
+
 private:
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
     ThreadPool thread_pool_;
+    // async cleaner
+    ThreadPool cleaner_thread_;
+    ThreadPool async_read_thread_;
 
     // file handle cache relative
     mutable Mutex file_mutex_;
-    std::map<std::string, RandomAccessFile*> file_map_;
+    std::map<std::string, DataReader> file_map_;
+    std::map<uint64_t, std::string> file_lru_; // cache file handle for read. <seq_, filename>
+    uint64_t seq_cnt_; // seq number generator
+
 
     // use for put
     mutable Mutex write_mutex_;
@@ -283,6 +308,11 @@ private:
     pthread_t timer_tid_;
     mutable Mutex queue_timer_mu_; // mutex must declare before cv
     CondVar queue_timer_cv_;
+
+    // garbage clean, delete nfs file with ttl
+    pthread_t gc_tid_;
+    volatile bool gc_stop_;
+    uint64_t ttl_;
 };
 
 struct PutContext {
