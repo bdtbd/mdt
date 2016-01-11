@@ -84,10 +84,7 @@ message RpcStoreResponse {
 // rpc service
 service SearchEngineService {
     rpc Search(RpcSearchRequest) returns(RpcSearchResponse);
-    rpc Store(RpcStoreRequest) returns(RpcStoreResponse) {
-        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
-        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
-    }
+    rpc Store(RpcStoreRequest) returns(RpcStoreResponse);
     rpc OpenTable(RpcOpenTableRequest) returns(RpcOpenTableResponse);
     rpc OpenDatabase(RpcOpenDatabaseRequest) returns(RpcOpenDatabaseResponse);
 }

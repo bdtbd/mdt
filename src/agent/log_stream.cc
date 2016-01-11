@@ -6,6 +6,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "util/coding.h"
+#include <sys/time.h>
 
 #include "leveldb/slice.h"
 #include "leveldb/db.h"
@@ -13,6 +14,21 @@
 #include "proto/query.pb.h"
 
 DECLARE_int32(file_stream_max_pending_request);
+DECLARE_string(db_name);
+DECLARE_string(table_name);
+DECLARE_string(primary_key);
+DECLARE_string(user_time);
+DECLARE_int32(time_type);
+// split string by substring
+DECLARE_string(string_delims);
+// split string by char
+DECLARE_string(line_delims);
+DECLARE_string(kv_delims);
+DECLARE_bool(enable_index_filter);
+DECLARE_string(index_list);
+
+DECLARE_bool(use_fixed_index_list);
+DECLARE_string(fixed_index_list);
 
 namespace mdt {
 namespace agent {
@@ -33,6 +49,55 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
     server_addr_(server_addr),
     stop_(false) {
     pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
+    db_name_ = FLAGS_db_name;
+    table_name_ = FLAGS_table_name;
+
+    // split string delims
+    std::vector<std::string> string_delims;
+    if (FLAGS_string_delims.size() != 0) {
+        boost::split(string_delims, FLAGS_string_delims, boost::is_any_of(","));
+        VLOG(30) << "DEBUG: get string delims";
+        for (int i = 0; i < (int)string_delims.size(); i++) {
+            string_delims_.push_back(string_delims[i]);
+        }
+    }
+
+    // split fixed index list
+    use_fixed_index_list_ = FLAGS_use_fixed_index_list;
+    std::vector<std::string> fixed_index_list;
+    if (FLAGS_fixed_index_list.size() != 0) {
+        // --fixed_index_list=url:5,time:2
+        boost::split(fixed_index_list, FLAGS_fixed_index_list, boost::is_any_of(","));
+        VLOG(30) << "DEBUG: split fixed index table";
+        for (int i = 0 ; i < (int)fixed_index_list.size(); i++) {
+            std::vector<std::string> idx_pair;
+            boost::split(idx_pair, fixed_index_list[i], boost::is_any_of(":"));
+            if ((idx_pair.size() == 2) &&
+                (idx_pair[0].size() > 0) &&
+                (idx_pair[1].size() > 0)) {
+                int idx_num = atoi(idx_pair[1].c_str());
+                fixed_index_list_.insert(std::pair<std::string, int>(idx_pair[0], idx_num));
+            }
+        }
+    }
+
+    line_delims_ = FLAGS_line_delims;
+    kv_delims_ = FLAGS_kv_delims;
+    enable_index_filter_ = FLAGS_enable_index_filter;
+    // split index
+    std::vector<std::string> log_columns;
+    if (FLAGS_index_list.size() != 0) {
+        boost::split(log_columns, FLAGS_index_list, boost::is_any_of(","));
+        VLOG(30) << "DEBUG: split index table";
+        for (int i = 0 ; i < (int)log_columns.size(); i++) {
+            index_list_.insert(log_columns[i]);
+        }
+    }
+
+    primary_key_ = FLAGS_primary_key;
+    user_time_ = FLAGS_user_time;
+    time_type_ = FLAGS_time_type;
+
     pthread_create(&tid_, NULL, LogStreamWrapper, this);
 }
 
@@ -97,6 +162,7 @@ void LogStream::Run() {
                     file_stream->GetCheckpoint(key, &offset, &size);
 
                     if (size) {
+                        VLOG(30) << "file " << key->filename << ", async push error, re-send";
                         std::vector<std::string> line_vec;
                         DBKey* rkey;
                         file_stream->CheckPointRead(&line_vec, &rkey, offset, size);
@@ -135,6 +201,8 @@ void LogStream::Run() {
                 std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
                 ParseMdtRequest(line_vec, &req_vec);
                 AsyncPush(req_vec, key);
+            } else {
+                VLOG(30) << "nothing read...";
             }
         }
 
@@ -144,6 +212,8 @@ void LogStream::Run() {
             const std::string& filename = *delete_it;
             std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(filename);
             if (file_it != file_streams_.end()) {
+                continue;
+                VLOG(30) << "delete filestream, " << filename;
                 FileStream* file_stream = file_it->second;
                 // if no one refer this file stream, then delete it
                 if (file_stream->MarkDelete()) {
@@ -170,6 +240,10 @@ struct LogRecord {
     }
 
     int SplitLogItem(const std::string& str, const std::vector<std::string>& dim_vec) {
+        if (dim_vec.size() == 0) {
+            columns.push_back(str);
+            return 0;
+        }
         std::size_t pos = 0, prev = 0;
         while (1) {
             std::size_t min_pos = std::string::npos;
@@ -257,6 +331,37 @@ struct LogTailerSpan {
     }
 };
 
+std::string LogStream::TimeToString(struct timeval* filetime) {
+#ifdef OS_LINUX
+    pid_t tid = syscall(SYS_gettid);
+#else
+    pthread_t tid = pthread_self();
+#endif
+    uint64_t thread_id = 0;
+    memcpy(&thread_id, &tid, std::min(sizeof(thread_id), sizeof(tid)));
+
+    struct timeval now_tv;
+    gettimeofday(&now_tv, NULL);
+    const time_t seconds = now_tv.tv_sec;
+    struct tm t;
+    localtime_r(&seconds, &t);
+    char buf[34];
+    char* p = buf;
+    p += snprintf(p, 34,
+            "%04d-%02d-%02d-%02d:%02d:%02d.%06d.%06lu",
+            t.tm_year + 1900,
+            t.tm_mon + 1,
+            t.tm_mday,
+            t.tm_hour,
+            t.tm_min,
+            t.tm_sec,
+            static_cast<int>(now_tv.tv_usec),
+            (unsigned long)thread_id);
+    std::string time_buf(buf, 33);
+    *filetime = now_tv;
+    return time_buf;
+}
+
 // type 1: sec + micro sec
 uint64_t LogStream::ParseTime(const std::string& time_str) {
     if (time_type_ == 1) {
@@ -279,6 +384,7 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
         LogRecord log;
         if (log.SplitLogItem(line, string_delims_) < 0) {
             res = -1;
+            VLOG(30) << "parse mdt request split by string fail";
         } else {
             LogTailerSpan kv;
             for (int i = 0; i < (int)log.columns.size(); i++) {
@@ -305,13 +411,13 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
             }
             // if primary key not set, use time
             if (req->primary_key() == "") {
-                res = -1;
-                //req->set_primary_key(mdt::timer::get_micros());
+                struct timeval dummy_time;
+                req->set_primary_key(TimeToString(&dummy_time));
             }
             req->set_data(line);
             // user has time item in log
-            it = kv.kv_annotation.find(user_time_name_);
-            if (user_time_name_.size() && it != kv.kv_annotation.end()) {
+            it = kv.kv_annotation.find(user_time_);
+            if (user_time_.size() && it != kv.kv_annotation.end()) {
                 uint64_t ts = ParseTime(it->second);
                 if (ts > 0) {
                     req->set_timestamp(ts);
@@ -323,10 +429,10 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
             }
         }
 
-        if (res < 0 && req) {
-            delete req;
-        } else {
+        if (res >= 0) {
             req_vec->push_back(req);
+        } else if (req) {
+            delete req;
         }
     }
     return 0;
@@ -334,6 +440,7 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
 
 void LogStream::ApplyRedoList(FileStream* file_stream) {
     // redo check point
+    VLOG(30) << "begin use redo list to re-send log data";
     std::map<uint64_t, uint64_t> redo_list;
     file_stream->GetRedoList(&redo_list);
     std::map<uint64_t, uint64_t>::iterator redo_it = redo_list.begin();
@@ -358,6 +465,7 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     for (uint32_t i = 0; i < req_vec.size(); i++) {
         mdt::SearchEngine::RpcStoreRequest* req = req_vec[i];
         mdt::SearchEngine::RpcStoreResponse* resp = new mdt::SearchEngine::RpcStoreResponse;
+        VLOG(40) << "\n =====> async send data to " << server_addr << ", req:\n " << req->DebugString();
 
         boost::function<void (const mdt::SearchEngine::RpcStoreRequest*,
                               mdt::SearchEngine::RpcStoreResponse*,
@@ -378,12 +486,13 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
                                   DBKey* key) {
     // handle data push error
     if (failed) {
-        LOG(WARNING) << "async push error, " << error;
+        LOG(WARNING) << "async write error " << error << ", file " << key->filename << " add to failed event queue";
         pthread_spin_lock(&lock_);
         failed_key_queue_.push(key);
         pthread_spin_unlock(&lock_);
         thread_event_.Set();
     } else {
+        VLOG(30) << "file " << key->filename << " add to success event queue";
         pthread_spin_lock(&lock_);
         key_queue_.push(key);
         pthread_spin_unlock(&lock_);
@@ -395,6 +504,7 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
 }
 
 int LogStream::AddWriteEvent(std::string filename) {
+    VLOG(30) << "file " << filename << " add to write event queue";
     pthread_spin_lock(&lock_);
     write_event_.insert(filename);
     pthread_spin_unlock(&lock_);
@@ -403,6 +513,7 @@ int LogStream::AddWriteEvent(std::string filename) {
 }
 
 int LogStream::DeleteWatchEvent(std::string filename) {
+    VLOG(30) << "file " << filename << " add to delete event queue";
     pthread_spin_lock(&lock_);
     delete_event_.insert(filename);
     pthread_spin_unlock(&lock_);
@@ -500,6 +611,7 @@ int FileStream::RecoveryCheckPoint() {
         leveldb::Slice value = db_it->value();
         uint64_t offset, size;
         ParseKeyValue(key, value, &offset, &size);
+        VLOG(30) << "recovery cp, offset " << offset << ", size " << size;
 
         // insert [offset, size] into mem cp list
         pthread_spin_lock(&lock_);
@@ -544,13 +656,17 @@ ssize_t FileStream::ParseLine(char* buf, ssize_t size, std::vector<std::string>*
         return -1;
     }
     ssize_t res = 0;
+    int nr_lines = 0;
     std::string str(buf, size);
-    boost::split(*line_vec, str, boost::is_any_of("\n"));
-    if (buf[size -1] != '\n') {
+    boost::split((*line_vec), str, boost::is_any_of("\n"));
+    nr_lines = line_vec->size();
+    VLOG(30) << "parse line, nr of line " << nr_lines;
+    if ((buf[size -1] != '\n') || ((*line_vec)[nr_lines - 1].size() == 0)) {
         line_vec->pop_back();
     }
     for (uint32_t i = 0; i < line_vec->size(); i++) {
-        res += line_vec[i].size() + 1;
+        res += (*line_vec)[i].size() + 1;
+        VLOG(30) << "line: " << (*line_vec)[i] << ", res " << res << ", size " << size;
     }
     return res;
 }
@@ -574,8 +690,11 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         if (res < 0) {
             LOG(WARNING) << "redo cp, read file error " << offset << ", size " << size << ", res " << res;
             ret = -1;
+        } else if (res == 0) {
+           VLOG(30) << "file " << filename_ << ", read size 0";
+        } else {
+            res = ParseLine(buf, res, line_vec);
         }
-        res = ParseLine(buf, res, line_vec);
         delete buf;
 
         if (res <= 0) {
@@ -601,6 +720,7 @@ int FileStream::LogCheckPoint(uint64_t offset, uint64_t size) {
     mem_checkpoint_list_[offset] = size;
     pthread_spin_unlock(&lock_);
 
+    VLOG(30) << "log cp, file " << filename_ << ", offset " << offset << ", size " << size;
     std::string key, value;
     MakeKeyValue(module_name_, filename_, offset, &key, size, &value);
     leveldb::Status s = log_options_.db->Put(leveldb::WriteOptions(), key, value);
@@ -615,6 +735,9 @@ int FileStream::LogCheckPoint(uint64_t offset, uint64_t size) {
     } else {
         // write db success
         current_offset_ = offset + size;
+        ret = size;
+        VLOG(30) << "log cp, write leveldb succes, file " << filename_ << ", offset "
+            << offset << ", size " << size << ", current_offset " << current_offset_;
     }
     return ret;
 }
@@ -635,6 +758,7 @@ int FileStream::DeleteCheckoutPoint(DBKey* key) {
     if (!s.ok()) {
         LOG(WARNING) << "delete db checkpoint error, " << filename_ << ", offset " << key->offset;
     }
+    VLOG(30) << "delete cp, file " << key->filename << ", cp offset " << key->offset;
     return 0;
 }
 
@@ -642,6 +766,7 @@ int FileStream::CheckPointRead(std::vector<std::string>* line_vec, DBKey** key,
                                uint64_t offset, uint64_t size) {
     int ret = 0;
     if (fd_ > 0) {
+        VLOG(30) << "file " << filename_ << " read from cp, offset " << offset << ", size " << size;
         char* buf = new char[size];
         ssize_t res = pread(fd_, buf, size, offset);
         if (res < (int64_t)size) {

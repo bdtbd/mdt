@@ -1,6 +1,7 @@
 #include <gflags/gflags.h>
 #include "collector/query_service.h"
 #include <boost/bind.hpp>
+#include <glog/logging.h>
 
 DECLARE_int32(se_num_threads);
 DECLARE_bool(mdt_flagfile_set);
@@ -36,7 +37,7 @@ void SearchEngineImpl::ReportMessage() {
             return;
         }
         std::string local_addr = hostname_str + ":" + FLAGS_se_service_port;
-        VLOG(30) << "hostip " << local_addr;
+        VLOG(50) << "hostip " << local_addr;
         std::string scheduler_addr = FLAGS_scheduler_addr;
 
         // report addr
@@ -63,7 +64,7 @@ void SearchEngineImpl::ReportMessageCallback(const mdt::LogSchedulerService::Reg
                                              mdt::LogSchedulerService::RegisterNodeResponse* resp,
                                              bool failed, int error,
                                              mdt::LogSchedulerService::LogSchedulerService_Stub* service) {
-        VLOG(30) << "report message, addr " << req->server_addr();
+        VLOG(50) << "report message, addr " << req->server_addr();
         delete req;
         delete resp;
         delete service;
@@ -244,6 +245,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
+    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name();
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();

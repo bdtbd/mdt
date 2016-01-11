@@ -10,10 +10,7 @@ message EchoResponse {
 
 // rpc service
 service LogAgentService {
-    rpc Echo(EchoRequest) returns(EchoResponse) {
-        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
-        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
-    }
+    rpc Echo(EchoRequest) returns(EchoResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;

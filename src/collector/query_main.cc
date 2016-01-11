@@ -93,7 +93,7 @@ int QueryEntry::InitSearchEngine() {
 
 int main(int ac, char* av[]) {
     ::google::ParseCommandLineFlags(&ac, &av, true);
-    SetupGoogleLog();
+    //SetupGoogleLog();
     QueryEntry entry;
     if (FLAGS_flagfile.size() == 0) {
         std::cout << "flagfile not set.\n";

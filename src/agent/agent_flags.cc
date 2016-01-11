@@ -33,5 +33,23 @@ DEFINE_string(db_dir, "../leveldb_dir/", "leveldb dir for cp");
 DEFINE_string(watch_log_dir, "../watch_log_dir/", "log dir");
 DEFINE_string(module_name_list, "tabletnode.1.", "identify module name");
 
+DEFINE_string(db_name, "mdttrace-debug", "production name");
+DEFINE_string(table_name, "trace", "table name");
+DEFINE_string(primary_key, "", "primary key name");
+DEFINE_string(user_time, "", "user point out which field use as timestamp");
+DEFINE_int32(time_type, 1, "use for parse user time from log");
 
+// split string by substring
+//DEFINE_string(string_delims, "||", "split string by substring");
+DEFINE_string(string_delims, "", "split string by substring");
+
+// split string by char
+DEFINE_string(line_delims, " ", "log tailer's line delim");
+DEFINE_string(kv_delims, "=", "log tailer's kv delim");
+DEFINE_bool(enable_index_filter, false, "do not filter log line by index list in agent");
+DEFINE_string(index_list, "", "index table name list");
+
+// split string by index number
+DEFINE_bool(use_fixed_index_list, true, "use fixed index list");
+DEFINE_string(fixed_index_list, "url:5,time:2", "use for fix index list match");
 

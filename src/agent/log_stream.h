@@ -10,6 +10,7 @@
 #include "proto/query.pb.h"
 #include "rpc/rpc_client.h"
 #include "util/event.h"
+#include <sys/time.h>
 
 namespace mdt {
 namespace agent {
@@ -77,6 +78,7 @@ public:
 
 private:
     uint64_t ParseTime(const std::string& time_str);
+    std::string TimeToString(struct timeval* filetime);
     int ParseMdtRequest(std::vector<std::string>& line_vec,
                         std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec);
     void ApplyRedoList(FileStream* file_stream);
@@ -111,7 +113,7 @@ private:
     // every log item has unique key
     std::string primary_key_;
     // use for time parse
-    std::string user_time_name_;
+    std::string user_time_;
     // type = 1: for second+micro-second
     int time_type_;
 
