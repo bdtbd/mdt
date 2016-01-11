@@ -1,0 +1,46 @@
+import "sofa/pbrpc/rpc_option.proto";
+package mdt.LogSchedulerService;
+
+message EchoRequest {
+    required string message = 1;
+}
+message EchoResponse {
+    required string message = 1;
+}
+
+message RegisterNodeRequest {
+    optional string server_addr = 1; // ip:port 
+}
+
+message RegisterNodeResponse {
+    optional int32 error_code = 1;
+}
+
+message GetNodeListRequest {
+    optional string current_server_addr = 1; 
+}
+
+message GetNodeListResponse {
+    repeated string server_list = 1;
+    optional string primary_server_addr = 2;
+}
+
+// rpc service
+service LogSchedulerService {
+    rpc Echo(EchoRequest) returns(EchoResponse) {
+        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
+        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
+    }
+    rpc RegisterNode(RegisterNodeRequest) returns(RegisterNodeResponse) {
+        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
+        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
+    }
+    rpc GetNodeList(GetNodeListRequest) returns(GetNodeListResponse) {
+        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
+        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
+    }
+}
+option py_generic_services = true;
+option cc_generic_services = true;
+
+

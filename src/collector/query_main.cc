@@ -1,6 +1,6 @@
 #include <iostream>
 #include <gflags/gflags.h>
-#include "ftrace/search_engine/query_service.h"
+#include "collector/query_service.h"
 #include <sofa/pbrpc/pbrpc.h>
 #include "util/status.h"
 #include <gflags/gflags.h>

@@ -1,3 +1,4 @@
+import "sofa/pbrpc/rpc_option.proto";
 package mdt.SearchEngine;
 
 // reps status
@@ -83,7 +84,10 @@ message RpcStoreResponse {
 // rpc service
 service SearchEngineService {
     rpc Search(RpcSearchRequest) returns(RpcSearchResponse);
-    rpc Store(RpcStoreRequest) returns(RpcStoreResponse);
+    rpc Store(RpcStoreRequest) returns(RpcStoreResponse) {
+        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
+        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
+    }
     rpc OpenTable(RpcOpenTableRequest) returns(RpcOpenTableResponse);
     rpc OpenDatabase(RpcOpenDatabaseRequest) returns(RpcOpenDatabaseResponse);
 }

@@ -1,0 +1,85 @@
+#ifndef AGENT_AGENT_IMPL_H_
+#define AGENT_AGENT_IMPL_H_
+
+#include <iostream>
+#include <map>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/inotify.h>
+#include <sofa/pbrpc/pbrpc.h>
+#include "proto/agent.pb.h"
+#include "proto/scheduler.pb.h"
+#include "agent/log_stream.h"
+#include "util/event.h"
+
+namespace mdt {
+namespace agent {
+
+class AgentImpl;
+struct FileSystemInotify {
+    std::string log_dir;
+    int watch_fd;
+    int inotify_fd;
+    int inotify_flag;
+    pthread_t tid;
+    volatile bool stop;
+    AgentImpl* agent;
+
+    FileSystemInotify()
+        : watch_fd(-1),
+        inotify_fd(-1),
+        inotify_flag(-1),
+        stop(true),
+        agent(NULL) {}
+};
+
+class AgentImpl : public ::mdt::LogAgentService::LogAgentService {
+public:
+    AgentImpl();
+    ~AgentImpl();
+    int Init();
+    void GetServerAddr();
+    void WatchLogDir(FileSystemInotify* fs_inotify);
+
+    // rpc service
+    void Echo(::google::protobuf::RpcController* controller,
+         const mdt::LogAgentService::EchoRequest* request,
+         mdt::LogAgentService::EchoResponse* response,
+         ::google::protobuf::Closure* done);
+
+private:
+    void ParseLogDir(std::vector<std::string>& log_vec);
+    void ParseModuleName(const std::string& filename, std::string* module_name);
+
+    // watch event
+    void DestroyWatchPath(FileSystemInotify* fs_inotify);
+    int AddWatchPath(const std::string& dir);
+    int AddWriteEvent(const std::string& logdir, const std::string& filename, inotify_event* event);
+    int DeleteWatchEvent(const std::string& logdir, const std::string& filename, inotify_event* event);
+
+    // cluster find
+    void GetServerAddrCallback(const mdt::LogSchedulerService::GetNodeListRequest* req,
+                               mdt::LogSchedulerService::GetNodeListResponse* resp,
+                               bool failed, int error,
+                               mdt::LogSchedulerService::LogSchedulerService_Stub* service);
+
+private:
+    pthread_spinlock_t lock_;
+    std::map<std::string, FileSystemInotify*> inotify_; // log dir notify
+    std::map<std::string, LogStream*> log_streams_; // each module has its log stream
+
+    // all modules use the same db
+    LogOptions log_options_;
+
+    // agent rpc service
+    RpcClient* rpc_client_;
+    pthread_t scheduler_tid_;
+    volatile bool stop_scheduler_thread_;
+    AutoResetEvent server_addr_event_;
+    pthread_spinlock_t server_lock_;
+    std::string server_addr_;
+};
+
+}
+}
+#endif

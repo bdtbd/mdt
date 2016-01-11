@@ -10,7 +10,7 @@ CXX = g++
 SHARED_CFLAGS = -fPIC
 SHARED_LDFLAGS = -shared -Wl,-soname -Wl,
 
-INCPATH += -I./src -I./include $(DEPS_INCPATH) 
+INCPATH += -I./src -I./include -I./src/leveldb/include -I./src/leveldb  $(DEPS_INCPATH) 
 CFLAGS += -std=c99 $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 CXXFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
 LDFLAGS += -rdynamic $(DEPS_LDPATH) $(DEPS_LDFLAGS) -lpthread -lrt -lz -ldl
@@ -19,6 +19,7 @@ PROTO_FILES := $(wildcard src/proto/*.proto)
 PROTO_OUT_CC := $(PROTO_FILES:.proto=.pb.cc)
 PROTO_OUT_H := $(PROTO_FILES:.proto=.pb.h)
 
+############################################################
 SDK_SRC := $(wildcard src/sdk/*.cc)
 COMMON_SRC := $(wildcard src/common/*.cc)
 UTIL_SRC := $(wildcard src/util/*.cc)
@@ -34,17 +35,13 @@ MULWRITE_TEST_SRC := $(wildcard src/benchmark/mulcli_write_test.cc)
 SCAN_TEST_SRC := $(wildcard src/benchmark/scan_test.cc)
 C_SAMPLE_SRC := $(wildcard src/sample/c_sample.c)
 
-###########################
-#	trace collector   #
-###########################
 FTRACE_SRC := $(wildcard src/ftrace/collector/*.cc)
-FTRACE_TEST_SRC := $(wildcard src/ftrace/test/TEST_log.cc)
+FTRACE_TEST_SRC := $(wildcard src/ftrace/collector/test/*.cc)
+AGENT_SRC := $(wildcard src/agent/*.cc)
+COLLECTOR_SRC := $(wildcard src/collector/*.cc)
+SCHEDULER_SRC := $(wildcard src/scheduler/*.cc)
 
-###########################
-#	search engine     #
-###########################
-FTRACE_SEARCHENGINE_SRC := $(wildcard src/ftrace/search_engine/*.cc)
-
+############################################################
 SDK_OBJ := $(SDK_SRC:.cc=.o)
 COMMON_OBJ := $(COMMON_SRC:.cc=.o)
 UTIL_OBJ := $(UTIL_SRC:.cc=.o)
@@ -60,23 +57,24 @@ MULWRITE_TEST_OBJ := $(MULWRITE_TEST_SRC:.cc=.o)
 SCAN_TEST_OBJ := $(SCAN_TEST_SRC:.cc=.o)
 C_SAMPLE_OBJ := $(C_SAMPLE_SRC:.c=.o)
 
-###########################
-#	trace collector
-###########################
 FTRACE_OBJ := $(FTRACE_SRC:.cc=.o)
 FTRACE_TEST_OBJ := $(FTRACE_TEST_SRC:.cc=.o)
-
-###########################
-#	search engine     #
-###########################
-FTRACE_SEARCHENGINE_OBJ := $(FTRACE_SEARCHENGINE_SRC:.cc=.o)
+AGENT_OBJ := $(AGENT_SRC:.cc=.o)
+COLLECTOR_OBJ := $(COLLECTOR_SRC:.cc=.o)
+SCHEDULER_OBJ := $(SCHEDULER_SRC:.cc=.o)
 
 CXX_OBJ := $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) \
            $(SAMPLE_OBJ) $(MDTTOOL_OBJ) $(WRITE_TEST_OBJ) $(MULWRITE_TEST_OBJ) \
-           $(SCAN_TEST_OBJ) $(SYNC_WRITE_TEST_OBJ) $(UPDATESCHEMA_OBJ) $(DUMPFILE_OBJ)
+           $(SCAN_TEST_OBJ) $(SYNC_WRITE_TEST_OBJ) $(UPDATESCHEMA_OBJ) $(DUMPFILE_OBJ) \
+	   $(COLLECTOR_OBJ) $(SCHEDULER_OBJ)
 C_OBJ := $(C_SAMPLE_OBJ)
+LEVELDB_LIB := src/leveldb/libleveldb.a
 
-PROGRAM = 
+############################################################
+PROGRAM = agent_main collector_main scheduler_main 
+FTRACELIBRARY = libftrace.a
+FTRACE_TEST = TEST_log
+
 LIBRARY = libmdt.a
 SAMPLE = sample
 MDTTOOL = mdt-tool
@@ -88,12 +86,6 @@ SYNC_WRITE_TEST = sync_write_test
 MULWRITE_TEST = mulcli_write_test
 SCAN_TEST = scan_test
 C_SAMPLE = c_sample
-
-###########################
-#	trace collector
-###########################
-FTRACELIBRARY = libftrace.a
-FTRACE_TEST = TEST_log
 
 .PHONY: all clean cleanall test
 all: $(PROGRAM) $(LIBRARY) $(FTRACELIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL) $(WRITE_TEST) $(DUMPFILE) $(MULWRITE_TEST) $(SCAN_TEST) $(SYNC_WRITE_TEST) $(UPDATESCHEMA) $(FTRACE_TEST) 
@@ -108,7 +100,7 @@ all: $(PROGRAM) $(LIBRARY) $(FTRACELIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL) $(W
 	echo 'Done'
 
 clean:
-	rm -rf $(CXX_OBJ) $(C_OBJ) $(FTRACE_OBJ)
+	rm -rf $(CXX_OBJ) $(C_OBJ) $(FTRACE_OBJ) $(AGENT_OBJ) $(SCHEDULER_OBJ) $(COLLECTOR_OBJ)
 	rm -rf $(PROGRAM) $(LIBRARY) $(FTRACELIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL) $(WRITE_TEST) $(MULWRITE_TEST) $(SCAN_TEST) $(SYNC_WRITE_TEST) $(UPDATESCHEMA) $(FTRACE_TEST)
 	rm -rf search_service
 	rm -rf $(DUMPFILE)
@@ -116,6 +108,9 @@ clean:
 cleanall:
 	$(MAKE) clean
 	rm -rf build
+
+src/leveldb/libleveldb.a: FORCE
+	$(MAKE) -C src/leveldb
 
 sample: $(SAMPLE_OBJ) $(LIBRARY)
 	$(CXX) -o $@ $(SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
@@ -153,8 +148,14 @@ libftrace.a: $(FTRACE_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 TEST_log: $(FTRACE_TEST_OBJ) $(FTRACELIBRARY)
 	$(CXX) -o $@ $(FTRACE_TEST_OBJ) $(FTRACELIBRARY) $(LDFLAGS)
 
-search_service: $(FTRACE_SEARCHENGINE_OBJ) $(LIBRARY) 
-	$(CXX) -o search_service $(FTRACE_SEARCHENGINE_OBJ) $(LIBRARY) $(LDFLAGS)
+agent_main: $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB)
+	$(CXX) -o agent_main $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LDFLAGS) $(LEVELDB_LIB)
+
+collector_main: $(COLLECTOR_OBJ) $(LIBRARY) 
+	$(CXX) -o collector_main $(COLLECTOR_OBJ) $(LIBRARY) $(LDFLAGS)
+
+scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
+	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LDFLAGS)
 
 $(CXX_OBJ): %.o: %.cc $(PROTO_OUT_H)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
