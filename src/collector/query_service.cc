@@ -36,6 +36,7 @@ void SearchEngineImpl::ReportMessage() {
             return;
         }
         std::string local_addr = hostname_str + ":" + FLAGS_se_service_port;
+        VLOG(30) << "hostip " << local_addr;
         std::string scheduler_addr = FLAGS_scheduler_addr;
 
         // report addr
@@ -62,6 +63,7 @@ void SearchEngineImpl::ReportMessageCallback(const mdt::LogSchedulerService::Reg
                                              mdt::LogSchedulerService::RegisterNodeResponse* resp,
                                              bool failed, int error,
                                              mdt::LogSchedulerService::LogSchedulerService_Stub* service) {
+        VLOG(30) << "report message, addr " << req->server_addr();
         delete req;
         delete resp;
         delete service;
@@ -70,6 +72,7 @@ void SearchEngineImpl::ReportMessageCallback(const mdt::LogSchedulerService::Reg
 
 // init mdt.flag
 Status SearchEngineImpl::InitSearchEngine() {
+#if 0
     if (!FLAGS_mdt_flagfile_set) {
         return Status::NotFound("not mdt.flag");
     }
@@ -83,6 +86,7 @@ Status SearchEngineImpl::InitSearchEngine() {
     FLAGS_flagfile = FLAGS_mdt_flagfile;
     ::google::ParseCommandLineFlags(&ac, &av, true);
     delete av;
+#endif
     return Status::OK();
 }
 

@@ -29,7 +29,9 @@ void SchedulerImpl::RegisterNode(::google::protobuf::RpcController* controller,
     pthread_spin_lock(&lock_);
     std::map<std::string, uint64_t>::iterator it = server_list_.find(request->server_addr());
     if (it == server_list_.end()) {
-        server_list_[request->server_addr()] = 0;
+        server_list_.insert(std::pair<std::string, uint64_t>(request->server_addr(), 0));
+        VLOG(30) << "new node register, " << request->server_addr();
+    } else {
     }
     pthread_spin_unlock(&lock_);
     done->Run();

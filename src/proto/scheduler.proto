@@ -27,18 +27,9 @@ message GetNodeListResponse {
 
 // rpc service
 service LogSchedulerService {
-    rpc Echo(EchoRequest) returns(EchoResponse) {
-        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
-        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
-    }
-    rpc RegisterNode(RegisterNodeRequest) returns(RegisterNodeResponse) {
-        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
-        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
-    }
-    rpc GetNodeList(GetNodeListRequest) returns(GetNodeListResponse) {
-        option (sofa.pbrpc.request_compress_type) = CompressTypeSnappy;
-        option (sofa.pbrpc.response_compress_type) = CompressTypeSnappy;
-    }
+    rpc Echo(EchoRequest) returns(EchoResponse);
+    rpc RegisterNode(RegisterNodeRequest) returns(RegisterNodeResponse);
+    rpc GetNodeList(GetNodeListRequest) returns(GetNodeListResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;
