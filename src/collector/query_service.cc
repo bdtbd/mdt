@@ -1,6 +1,7 @@
 #include <gflags/gflags.h>
 #include "collector/query_service.h"
 #include <boost/bind.hpp>
+#include <glog/logging.h>
 
 DECLARE_int32(se_num_threads);
 DECLARE_bool(mdt_flagfile_set);
@@ -244,6 +245,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
+    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name();
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();

@@ -11,13 +11,15 @@
 #include "agent/options.h"
 #include "proto/agent.pb.h"
 #include "agent/log_stream.h"
+#include <errno.h>
+#include <sys/select.h>
 
 DECLARE_string(scheduler_addr);
 DECLARE_string(db_dir);
 DECLARE_string(watch_log_dir);
 DECLARE_string(module_name_list);
 
-extern mdt::agent::EventMask event_masks[];
+extern mdt::agent::EventMask event_masks[21];
 
 namespace mdt {
 namespace agent {
@@ -48,6 +50,7 @@ void AgentImpl::GetServerAddrCallback(const mdt::LogSchedulerService::GetNodeLis
     if (!failed) {
         pthread_spin_lock(&server_lock_);
         server_addr_ = resp->primary_server_addr();
+        VLOG(50) << "agent, collector addr " << server_addr_;
         pthread_spin_unlock(&server_lock_);
     }
     delete req;
@@ -113,6 +116,7 @@ void AgentImpl::ParseLogDir(std::vector<std::string>& log_vec) {
     for (uint32_t i = 0; i < tmp_vec.size(); i++) {
         if (access(tmp_vec[i].c_str(), F_OK) == 0) {
             log_vec.push_back(tmp_vec[i]);
+            VLOG(30) << "watch log dir " << tmp_vec[i];
         }
     }
     return;
@@ -124,20 +128,57 @@ void* WatchThreadWrapper(void* arg) {
     return NULL;
 }
 
+int AgentImpl::WaitInotifyFDReadable(int fd) {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+    return select(FD_SETSIZE, &rfds, NULL, NULL, NULL);
+}
+
+int AgentImpl::FreadEvent(void* dest, size_t size, FILE* file) {
+    char* buf = (char*)dest;
+    while (size) {
+        int n = fread(buf, 1, size, file);
+        if (n == 0) {
+            return -1;
+        }
+        size -= n;
+        buf += n;
+    }
+    return 0;
+}
+
 void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
     while (1) {
+        VLOG(30) << "step into watch dir phase, dir " << fs_inotify->log_dir;
         if (fs_inotify->stop) {
             break;
         }
+
         inotify_event event;
+        char filename[256];
+
+        if (FreadEvent(&event, sizeof(event), fs_inotify->inotify_FD) == -1) {
+            VLOG(30) << "inotify FD " << fs_inotify->log_dir << ", read failed";
+            sleep(1);
+            continue;
+        }
+        if (event.len) {
+            FreadEvent(filename, event.len, fs_inotify->inotify_FD);
+        }
+
+        /*
+        if (WaitInotifyFDReadable(fs_inotify->inotify_fd) < 0) {
+            VLOG(30) << "inotify fd " << fs_inotify->inotify_fd << ", select failed";
+            continue;
+        }
         int length = read(fs_inotify->inotify_fd, &event, sizeof(event));
         if (length < 0) {
-            LOG(WARNING) << "read event: " << fs_inotify->log_dir << ", fail";
+            LOG(WARNING) << "read event: " << fs_inotify->log_dir << ", errno " << errno;
             continue;
         }
 
-        int namelen;
-        char filename[256];
+        int namelen = 0;
         if (event.len) {
             namelen = read(fs_inotify->inotify_fd, filename, event.len);
             if (namelen < 0) {
@@ -145,7 +186,12 @@ void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
                 continue;
             }
         }
-
+        */
+        for (uint32_t i = 0; i < 21; ++i) {
+            if (event.mask & event_masks[i].flag) {
+                LOG(WARNING) << "file " << filename << " has event: " << event_masks[i].name;
+            }
+        }
         // parse event
         if (event.mask & (IN_CREATE | IN_MOVED_TO)) {
             AddWriteEvent(fs_inotify->log_dir, filename, &event);
@@ -154,7 +200,7 @@ void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
         } else if (event.mask & (IN_MODIFY)) {
             AddWriteEvent(fs_inotify->log_dir, filename, &event);
         } else {
-            LOG(WARNING) << "read event: " << event.mask;
+            //for (int i = 0; i < sizeof(event_masks)/sizeof(mdt::agent::EventMask); ++i) {
         }
     }
 }
@@ -181,6 +227,7 @@ void AgentImpl::ParseModuleName(const std::string& filename, std::string* module
 int AgentImpl::AddWriteEvent(const std::string& logdir, const std::string& filename, inotify_event* event) {
     std::string module_name;
     ParseModuleName(filename, &module_name);
+    VLOG(30) << "write event, module name " << module_name << ", log dir " << logdir;
     if (module_name.size() == 0) {
         VLOG(30) << "dir " << filename << ", no module match";
         return -1;
@@ -204,6 +251,7 @@ int AgentImpl::AddWriteEvent(const std::string& logdir, const std::string& filen
 int AgentImpl::DeleteWatchEvent(const std::string& logdir, const std::string& filename, inotify_event* event) {
     std::string module_name;
     ParseModuleName(filename, &module_name);
+    VLOG(30) << "delete event, module name " << module_name << ", log dir " << logdir;
     if (module_name.size() == 0) {
         VLOG(30) << "dir " << filename << ", no module match";
         return -1;
@@ -228,12 +276,19 @@ void AgentImpl::DestroyWatchPath(FileSystemInotify* fs_inotify) {
     if (fs_inotify->stop == false) {
         fs_inotify->stop = true;
         pthread_join(fs_inotify->tid, NULL);
+        VLOG(30) << "stop watch thread";
     }
     if (fs_inotify->watch_fd >= 0) {
         inotify_rm_watch(fs_inotify->inotify_fd, fs_inotify->watch_fd);
+        VLOG(30) << "remove watch fd";
     }
     if (fs_inotify->inotify_fd >= 0) {
         close(fs_inotify->inotify_fd);
+        VLOG(30) << "close inotify fd";
+    }
+    if (fs_inotify->inotify_FD) {
+        fclose(fs_inotify->inotify_FD);
+        VLOG(30) << "fclose inotify FD";
     }
     delete fs_inotify;
 }
@@ -245,6 +300,7 @@ int AgentImpl::AddWatchPath(const std::string& dir) {
 
     fs_inotify->inotify_fd = inotify_init();
     if (fs_inotify->inotify_fd < 0) {
+        VLOG(30) << "init inotify fd error";
         DestroyWatchPath(fs_inotify);
         return -1;
     }
@@ -258,7 +314,13 @@ int AgentImpl::AddWatchPath(const std::string& dir) {
         DestroyWatchPath(fs_inotify);
         return -1;
     }
+    if ((fs_inotify->inotify_FD = fdopen(fs_inotify->inotify_fd, "r")) == NULL) {
+        DestroyWatchPath(fs_inotify);
+        return -1;
+    }
 
+
+    VLOG(30) << "add watch addr " << dir << ", watch fd " << fs_inotify->watch_fd;
     fs_inotify->stop = false;
     pthread_create(&fs_inotify->tid, NULL, WatchThreadWrapper, fs_inotify);
 

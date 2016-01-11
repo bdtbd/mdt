@@ -97,6 +97,7 @@ void LogStream::Run() {
                     file_stream->GetCheckpoint(key, &offset, &size);
 
                     if (size) {
+                        VLOG(30) << "file " << key->filename << ", async push error, re-send";
                         std::vector<std::string> line_vec;
                         DBKey* rkey;
                         file_stream->CheckPointRead(&line_vec, &rkey, offset, size);
@@ -135,6 +136,8 @@ void LogStream::Run() {
                 std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
                 ParseMdtRequest(line_vec, &req_vec);
                 AsyncPush(req_vec, key);
+            } else {
+                VLOG(30) << "nothing read...";
             }
         }
 
@@ -144,6 +147,8 @@ void LogStream::Run() {
             const std::string& filename = *delete_it;
             std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(filename);
             if (file_it != file_streams_.end()) {
+                continue;
+                VLOG(30) << "delete filestream, " << filename;
                 FileStream* file_stream = file_it->second;
                 // if no one refer this file stream, then delete it
                 if (file_stream->MarkDelete()) {
@@ -334,6 +339,7 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
 
 void LogStream::ApplyRedoList(FileStream* file_stream) {
     // redo check point
+    VLOG(30) << "begin use redo list to re-send log data";
     std::map<uint64_t, uint64_t> redo_list;
     file_stream->GetRedoList(&redo_list);
     std::map<uint64_t, uint64_t>::iterator redo_it = redo_list.begin();
@@ -354,6 +360,7 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     std::string server_addr = *server_addr_;
     pthread_spin_unlock(server_addr_lock_);
     rpc_client_->GetMethodList(server_addr, &service);
+    VLOG(30) << "async resend data to " << server_addr;
 
     for (uint32_t i = 0; i < req_vec.size(); i++) {
         mdt::SearchEngine::RpcStoreRequest* req = req_vec[i];
@@ -378,12 +385,13 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
                                   DBKey* key) {
     // handle data push error
     if (failed) {
-        LOG(WARNING) << "async push error, " << error;
+        LOG(WARNING) << "async write error " << error << ", file " << key->filename << " add to success event queue";
         pthread_spin_lock(&lock_);
         failed_key_queue_.push(key);
         pthread_spin_unlock(&lock_);
         thread_event_.Set();
     } else {
+        VLOG(30) << "file " << key->filename << " add to success event queue";
         pthread_spin_lock(&lock_);
         key_queue_.push(key);
         pthread_spin_unlock(&lock_);
@@ -395,6 +403,7 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
 }
 
 int LogStream::AddWriteEvent(std::string filename) {
+    VLOG(30) << "file " << filename << " add to write event queue";
     pthread_spin_lock(&lock_);
     write_event_.insert(filename);
     pthread_spin_unlock(&lock_);
@@ -403,6 +412,7 @@ int LogStream::AddWriteEvent(std::string filename) {
 }
 
 int LogStream::DeleteWatchEvent(std::string filename) {
+    VLOG(30) << "file " << filename << " add to delete event queue";
     pthread_spin_lock(&lock_);
     delete_event_.insert(filename);
     pthread_spin_unlock(&lock_);
@@ -500,6 +510,7 @@ int FileStream::RecoveryCheckPoint() {
         leveldb::Slice value = db_it->value();
         uint64_t offset, size;
         ParseKeyValue(key, value, &offset, &size);
+        VLOG(30) << "recovery cp, offset " << offset << ", size " << size;
 
         // insert [offset, size] into mem cp list
         pthread_spin_lock(&lock_);
@@ -574,8 +585,10 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         if (res < 0) {
             LOG(WARNING) << "redo cp, read file error " << offset << ", size " << size << ", res " << res;
             ret = -1;
+        } else if (res == 0) {
+        } else {
+            res = ParseLine(buf, res, line_vec);
         }
-        res = ParseLine(buf, res, line_vec);
         delete buf;
 
         if (res <= 0) {
@@ -635,6 +648,7 @@ int FileStream::DeleteCheckoutPoint(DBKey* key) {
     if (!s.ok()) {
         LOG(WARNING) << "delete db checkpoint error, " << filename_ << ", offset " << key->offset;
     }
+    VLOG(30) << "delete cp, file " << key->filename << ", cp offset " << key->offset;
     return 0;
 }
 
@@ -642,6 +656,7 @@ int FileStream::CheckPointRead(std::vector<std::string>* line_vec, DBKey** key,
                                uint64_t offset, uint64_t size) {
     int ret = 0;
     if (fd_ > 0) {
+        VLOG(30) << "file " << filename_ << " read from cp, offset " << offset << ", size " << size;
         char* buf = new char[size];
         ssize_t res = pread(fd_, buf, size, offset);
         if (res < (int64_t)size) {

@@ -11,6 +11,7 @@
 #include "proto/scheduler.pb.h"
 #include "agent/log_stream.h"
 #include "util/event.h"
+#include <stdio.h>
 
 namespace mdt {
 namespace agent {
@@ -20,6 +21,7 @@ struct FileSystemInotify {
     std::string log_dir;
     int watch_fd;
     int inotify_fd;
+    FILE* inotify_FD;
     int inotify_flag;
     pthread_t tid;
     volatile bool stop;
@@ -28,6 +30,7 @@ struct FileSystemInotify {
     FileSystemInotify()
         : watch_fd(-1),
         inotify_fd(-1),
+        inotify_FD(NULL),
         inotify_flag(-1),
         stop(true),
         agent(NULL) {}
@@ -56,6 +59,8 @@ private:
     int AddWatchPath(const std::string& dir);
     int AddWriteEvent(const std::string& logdir, const std::string& filename, inotify_event* event);
     int DeleteWatchEvent(const std::string& logdir, const std::string& filename, inotify_event* event);
+    int WaitInotifyFDReadable(int fd);
+    int FreadEvent(void* dest, size_t size, FILE* file);
 
     // cluster find
     void GetServerAddrCallback(const mdt::LogSchedulerService::GetNodeListRequest* req,
