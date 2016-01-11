@@ -461,6 +461,7 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     std::string server_addr = *server_addr_;
     pthread_spin_unlock(server_addr_lock_);
     rpc_client_->GetMethodList(server_addr, &service);
+    VLOG(30) << "async resend data to " << server_addr;
 
     for (uint32_t i = 0; i < req_vec.size(); i++) {
         mdt::SearchEngine::RpcStoreRequest* req = req_vec[i];
