@@ -27,7 +27,7 @@ mdt::agent::EventMask event_masks[] = {
 };
 
 DEFINE_string(agent_service_port, "33331", "agent port");
-DEFINE_int32(file_stream_max_pending_request, 10000, "max pending write req");
+DEFINE_int32(file_stream_max_pending_request, 1000, "max pending write req");
 DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler server addr");
 DEFINE_string(db_dir, "../leveldb_dir/", "leveldb dir for cp");
 DEFINE_string(watch_log_dir, "../watch_log_dir/", "log dir");

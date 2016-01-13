@@ -150,7 +150,7 @@ int AgentImpl::FreadEvent(void* dest, size_t size, FILE* file) {
 
 void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
     while (1) {
-        VLOG(30) << "step into watch dir phase, dir " << fs_inotify->log_dir;
+        VLOG(35) << "step into watch dir phase, dir " << fs_inotify->log_dir;
         if (fs_inotify->stop) {
             break;
         }
@@ -159,7 +159,7 @@ void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
         char filename[256];
 
         if (FreadEvent(&event, sizeof(event), fs_inotify->inotify_FD) == -1) {
-            VLOG(30) << "inotify FD " << fs_inotify->log_dir << ", read failed";
+            LOG(WARNING) << "inotify FD " << fs_inotify->log_dir << ", read failed";
             sleep(1);
             continue;
         }
@@ -189,7 +189,7 @@ void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
         */
         for (uint32_t i = 0; i < 21; ++i) {
             if (event.mask & event_masks[i].flag) {
-                LOG(WARNING) << "file " << filename << " has event: " << event_masks[i].name;
+                VLOG(35) << "file " << filename << " has event: " << event_masks[i].name;
             }
         }
         // parse event
@@ -227,7 +227,7 @@ void AgentImpl::ParseModuleName(const std::string& filename, std::string* module
 int AgentImpl::AddWriteEvent(const std::string& logdir, const std::string& filename, inotify_event* event) {
     std::string module_name;
     ParseModuleName(filename, &module_name);
-    VLOG(30) << "write event, module name " << module_name << ", log dir " << logdir;
+    VLOG(35) << "write event, module name " << module_name << ", log dir " << logdir;
     if (module_name.size() == 0) {
         VLOG(30) << "dir " << filename << ", no module match";
         return -1;
@@ -268,7 +268,7 @@ int AgentImpl::DeleteWatchEvent(const std::string& logdir, const std::string& fi
     }
     pthread_spin_unlock(&lock_);
 
-    stream->DeleteWatchEvent(logdir + "/" + filename);
+    stream->DeleteWatchEvent(logdir + "/" + filename, true);
     return 0;
 }
 

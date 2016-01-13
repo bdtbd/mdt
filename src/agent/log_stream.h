@@ -75,7 +75,7 @@ public:
     ~LogStream();
 
     int AddWriteEvent(std::string filename);
-    int DeleteWatchEvent(std::string filename);
+    int DeleteWatchEvent(std::string filename, bool need_wakeup);
     void Run();
 
 private:
@@ -109,6 +109,7 @@ private:
     std::string kv_delims_; // parse kv from item
     bool enable_index_filter_; // use index list filter log line, default value = false
     std::set<std::string> index_list_;
+    std::map<std::string, std::string> alias_index_map_;
     // kv parse method 2: fixed parse
     bool use_fixed_index_list_;
     std::map<std::string, int> fixed_index_list_;

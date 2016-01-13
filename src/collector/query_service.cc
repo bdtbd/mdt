@@ -245,7 +245,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
-    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name();
+    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name() << ", req " << req->DebugString();
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();
