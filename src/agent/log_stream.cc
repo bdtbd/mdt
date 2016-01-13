@@ -26,6 +26,7 @@ DECLARE_string(line_delims);
 DECLARE_string(kv_delims);
 DECLARE_bool(enable_index_filter);
 DECLARE_string(index_list);
+DECLARE_string(alias_index_list);
 
 DECLARE_bool(use_fixed_index_list);
 DECLARE_string(fixed_index_list);
@@ -110,25 +111,39 @@ LogStream::~LogStream() {
 
 void LogStream::Run() {
     while (1) {
-        thread_event_.Wait();
-        if (stop_ == true) {
-            break;
-        }
-
-        int64_t start_ts = mdt::timer::get_micros();
-
+        bool has_event = false;
         std::set<std::string> local_write_event;
         std::set<std::string> local_delete_event;
         std::queue<DBKey*> local_key_queue;
         std::queue<DBKey*> local_failed_key_queue;
 
         pthread_spin_lock(&lock_);
-        swap(local_write_event,write_event_);
-        swap(local_delete_event, delete_event_);
-        swap(key_queue_, local_key_queue);
-        swap(failed_key_queue_, local_failed_key_queue);
+        if (write_event_.size()) {
+            swap(local_write_event,write_event_);
+            has_event = true;
+        }
+        if (delete_event_.size()) {
+            swap(local_delete_event, delete_event_);
+            has_event = true;
+        }
+        if (key_queue_.size()) {
+            swap(key_queue_, local_key_queue);
+            has_event = true;
+        }
+        if (failed_key_queue_.size()) {
+            swap(failed_key_queue_, local_failed_key_queue);
+            has_event = true;
+        }
         pthread_spin_unlock(&lock_);
 
+        if (!has_event) {
+            thread_event_.Wait();
+        }
+        if (stop_ == true) {
+            break;
+        }
+
+        int64_t start_ts = mdt::timer::get_micros();
         // handle push callback event
         while (!local_key_queue.empty()) {
             DBKey* key = local_key_queue.front();
@@ -138,11 +153,15 @@ void LogStream::Run() {
                 file_stream = file_it->second;
             }
             local_key_queue.pop();
-            // delete and free space
-            if (file_stream) {
-                file_stream->DeleteCheckoutPoint(key);
+
+            // last one delete and free space
+            if (key->ref.Dec() == 0) {
+                if (file_stream) {
+                    file_stream->DeleteCheckoutPoint(key);
+                }
+                VLOG(30) << "delete key, file " << key->filename << ", key " << (uint64_t)key;
+                delete key;
             }
-            delete key;
         }
 
         // handle fail push callback
@@ -173,7 +192,10 @@ void LogStream::Run() {
                     }
                 }
             }
-            delete key;
+            if (key->ref.Dec() == 0) {
+                VLOG(30) << "delete key, file " << key->filename << ", key " << (uint64_t)key;
+                delete key;
+            }
         }
 
         // handle write event
@@ -435,7 +457,7 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
             delete req;
         }
     }
-    return 0;
+    return req_vec->size();
 }
 
 void LogStream::ApplyRedoList(FileStream* file_stream) {
@@ -450,8 +472,11 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
         file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second);
 
         std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
-        ParseMdtRequest(line_vec, &req_vec);
-        AsyncPush(req_vec, key);
+        if (ParseMdtRequest(line_vec, &req_vec)) {
+            AsyncPush(req_vec, key);
+        } else {
+            // TODO: do something
+        }
     }
 }
 
@@ -460,13 +485,15 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     pthread_spin_lock(server_addr_lock_);
     std::string server_addr = *server_addr_;
     pthread_spin_unlock(server_addr_lock_);
-    rpc_client_->GetMethodList(server_addr, &service);
-    VLOG(30) << "async resend data to " << server_addr;
+    VLOG(30) << "async send data to " << server_addr << ", nr req " << req_vec.size();
 
+    key->ref.Set((uint64_t)(req_vec.size()));
     for (uint32_t i = 0; i < req_vec.size(); i++) {
+        rpc_client_->GetMethodList(server_addr, &service);
         mdt::SearchEngine::RpcStoreRequest* req = req_vec[i];
         mdt::SearchEngine::RpcStoreResponse* resp = new mdt::SearchEngine::RpcStoreResponse;
-        VLOG(40) << "\n =====> async send data to " << server_addr << ", req:\n " << req->DebugString();
+        VLOG(40) << "\n =====> async send data to " << server_addr << ", req " << (uint64_t)req
+            << ", resp " << (uint64_t)resp << ", key " << (uint64_t)key << "\n " << req->DebugString();
 
         boost::function<void (const mdt::SearchEngine::RpcStoreRequest*,
                               mdt::SearchEngine::RpcStoreResponse*,
@@ -487,21 +514,23 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
                                   DBKey* key) {
     // handle data push error
     if (failed) {
-        LOG(WARNING) << "async write error " << error << ", file " << key->filename << " add to failed event queue";
+        LOG(WARNING) << "async write error " << error << ", key " << (uint64_t)key << ", file " << key->filename << " add to failed event queue"
+            << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get();
         pthread_spin_lock(&lock_);
         failed_key_queue_.push(key);
         pthread_spin_unlock(&lock_);
         thread_event_.Set();
     } else {
-        VLOG(30) << "file " << key->filename << " add to success event queue";
+        VLOG(30) << "file " << key->filename << " add to success event queue, req "
+            << (uint64_t)req << ", resp " << (uint64_t)resp << ", key " << (uint64_t)key << ", key.ref " << key->ref.Get();
         pthread_spin_lock(&lock_);
         key_queue_.push(key);
         pthread_spin_unlock(&lock_);
         thread_event_.Set();
     }
     delete req;
-    delete resp;
     delete service;
+    delete resp;
 }
 
 int LogStream::AddWriteEvent(std::string filename) {
@@ -704,6 +733,7 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
             *key = new DBKey;
             (*key)->filename = filename_;
             (*key)->offset = offset;
+            (*key)->ref.Set(0);
 
             ret = LogCheckPoint(offset, res);
             if (ret < 0) {
@@ -782,6 +812,7 @@ int FileStream::CheckPointRead(std::vector<std::string>* line_vec, DBKey** key,
             *key = new DBKey;
             (*key)->filename = filename_;
             (*key)->offset = offset;
+            (*key)->ref.Set(0);
         }
         delete buf;
     }

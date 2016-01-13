@@ -48,6 +48,7 @@ DEFINE_string(line_delims, " ", "log tailer's line delim");
 DEFINE_string(kv_delims, "=", "log tailer's kv delim");
 DEFINE_bool(enable_index_filter, false, "do not filter log line by index list in agent");
 DEFINE_string(index_list, "", "index table name list");
+DEFINE_string(alias_index_list, "", "alias index table name list");
 
 // split string by index number
 DEFINE_bool(use_fixed_index_list, true, "use fixed index list");

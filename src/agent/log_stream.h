@@ -11,6 +11,7 @@
 #include "rpc/rpc_client.h"
 #include "util/event.h"
 #include <sys/time.h>
+#include "util/counter.h"
 
 namespace mdt {
 namespace agent {
@@ -20,6 +21,7 @@ struct DBKey {
     std::string filename;
     uint64_t timestamp;
     uint64_t offset;
+    Counter ref;
 };
 
 class FileStream {
