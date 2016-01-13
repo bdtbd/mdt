@@ -53,6 +53,28 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
     db_name_ = FLAGS_db_name;
     table_name_ = FLAGS_table_name;
 
+    // split alias index
+    //std::map<std::string, std::string> alias_index_map;
+    if (FLAGS_alias_index_list.size() != 0) {
+        std::vector<std::string> alias_index_vec;
+        boost::split(alias_index_vec, FLAGS_alias_index_list, boost::is_any_of(";"));
+        VLOG(30) << "DEBUG: split alias index tablet\n";
+        for (int i = 0; i < (int)alias_index_vec.size(); i++) {
+            std::vector<std::string> alias_vec;
+            boost::split(alias_vec, alias_index_vec[i], boost::is_any_of(":"));
+            if ((alias_vec.size() >= 2) && alias_vec[1].size()) {
+                std::vector<std::string> alias;
+                boost::split(alias, alias_vec[1], boost::is_any_of(","));
+                alias_index_map_.insert(std::pair<std::string, std::string>(alias_vec[0], alias_vec[0]));
+                VLOG(30) << "=====> index: " << alias_vec[0] << std::endl;
+                for (int j = 0; j < (int)alias.size(); j++) {
+                    alias_index_map_.insert(std::pair<std::string, std::string>(alias[j], alias_vec[0]));
+                    VLOG(30) << "parse alias list: " << alias[j] << std::endl;
+                }
+            }
+        }
+    }
+
     // split string delims
     std::vector<std::string> string_delims;
     if (FLAGS_string_delims.size() != 0) {
@@ -91,6 +113,7 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
         boost::split(log_columns, FLAGS_index_list, boost::is_any_of(","));
         VLOG(30) << "DEBUG: split index table";
         for (int i = 0 ; i < (int)log_columns.size(); i++) {
+            alias_index_map_.insert(std::pair<std::string, std::string>(log_columns[i], log_columns[i]));
             index_list_.insert(log_columns[i]);
         }
     }
@@ -118,6 +141,8 @@ void LogStream::Run() {
         std::queue<DBKey*> local_failed_key_queue;
 
         pthread_spin_lock(&lock_);
+        VLOG(30) << "event: write " << write_event_.size() << ", delete " << delete_event_.size()
+            << ", success " << key_queue_.size() << ", fail " << failed_key_queue_.size();
         if (write_event_.size()) {
             swap(local_write_event,write_event_);
             has_event = true;
@@ -159,7 +184,7 @@ void LogStream::Run() {
                 if (file_stream) {
                     file_stream->DeleteCheckoutPoint(key);
                 }
-                VLOG(30) << "delete key, file " << key->filename << ", key " << (uint64_t)key;
+                VLOG(30) << "delete key, file " << key->filename << ", key " << (uint64_t)key << ", offset " << key->offset;
                 delete key;
             }
         }
@@ -172,28 +197,28 @@ void LogStream::Run() {
             if (file_it != file_streams_.end()) {
                 file_stream = file_it->second;
             }
-
             local_failed_key_queue.pop();
-            if (file_stream) {
-                if (file_stream->HanleFailKey(key)) {
-                    // re-send data
-                    uint64_t offset, size;
-                    file_stream->GetCheckpoint(key, &offset, &size);
 
-                    if (size) {
-                        VLOG(30) << "file " << key->filename << ", async push error, re-send";
-                        std::vector<std::string> line_vec;
-                        DBKey* rkey;
-                        file_stream->CheckPointRead(&line_vec, &rkey, offset, size);
+            if (key->ref.Dec() == 0) {
+                if (file_stream) {
+                    if (file_stream->HanleFailKey(key)) {
+                        // re-send data
+                        uint64_t offset, size;
+                        file_stream->GetCheckpoint(key, &offset, &size);
 
-                        std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
-                        ParseMdtRequest(line_vec, &req_vec);
-                        AsyncPush(req_vec, rkey);
+                        if (size) {
+                            VLOG(30) << "file " << key->filename << ", async push error, re-send";
+                            std::vector<std::string> line_vec;
+                            DBKey* rkey;
+                            file_stream->CheckPointRead(&line_vec, &rkey, offset, size);
+
+                            std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
+                            ParseMdtRequest(line_vec, &req_vec);
+                            AsyncPush(req_vec, rkey);
+                        }
                     }
                 }
-            }
-            if (key->ref.Dec() == 0) {
-                VLOG(30) << "delete key, file " << key->filename << ", key " << (uint64_t)key;
+                VLOG(30) << "delete key, file " << key->filename << ", key " << (uint64_t)key << ", offset " << key->offset;
                 delete key;
             }
         }
@@ -224,7 +249,7 @@ void LogStream::Run() {
                 ParseMdtRequest(line_vec, &req_vec);
                 AsyncPush(req_vec, key);
             } else {
-                VLOG(30) << "nothing read...";
+                VLOG(30) << "has write event, but read nothing";
             }
         }
 
@@ -234,7 +259,6 @@ void LogStream::Run() {
             const std::string& filename = *delete_it;
             std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(filename);
             if (file_it != file_streams_.end()) {
-                continue;
                 VLOG(30) << "delete filestream, " << filename;
                 FileStream* file_stream = file_it->second;
                 // if no one refer this file stream, then delete it
@@ -324,6 +348,34 @@ struct LogTailerSpan {
         return linevec[0].size() + 1;
     }
 
+    uint32_t ParseKVpairs(const std::string& line, const std::string& linedelims,
+                          const std::string& kvdelims,
+                          const std::map<std::string, std::string>& alias_index_map) {
+        uint32_t size = line.size();
+        if (size == 0) return 0;
+
+        std::vector<std::string> linevec;
+        boost::split(linevec, line, boost::is_any_of("\n"));
+        if (linevec.size() == 0 || linevec[0].size() == 0) return 0;
+        //if (linevec[0].at(linevec.size() - 1) != '\n') return 0;
+
+        std::map<std::string, std::string>& logkv = kv_annotation;
+        //logkv.clear();
+        std::vector<std::string> kvpairs;
+        boost::split(kvpairs, linevec[0], boost::is_any_of(linedelims));
+        for (uint32_t i = 0; i < kvpairs.size(); i++) {
+            const std::string& kvpair = kvpairs[i];
+            std::vector<std::string> kv;
+            boost::split(kv, kvpair, boost::is_any_of(kvdelims));
+            if (kv.size() == 2 && kv[0].size() > 0 && kv[1].size() > 0) {
+                std::map<std::string, std::string>::const_iterator it = alias_index_map.find(kv[0]);
+                if (it != alias_index_map.end()) {
+                    logkv.insert(std::pair<std::string, std::string>(it->second, kv[1]));
+                }
+            }
+        }
+        return linevec[0].size() + 1;
+    }
     uint32_t ParseFixedKvPairs(const std::string& line, const std::string& linedelims,
                                const std::map<std::string, int>& fixed_index_list) {
         uint32_t size = line.size();
@@ -406,14 +458,15 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
         LogRecord log;
         if (log.SplitLogItem(line, string_delims_) < 0) {
             res = -1;
-            VLOG(30) << "parse mdt request split by string fail";
+            LOG(WARNING) << "parse mdt request split by string fail: " << line;
         } else {
             LogTailerSpan kv;
             for (int i = 0; i < (int)log.columns.size(); i++) {
                 if (use_fixed_index_list_) {
                     kv.ParseFixedKvPairs(log.columns[i], line_delims_, fixed_index_list_);
                 } else {
-                    kv.ParseKVpairs(log.columns[i], line_delims_, kv_delims_, index_list_);
+                    //kv.ParseKVpairs(log.columns[i], line_delims_, kv_delims_, index_list_);
+                    kv.ParseKVpairs(log.columns[i], line_delims_, kv_delims_, alias_index_map_);
                 }
             }
 
@@ -472,11 +525,8 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
         file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second);
 
         std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
-        if (ParseMdtRequest(line_vec, &req_vec)) {
-            AsyncPush(req_vec, key);
-        } else {
-            // TODO: do something
-        }
+        ParseMdtRequest(line_vec, &req_vec);
+        AsyncPush(req_vec, key);
     }
 }
 
@@ -485,7 +535,7 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     pthread_spin_lock(server_addr_lock_);
     std::string server_addr = *server_addr_;
     pthread_spin_unlock(server_addr_lock_);
-    VLOG(30) << "async send data to " << server_addr << ", nr req " << req_vec.size();
+    VLOG(30) << "async send data to " << server_addr << ", nr req " << req_vec.size() << ", offset " << key->offset;
 
     key->ref.Set((uint64_t)(req_vec.size()));
     for (uint32_t i = 0; i < req_vec.size(); i++) {
@@ -515,14 +565,14 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
     // handle data push error
     if (failed) {
         LOG(WARNING) << "async write error " << error << ", key " << (uint64_t)key << ", file " << key->filename << " add to failed event queue"
-            << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get();
+            << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get() << ", offset " << key->offset;
         pthread_spin_lock(&lock_);
         failed_key_queue_.push(key);
         pthread_spin_unlock(&lock_);
         thread_event_.Set();
     } else {
         VLOG(30) << "file " << key->filename << " add to success event queue, req "
-            << (uint64_t)req << ", resp " << (uint64_t)resp << ", key " << (uint64_t)key << ", key.ref " << key->ref.Get();
+            << (uint64_t)req << ", resp " << (uint64_t)resp << ", key " << (uint64_t)key << ", key.ref " << key->ref.Get() << ", offset " << key->offset;
         pthread_spin_lock(&lock_);
         key_queue_.push(key);
         pthread_spin_unlock(&lock_);
@@ -534,7 +584,7 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
 }
 
 int LogStream::AddWriteEvent(std::string filename) {
-    VLOG(30) << "file " << filename << " add to write event queue";
+    VLOG(35) << "file " << filename << " add to write event queue";
     pthread_spin_lock(&lock_);
     write_event_.insert(filename);
     pthread_spin_unlock(&lock_);
@@ -696,7 +746,7 @@ ssize_t FileStream::ParseLine(char* buf, ssize_t size, std::vector<std::string>*
     }
     for (uint32_t i = 0; i < line_vec->size(); i++) {
         res += (*line_vec)[i].size() + 1;
-        VLOG(30) << "line: " << (*line_vec)[i] << ", res " << res << ", size " << size;
+        VLOG(40) << "line: " << (*line_vec)[i] << ", res " << res << ", size " << size;
     }
     return res;
 }
@@ -708,6 +758,7 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         // check mem cp pending request
         pthread_spin_lock(&lock_);
         if (mem_checkpoint_list_.size() > (uint32_t)FLAGS_file_stream_max_pending_request) {
+            LOG(WARNING) << "pending overflow, max queue size " << FLAGS_file_stream_max_pending_request << ", cp list size " << mem_checkpoint_list_.size();
             pthread_spin_unlock(&lock_);
             return -1;
         }
@@ -718,7 +769,7 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         char* buf = new char[size];
         ssize_t res = pread(fd_, buf, size, offset);
         if (res < 0) {
-            LOG(WARNING) << "redo cp, read file error " << offset << ", size " << size << ", res " << res;
+            LOG(WARNING) << "redo cp, read file error, offset " << offset << ", size " << size << ", res " << res;
             ret = -1;
         } else if (res == 0) {
            VLOG(30) << "file " << filename_ << ", read size 0";
@@ -747,11 +798,12 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
 
 int FileStream::LogCheckPoint(uint64_t offset, uint64_t size) {
     int ret = 0;
+    uint32_t nr_pending;
     pthread_spin_lock(&lock_);
     mem_checkpoint_list_[offset] = size;
+    nr_pending = mem_checkpoint_list_.size();
     pthread_spin_unlock(&lock_);
 
-    VLOG(30) << "log cp, file " << filename_ << ", offset " << offset << ", size " << size;
     std::string key, value;
     MakeKeyValue(module_name_, filename_, offset, &key, size, &value);
     leveldb::Status s = log_options_.db->Put(leveldb::WriteOptions(), key, value);
@@ -762,13 +814,15 @@ int FileStream::LogCheckPoint(uint64_t offset, uint64_t size) {
             mem_checkpoint_list_.erase(it);
         }
         pthread_spin_unlock(&lock_);
+        LOG(WARNING) << "log cp into leveldb error, file " << filename_ << ", offset " << offset << ", size " << size;
         ret = -1;
     } else {
         // write db success
         current_offset_ = offset + size;
         ret = size;
         VLOG(30) << "log cp, write leveldb succes, file " << filename_ << ", offset "
-            << offset << ", size " << size << ", current_offset " << current_offset_;
+            << offset << ", size " << size << ", current_offset " << current_offset_
+            << ", nr pending " << nr_pending << ", max queue size " << FLAGS_file_stream_max_pending_request;
     }
     return ret;
 }
