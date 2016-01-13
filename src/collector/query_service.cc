@@ -1,20 +1,79 @@
 #include <gflags/gflags.h>
-#include "ftrace/search_engine/query_service.h"
+#include "collector/query_service.h"
 #include <boost/bind.hpp>
+#include <glog/logging.h>
 
 DECLARE_int32(se_num_threads);
 DECLARE_bool(mdt_flagfile_set);
 DECLARE_string(mdt_flagfile);
 DECLARE_string(flagfile);
+DECLARE_string(scheduler_addr);
+DECLARE_string(se_service_port);
 
 namespace mdt {
 
+void* ReportThread(void* arg) {
+    SearchEngineImpl* se = (SearchEngineImpl*)arg;
+    se->ReportMessage();
+    return NULL;
+}
+
 // operation
-SearchEngineImpl::SearchEngineImpl() {}
+SearchEngineImpl::SearchEngineImpl()
+    : stop_report_message_(false) {
+    rpc_client_ = new RpcClient();
+    pthread_create(&report_tid_, NULL, ReportThread, this);
+}
 SearchEngineImpl::~SearchEngineImpl() {}
+
+void SearchEngineImpl::ReportMessage() {
+    char hostname[255];
+    if (0 != gethostname(hostname, 256)) {
+        LOG(FATAL) << "fail to report message";
+    }
+    std::string hostname_str = hostname;
+    while (1) {
+        if (stop_report_message_) {
+            return;
+        }
+        std::string local_addr = hostname_str + ":" + FLAGS_se_service_port;
+        VLOG(50) << "hostip " << local_addr;
+        std::string scheduler_addr = FLAGS_scheduler_addr;
+
+        // report addr
+        mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+        rpc_client_->GetMethodList(scheduler_addr, &service);
+        mdt::LogSchedulerService::RegisterNodeRequest* req = new mdt::LogSchedulerService::RegisterNodeRequest();
+        req->set_server_addr(local_addr);
+        mdt::LogSchedulerService::RegisterNodeResponse* resp = new mdt::LogSchedulerService::RegisterNodeResponse();
+
+        boost::function<void (const mdt::LogSchedulerService::RegisterNodeRequest*,
+                mdt::LogSchedulerService::RegisterNodeResponse*,
+                bool, int)> callback =
+            boost::bind(&SearchEngineImpl::ReportMessageCallback,
+                    this, _1, _2, _3, _4, service);
+        rpc_client_->AsyncCall(service,
+                               &mdt::LogSchedulerService::LogSchedulerService_Stub::RegisterNode,
+                               req, resp, callback);
+        report_event_.Wait();
+        sleep(2);
+    }
+}
+
+void SearchEngineImpl::ReportMessageCallback(const mdt::LogSchedulerService::RegisterNodeRequest* req,
+                                             mdt::LogSchedulerService::RegisterNodeResponse* resp,
+                                             bool failed, int error,
+                                             mdt::LogSchedulerService::LogSchedulerService_Stub* service) {
+        VLOG(50) << "report message, addr " << req->server_addr();
+        delete req;
+        delete resp;
+        delete service;
+        report_event_.Set();
+}
 
 // init mdt.flag
 Status SearchEngineImpl::InitSearchEngine() {
+#if 0
     if (!FLAGS_mdt_flagfile_set) {
         return Status::NotFound("not mdt.flag");
     }
@@ -28,6 +87,7 @@ Status SearchEngineImpl::InitSearchEngine() {
     FLAGS_flagfile = FLAGS_mdt_flagfile;
     ::google::ParseCommandLineFlags(&ac, &av, true);
     delete av;
+#endif
     return Status::OK();
 }
 
@@ -185,6 +245,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
+    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name();
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();

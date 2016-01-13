@@ -25,7 +25,8 @@ DEFINE_string(op, "", "method:dumpfile, create, get_index");
 DEFINE_string(logfile, "xxx.dat", "log file");
 DEFINE_string(dbname, "TEST_db", "production name");
 DEFINE_string(tablename, "TEST_table001", "table name");
-DEFINE_string(index_list, "", "index table name list");
+DEFINE_string(index_list, "passuid,deviceType,mobile,sign,pageType", "index table name list");
+DEFINE_string(alias_index_list, "", "alias index table name list");
 DEFINE_string(primary_key, "", "primary key name");
 // split string by substring
 DEFINE_string(string_delims, "||", "split string by substring");
@@ -131,6 +132,35 @@ struct LogTailerSpan {
         return linevec[0].size() + 1;
     }
 
+    uint32_t ParseKVpairs(const std::string& line, const std::string& linedelims,
+                          const std::string& kvdelims,
+                          const std::map<std::string, std::string>& alias_index_map) {
+        uint32_t size = line.size();
+        if (size == 0) return 0;
+
+        std::vector<std::string> linevec;
+        boost::split(linevec, line, boost::is_any_of("\n"));
+        if (linevec.size() == 0 || linevec[0].size() == 0) return 0;
+        //if (linevec[0].at(linevec.size() - 1) != '\n') return 0;
+
+        std::map<std::string, std::string>& logkv = kv_annotation;
+        //logkv.clear();
+        std::vector<std::string> kvpairs;
+        boost::split(kvpairs, linevec[0], boost::is_any_of(linedelims));
+        for (uint32_t i = 0; i < kvpairs.size(); i++) {
+            const std::string& kvpair = kvpairs[i];
+            std::vector<std::string> kv;
+            boost::split(kv, kvpair, boost::is_any_of(kvdelims));
+            if (kv.size() == 2 && kv[0].size() > 0 && kv[1].size() > 0) {
+                std::map<std::string, std::string>::const_iterator it = alias_index_map.find(kv[0]);
+                if (it != alias_index_map.end()) {
+                    logkv.insert(std::pair<std::string, std::string>(it->second, kv[1]));
+                }
+            }
+        }
+        return linevec[0].size() + 1;
+    }
+
     void PrintKVpairs() {
         const std::map<std::string, std::string>& logkv = kv_annotation;
         std::cout << "LogSpan kv: ";
@@ -157,16 +187,40 @@ int main(int ac, char* av[])
         std::cout << " ***** WRITE TEST: use default param *****\n";
     }
 
+    // split alias index
+    std::map<std::string, std::string> alias_index_map;
+    if (FLAGS_alias_index_list.size() != 0) {
+        std::vector<std::string> alias_index_vec;
+        boost::split(alias_index_vec, FLAGS_alias_index_list, boost::is_any_of(";"));
+        std::cout << "DEBUG: split alias index tablet\n";
+        for (int i = 0; i < (int)alias_index_vec.size(); i++) {
+            std::vector<std::string> alias_vec;
+            boost::split(alias_vec, alias_index_vec[i], boost::is_any_of(":"));
+            if ((alias_vec.size() >= 2) && alias_vec[1].size()) {
+                std::vector<std::string> alias;
+                boost::split(alias, alias_vec[1], boost::is_any_of(","));
+                alias_index_map.insert(std::pair<std::string, std::string>(alias_vec[0], alias_vec[0]));
+                std::cout << "=====> index: " << alias_vec[0] << std::endl;
+                for (int j = 0; j < (int)alias.size(); j++) {
+                    alias_index_map.insert(std::pair<std::string, std::string>(alias[j], alias_vec[0]));
+                    std::cout << "parse alias list: " << alias[j] << std::endl;
+                }
+            }
+        }
+    }
+
     // split index
     std::vector<std::string> log_columns;
     if (FLAGS_index_list.size() != 0) {
         boost::split(log_columns, FLAGS_index_list, boost::is_any_of(","));
         std::cout << "DEBUG: split index table\n";
         for (int i = 0 ; i < (int)log_columns.size(); i++) {
+            alias_index_map.insert(std::pair<std::string, std::string>(log_columns[i], log_columns[i]));
             std::cout << log_columns[i] << "\t:\t";
         }
         std::cout << std::endl;
     }
+
     // split string delims
     std::vector<std::string> string_delims;
     if (FLAGS_string_delims.size() != 0) {
@@ -229,6 +283,37 @@ int main(int ac, char* av[])
                 possible_index.insert(it->first);
             }
             if (line_no % 10 == 0) {
+                std::set<std::string>::iterator it_set = possible_index.begin();
+                std::cout << "<<<<< ";
+                for (; it_set != possible_index.end(); ++it_set) {
+                    std::cout << "\t" << *it_set;
+                }
+                std::cout << " >>>>>" << std::endl;
+                kv.PrintKVpairs();
+            }
+        }
+    } else if (FLAGS_op == "get_index2") {
+        std::set<std::string> possible_index;
+        std::ifstream file(FLAGS_logfile.c_str());
+        std::string str;
+        uint64_t line_no = 0;
+        while (std::getline(file, str)) {
+            line_no++;
+            // string split
+            LogRecord log;
+            if (log.SplitLogItem(str, string_delims) < 0) {
+                continue;
+            }
+            // char split
+            LogTailerSpan kv;
+            for (int i = 0; i < (int)log.columns.size(); i++) {
+                kv.ParseKVpairs(log.columns[i], FLAGS_logtailer_linedelims, FLAGS_logtailer_kvdelims, alias_index_map);
+            }
+            std::map<std::string, std::string>::iterator it = kv.kv_annotation.begin();
+            for (; it != kv.kv_annotation.end(); ++it) {
+                possible_index.insert(it->first);
+            }
+            if (line_no % 1 == 0) {
                 std::set<std::string>::iterator it_set = possible_index.begin();
                 std::cout << "<<<<< ";
                 for (; it_set != possible_index.end(); ++it_set) {

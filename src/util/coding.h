@@ -11,8 +11,8 @@
 // * In addition we support variable length "varint" encoding
 // * Strings are encoded prefixed by their length in varint format
 
-#ifndef STORAGE_LEVELDB_UTIL_CODING_H_
-#define STORAGE_LEVELDB_UTIL_CODING_H_
+#ifndef MDT_LEVELDB_UTIL_CODING_H_
+#define MDT_LEVELDB_UTIL_CODING_H_
 
 #include <stdint.h>
 #include <string.h>

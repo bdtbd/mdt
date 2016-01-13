@@ -4,8 +4,8 @@
 //
 // Author: yanshiguang02@baidu.com
 
-#ifndef  TERA_COMMON_EVENT_H_
-#define  TERA_COMMON_EVENT_H_
+#ifndef  MDT_COMMON_EVENT_H_
+#define  MDT_COMMON_EVENT_H_
 
 #include "mutex.h"
 
@@ -48,6 +48,6 @@ private:
 
 } // namespace mdt
 
-using common::AutoResetEvent;
+//using mdt::AutoResetEvent;
 
 #endif  // TERA_COMMON_EVENT_H_

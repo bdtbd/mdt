@@ -16,8 +16,8 @@
 // non-const method, all threads accessing the same Slice must use
 // external synchronization.
 
-#ifndef STORAGE_LEVELDB_INCLUDE_SLICE_H_
-#define STORAGE_LEVELDB_INCLUDE_SLICE_H_
+#ifndef MDT_LEVELDB_INCLUDE_SLICE_H_
+#define MDT_LEVELDB_INCLUDE_SLICE_H_
 
 #include <assert.h>
 #include <stddef.h>
