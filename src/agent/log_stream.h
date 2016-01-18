@@ -12,6 +12,7 @@
 #include "util/event.h"
 #include <sys/time.h>
 #include "util/counter.h"
+#include "util/thread_pool.h"
 
 namespace mdt {
 namespace agent {
@@ -71,11 +72,11 @@ class LogStream {
 public:
     LogStream(std::string module_name, LogOptions log_options,
               RpcClient* rpc_client, pthread_spinlock_t* server_addr_lock,
-              std::string* server_addr);
+              AgentInfo* info);
     ~LogStream();
 
     int AddWriteEvent(std::string filename);
-    int DeleteWatchEvent(std::string filename);
+    int DeleteWatchEvent(std::string filename, bool need_wakeup);
     void Run();
 
 private:
@@ -90,6 +91,7 @@ private:
                            bool failed, int error,
                            mdt::SearchEngine::SearchEngineService_Stub* service,
                            DBKey* key);
+    void HandleDelayFailTask(DBKey* key);
 
 private:
     std::string module_name_;
@@ -98,7 +100,8 @@ private:
     // rpc data send
     RpcClient* rpc_client_;
     pthread_spinlock_t* server_addr_lock_;
-    std::string* server_addr_;
+    AgentInfo* info_;
+    //std::string* server_addr_;
 
     std::string db_name_;
     std::string table_name_;
@@ -109,6 +112,7 @@ private:
     std::string kv_delims_; // parse kv from item
     bool enable_index_filter_; // use index list filter log line, default value = false
     std::set<std::string> index_list_;
+    std::map<std::string, std::string> alias_index_map_;
     // kv parse method 2: fixed parse
     bool use_fixed_index_list_;
     std::map<std::string, int> fixed_index_list_;
@@ -131,6 +135,7 @@ private:
     std::set<std::string> write_event_;
     std::queue<DBKey*> key_queue_;
     std::queue<DBKey*> failed_key_queue_;
+    ThreadPool fail_delay_thread_;
 };
 
 }

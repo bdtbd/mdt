@@ -27,7 +27,7 @@ mdt::agent::EventMask event_masks[] = {
 };
 
 DEFINE_string(agent_service_port, "33331", "agent port");
-DEFINE_int32(file_stream_max_pending_request, 10000, "max pending write req");
+DEFINE_int32(file_stream_max_pending_request, 1000, "max pending write req");
 DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler server addr");
 DEFINE_string(db_dir, "../leveldb_dir/", "leveldb dir for cp");
 DEFINE_string(watch_log_dir, "../watch_log_dir/", "log dir");
@@ -53,4 +53,6 @@ DEFINE_string(alias_index_list, "", "alias index table name list");
 // split string by index number
 DEFINE_bool(use_fixed_index_list, true, "use fixed index list");
 DEFINE_string(fixed_index_list, "url:5,time:2", "use for fix index list match");
+
+DEFINE_int64(delay_retry_time, 1000000, "in second, time period after async push fail to retry");
 

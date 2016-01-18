@@ -8,20 +8,43 @@ message EchoResponse {
     required string message = 1;
 }
 
+message CollectorInfo {
+    optional int64 qps = 1;
+    optional int64 max_packet_size = 2;
+    optional int64 min_packet_size = 3;
+    optional int64 average_packet_size = 4;
+}
+
 message RegisterNodeRequest {
-    optional string server_addr = 1; // ip:port 
+    optional string server_addr = 1; // ip:port
+    optional CollectorInfo info = 2;
 }
 
 message RegisterNodeResponse {
     optional int32 error_code = 1;
 }
 
+message AgentInfo {
+    optional int64 qps_quota = 1;
+    optional int64 qps_use = 2;
+    optional int64 bandwidth_quota = 3;
+    optional int64 bandwidth_use = 4;
+    
+    optional int64 max_packet_size = 5;
+    optional int64 min_packet_size = 6;
+    optional int64 average_packet_size = 7;
+
+    optional int32 error_nr = 8;
+}
+
 message GetNodeListRequest {
-    optional string current_server_addr = 1; 
+    optional string agent_addr = 1; 
+    optional string current_server_addr = 2; 
+    optional AgentInfo info = 3;
 }
 
 message GetNodeListResponse {
-    repeated string server_list = 1;
+    //repeated string server_list = 1;
     optional string primary_server_addr = 2;
 }
 

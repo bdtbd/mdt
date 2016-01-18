@@ -2,6 +2,7 @@
 #include "collector/query_service.h"
 #include <boost/bind.hpp>
 #include <glog/logging.h>
+#include "proto/scheduler.pb.h"
 
 DECLARE_int32(se_num_threads);
 DECLARE_bool(mdt_flagfile_set);
@@ -45,6 +46,12 @@ void SearchEngineImpl::ReportMessage() {
         rpc_client_->GetMethodList(scheduler_addr, &service);
         mdt::LogSchedulerService::RegisterNodeRequest* req = new mdt::LogSchedulerService::RegisterNodeRequest();
         req->set_server_addr(local_addr);
+        mdt::LogSchedulerService::CollectorInfo* info = req->mutable_info();
+        info->set_qps(5000);
+        info->set_min_packet_size(500);
+        info->set_max_packet_size(500);
+        info->set_average_packet_size(500);
+
         mdt::LogSchedulerService::RegisterNodeResponse* resp = new mdt::LogSchedulerService::RegisterNodeResponse();
 
         boost::function<void (const mdt::LogSchedulerService::RegisterNodeRequest*,
@@ -245,7 +252,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
-    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name();
+    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name() << ", req " << req->DebugString();
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();

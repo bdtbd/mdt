@@ -69,7 +69,7 @@ public:
                      const Request*, Response*, Callback*),
                      const Request* request, Response* response,
                      boost::function<void (const Request*, Response*, bool, int)> callback,
-                     int32_t rpc_timeout = 10, int32_t retry_times = 3) {
+                     int32_t rpc_timeout = 600, int32_t retry_times = 3) {
         ::sofa::pbrpc::RpcController* ctrl = new ::sofa::pbrpc::RpcController();
         ctrl->SetTimeout(rpc_timeout * 1000L);
         ::google::protobuf::Closure* done =
