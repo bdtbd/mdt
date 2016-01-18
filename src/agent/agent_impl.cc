@@ -387,10 +387,23 @@ int AgentImpl::AddWatchPath(const std::string& dir) {
 /////       rpc method                /////
 ///////////////////////////////////////////
 void AgentImpl::Echo(::google::protobuf::RpcController* controller,
-         const mdt::LogAgentService::EchoRequest* request,
-         mdt::LogAgentService::EchoResponse* response,
-         ::google::protobuf::Closure* done) {
+                     const mdt::LogAgentService::EchoRequest* request,
+                     mdt::LogAgentService::EchoResponse* response,
+                     ::google::protobuf::Closure* done) {
     LOG(INFO) << "Echo: " << request->message();
+    done->Run();
+}
+
+void AgentImpl::RpcAddWatchPath(::google::protobuf::RpcController* controller,
+                                const mdt::LogAgentService::RpcAddWatchPathRequest* request,
+                                mdt::LogAgentService::RpcAddWatchPathResponse* response,
+                                ::google::protobuf::Closure* done) {
+    if (AddWatchPath(request->watch_path()) < 0) {
+        response->set_status(mdt::LogAgentService::kRpcError);
+        LOG(WARNING) << "add watch event in dir " << request->watch_path() << " failed";
+    } else {
+        response->set_status(mdt::LogAgentService::kRpcOk);
+    }
     done->Run();
 }
 

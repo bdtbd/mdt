@@ -8,6 +8,8 @@
 #include "proto/scheduler.pb.h"
 #include "util/thread_pool.h"
 #include "util/counter.h"
+#include "rpc/rpc_client.h"
+#include "proto/agent.pb.h"
 
 namespace mdt {
 namespace scheduler {
@@ -80,6 +82,11 @@ public:
                  mdt::LogSchedulerService::GetNodeListResponse* response,
                  ::google::protobuf::Closure* done);
 
+    void RpcAddAgentWatchPath(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcAddAgentWatchPathRequest* request,
+                 mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* response,
+                 ::google::protobuf::Closure* done);
+
 private:
     void DoRegisterNode(::google::protobuf::RpcController* controller,
                                        const mdt::LogSchedulerService::RegisterNodeRequest* request,
@@ -92,7 +99,14 @@ private:
                            ::google::protobuf::Closure* done);
     void SelectAndUpdateCollector(AgentInfo info, std::string* select_server_addr);
 
+    void DoRpcAddAgentWatchPath(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcAddAgentWatchPathRequest* request,
+                 mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* response,
+                 ::google::protobuf::Closure* done);
+
 private:
+    RpcClient* rpc_client_;
+
     ThreadPool agent_thread;
     pthread_spinlock_t agent_lock_;
     std::map<std::string, AgentInfo> agent_map_;

@@ -1,6 +1,11 @@
 import "sofa/pbrpc/rpc_option.proto";
 package mdt.LogSchedulerService;
 
+enum RpcResponseStatus {
+    kRpcOk = 1;
+    kRpcError = 2;
+}
+
 message EchoRequest {
     required string message = 1;
 }
@@ -48,11 +53,21 @@ message GetNodeListResponse {
     optional string primary_server_addr = 2;
 }
 
+message RpcAddAgentWatchPathRequest {
+    optional string watch_path = 1;
+    optional string agent_addr = 2;
+}
+
+message RpcAddAgentWatchPathResponse {
+    optional RpcResponseStatus status = 1;
+}
+
 // rpc service
 service LogSchedulerService {
     rpc Echo(EchoRequest) returns(EchoResponse);
     rpc RegisterNode(RegisterNodeRequest) returns(RegisterNodeResponse);
     rpc GetNodeList(GetNodeListRequest) returns(GetNodeListResponse);
+    rpc RpcAddAgentWatchPath(RpcAddAgentWatchPathRequest) returns(RpcAddAgentWatchPathResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;

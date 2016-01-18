@@ -1,6 +1,11 @@
 import "sofa/pbrpc/rpc_option.proto";
 package mdt.LogAgentService;
 
+enum RpcResponseStatus {
+    kRpcOk = 1;
+    kRpcError = 2;
+}
+
 message EchoRequest {
     required string message = 1;
 }
@@ -8,9 +13,18 @@ message EchoResponse {
     required string message = 1;
 }
 
+message RpcAddWatchPathRequest {
+    optional string watch_path = 1; 
+}
+
+message RpcAddWatchPathResponse {
+    optional RpcResponseStatus status = 1; 
+}
+
 // rpc service
 service LogAgentService {
     rpc Echo(EchoRequest) returns(EchoResponse);
+    rpc RpcAddWatchPath(RpcAddWatchPathRequest) returns(RpcAddWatchPathResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;
