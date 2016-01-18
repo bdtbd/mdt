@@ -82,7 +82,8 @@ private:
     volatile bool stop_scheduler_thread_;
     AutoResetEvent server_addr_event_;
     pthread_spinlock_t server_lock_;
-    std::string server_addr_;
+    AgentInfo info_;
+    //std::string server_addr_;
 };
 
 }

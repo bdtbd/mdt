@@ -54,3 +54,5 @@ DEFINE_string(alias_index_list, "", "alias index table name list");
 DEFINE_bool(use_fixed_index_list, true, "use fixed index list");
 DEFINE_string(fixed_index_list, "url:5,time:2", "use for fix index list match");
 
+DEFINE_int64(delay_retry_time, 1000000, "in second, time period after async push fail to retry");
+

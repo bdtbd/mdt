@@ -13,11 +13,13 @@
 #include "agent/log_stream.h"
 #include <errno.h>
 #include <sys/select.h>
+#include "proto/scheduler.pb.h"
 
 DECLARE_string(scheduler_addr);
 DECLARE_string(db_dir);
 DECLARE_string(watch_log_dir);
 DECLARE_string(module_name_list);
+DECLARE_string(agent_service_port);
 
 extern mdt::agent::EventMask event_masks[21];
 
@@ -34,7 +36,18 @@ AgentImpl::AgentImpl() {
     pthread_spin_init(&lock_, PTHREAD_PROCESS_SHARED);
     pthread_spin_init(&server_lock_, PTHREAD_PROCESS_SHARED);
     rpc_client_ = new RpcClient();
-    server_addr_ = "nil";
+
+    info_.qps_use= 0;
+    info_.qps_quota= 0;
+    info_.bandwidth_use= 0;
+    info_.bandwidth_quota= 0;
+    info_.max_packet_size= 0;
+    info_.min_packet_size= 0;
+    info_.average_packet_size= 0;
+    info_.error_nr = 0;
+    info_.collector_addr = "nil";
+    //server_addr_ = "nil";
+
     stop_scheduler_thread_ = false;
     pthread_create(&scheduler_tid_, NULL, SchedulerThread, this);
 }
@@ -49,8 +62,18 @@ void AgentImpl::GetServerAddrCallback(const mdt::LogSchedulerService::GetNodeLis
                                       mdt::LogSchedulerService::LogSchedulerService_Stub* service) {
     if (!failed) {
         pthread_spin_lock(&server_lock_);
-        server_addr_ = resp->primary_server_addr();
-        VLOG(50) << "agent, collector addr " << server_addr_;
+        info_.collector_addr = resp->primary_server_addr();
+        VLOG(50) << "agent, collector addr " << info_.collector_addr;
+
+        info_.qps_use= 0;
+        info_.qps_quota= 0;
+        info_.bandwidth_use= 0;
+        info_.bandwidth_quota= 0;
+        info_.max_packet_size= 0;
+        info_.min_packet_size= 0;
+        info_.average_packet_size= 0;
+        info_.error_nr = 0;
+
         pthread_spin_unlock(&server_lock_);
     }
     delete req;
@@ -60,18 +83,38 @@ void AgentImpl::GetServerAddrCallback(const mdt::LogSchedulerService::GetNodeLis
 }
 
 void AgentImpl::GetServerAddr() {
+    char hostname[255];
+    if (0 != gethostname(hostname, 256)) {
+        LOG(FATAL) << "fail to report message";
+    }
+    std::string hostname_str = hostname;
+
     while (1) {
         if (stop_scheduler_thread_) {
             return;
         }
+        std::string agent_addr = hostname_str + ":" + FLAGS_agent_service_port;
         std::string scheduler_addr = FLAGS_scheduler_addr;
 
         mdt::LogSchedulerService::LogSchedulerService_Stub* service;
         rpc_client_->GetMethodList(scheduler_addr, &service);
         mdt::LogSchedulerService::GetNodeListRequest* req = new mdt::LogSchedulerService::GetNodeListRequest();
         mdt::LogSchedulerService::GetNodeListResponse* resp = new mdt::LogSchedulerService::GetNodeListResponse();
+        // set up agent info request
         pthread_spin_lock(&server_lock_);
-        req->set_current_server_addr(server_addr_);
+        req->set_agent_addr(agent_addr);
+        req->set_current_server_addr(info_.collector_addr);
+
+        mdt::LogSchedulerService::AgentInfo* info = req->mutable_info();
+        info->set_qps_quota(info_.qps_quota);
+        info->set_qps_use(info_.qps_use);
+        info->set_bandwidth_use(info_.bandwidth_use);
+        info->set_bandwidth_quota(info_.bandwidth_quota);
+        info->set_max_packet_size(info_.max_packet_size);
+        info->set_min_packet_size(info_.min_packet_size);
+        info->set_average_packet_size(info_.average_packet_size);
+        info->set_error_nr(info_.error_nr);
+
         pthread_spin_unlock(&server_lock_);
 
         boost::function<void (const mdt::LogSchedulerService::GetNodeListRequest*,
@@ -239,7 +282,7 @@ int AgentImpl::AddWriteEvent(const std::string& logdir, const std::string& filen
     if (it != log_streams_.end()) {
         stream = log_streams_[module_name];
     } else {
-        stream = new LogStream(module_name, log_options_, rpc_client_, &server_lock_, &server_addr_);
+        stream = new LogStream(module_name, log_options_, rpc_client_, &server_lock_, &info_);
         log_streams_[module_name] = stream;
     }
     pthread_spin_unlock(&lock_);
@@ -263,7 +306,7 @@ int AgentImpl::DeleteWatchEvent(const std::string& logdir, const std::string& fi
     if (it != log_streams_.end()) {
         stream = log_streams_[module_name];
     } else {
-        stream = new LogStream(module_name, log_options_, rpc_client_, &server_lock_, &server_addr_);
+        stream = new LogStream(module_name, log_options_, rpc_client_, &server_lock_, &info_);
         log_streams_[module_name] = stream;
     }
     pthread_spin_unlock(&lock_);

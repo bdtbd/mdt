@@ -6,9 +6,57 @@
 #include <map>
 #include <sofa/pbrpc/pbrpc.h>
 #include "proto/scheduler.pb.h"
+#include "util/thread_pool.h"
+#include "util/counter.h"
 
 namespace mdt {
 namespace scheduler {
+
+enum AgentState {
+    AGENT_ACTIVE = 1,
+    AGENT_INACTIVE = 1,
+};
+
+struct AgentInfo {
+    //std::string agent_addr;
+    // report by agent
+    int64_t qps_use;
+    int64_t qps_quota;
+    int64_t bandwidth_use;
+    int64_t bandwidth_quota;
+
+    int64_t max_packet_size;
+    int64_t min_packet_size;
+    int64_t average_packet_size;
+
+    int64_t error_nr;
+
+    // manage by scheduler
+    int64_t ctime;
+    std::string collector_addr;
+    AgentState state;
+    Counter counter;
+};
+
+enum CollectorState {
+    COLLECTOR_ACTIVE = 1,
+    COLLECTOR_INACTIVE = 1,
+};
+
+struct CollectorInfo {
+    //std::string collector_addr;
+    // info report by collector
+    int64_t qps;
+    int64_t max_packet_size;
+    int64_t min_packet_size;
+    int64_t average_packet_size;
+
+    // state info manage by scheduler
+    int64_t nr_agents;
+    int64_t ctime;
+    int64_t error_nr;
+    CollectorState state; // 1 = active, 2 = inactive
+};
 
 class SchedulerImpl : public mdt::LogSchedulerService::LogSchedulerService {
 public:
@@ -25,6 +73,7 @@ public:
                  const mdt::LogSchedulerService::RegisterNodeRequest* request,
                  mdt::LogSchedulerService::RegisterNodeResponse* response,
                  ::google::protobuf::Closure* done);
+    void BgHandleCollectorInfo();
 
     void GetNodeList(::google::protobuf::RpcController* controller,
                  const mdt::LogSchedulerService::GetNodeListRequest* request,
@@ -32,9 +81,29 @@ public:
                  ::google::protobuf::Closure* done);
 
 private:
-    pthread_spinlock_t lock_;
-    uint64_t seq_no_;
-    std::map<std::string, uint64_t> server_list_; // log dir notify
+    void DoRegisterNode(::google::protobuf::RpcController* controller,
+                                       const mdt::LogSchedulerService::RegisterNodeRequest* request,
+                                       mdt::LogSchedulerService::RegisterNodeResponse* response,
+                                       ::google::protobuf::Closure* done);
+
+    void DoUpdateAgentInfo(::google::protobuf::RpcController* controller,
+                           const mdt::LogSchedulerService::GetNodeListRequest* request,
+                           mdt::LogSchedulerService::GetNodeListResponse* response,
+                           ::google::protobuf::Closure* done);
+    void SelectAndUpdateCollector(AgentInfo info, std::string* select_server_addr);
+
+private:
+    ThreadPool agent_thread;
+    pthread_spinlock_t agent_lock_;
+    std::map<std::string, AgentInfo> agent_map_;
+    ThreadPool agent_thread_;
+
+    ThreadPool collector_thread_;
+    pthread_spinlock_t collector_lock_;
+    std::map<std::string, CollectorInfo> collector_map_;
+
+    pthread_t collector_tid_;
+    volatile bool collector_thread_stop_;
 };
 
 }

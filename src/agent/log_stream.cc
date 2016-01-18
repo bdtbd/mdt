@@ -31,6 +31,8 @@ DECLARE_string(alias_index_list);
 DECLARE_bool(use_fixed_index_list);
 DECLARE_string(fixed_index_list);
 
+DECLARE_int64(delay_retry_time);
+
 namespace mdt {
 namespace agent {
 
@@ -42,13 +44,15 @@ void* LogStreamWrapper(void* arg) {
 
 LogStream::LogStream(std::string module_name, LogOptions log_options,
                      RpcClient* rpc_client, pthread_spinlock_t* server_addr_lock,
-                     std::string* server_addr)
+                     AgentInfo* info)
     : module_name_(module_name),
     log_options_(log_options),
     rpc_client_(rpc_client),
     server_addr_lock_(server_addr_lock),
-    server_addr_(server_addr),
-    stop_(false) {
+    info_(info),
+    //server_addr_(server_addr),
+    stop_(false),
+    fail_delay_thread_(1) {
     pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
     db_name_ = FLAGS_db_name;
     table_name_ = FLAGS_table_name;
@@ -539,7 +543,7 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
 int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_vec, DBKey* key) {
     mdt::SearchEngine::SearchEngineService_Stub* service;
     pthread_spin_lock(server_addr_lock_);
-    std::string server_addr = *server_addr_;
+    std::string server_addr = info_->collector_addr;
     pthread_spin_unlock(server_addr_lock_);
     VLOG(30) << "async send data to " << server_addr << ", nr req " << req_vec.size() << ", offset " << key->offset;
 
@@ -563,6 +567,13 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     return 0;
 }
 
+void LogStream::HandleDelayFailTask(DBKey* key) {
+    pthread_spin_lock(&lock_);
+    failed_key_queue_.push(key);
+    pthread_spin_unlock(&lock_);
+    thread_event_.Set();
+}
+
 void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
                                   mdt::SearchEngine::RpcStoreResponse* resp,
                                   bool failed, int error,
@@ -572,10 +583,13 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
     if (failed) {
         LOG(WARNING) << "async write error " << error << ", key " << (uint64_t)key << ", file " << key->filename << " add to failed event queue"
             << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get() << ", offset " << key->offset;
-        pthread_spin_lock(&lock_);
-        failed_key_queue_.push(key);
-        pthread_spin_unlock(&lock_);
-        thread_event_.Set();
+        pthread_spin_lock(server_addr_lock_);
+        info_->error_nr++;
+        pthread_spin_unlock(server_addr_lock_);
+
+        ThreadPool::Task task =
+            boost::bind(&LogStream::HandleDelayFailTask, this, key);
+        fail_delay_thread_.DelayTask(FLAGS_delay_retry_time, task);
     } else {
         VLOG(30) << "file " << key->filename << " add to success event queue, req "
             << (uint64_t)req << ", resp " << (uint64_t)resp << ", key " << (uint64_t)key << ", key.ref " << key->ref.Get() << ", offset " << key->offset;

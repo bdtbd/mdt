@@ -90,7 +90,7 @@ C_SAMPLE = c_sample
 .PHONY: all clean cleanall test
 all: $(PROGRAM) $(LIBRARY) $(FTRACELIBRARY) $(SAMPLE) $(C_SAMPLE) $(MDTTOOL) $(WRITE_TEST) $(DUMPFILE) $(MULWRITE_TEST) $(SCAN_TEST) $(SYNC_WRITE_TEST) $(UPDATESCHEMA) $(FTRACE_TEST) 
 	mkdir -p build/include build/lib build/bin
-	#cp $(PROGRAM) build/bin
+	cp $(PROGRAM) build/bin
 	cp $(LIBRARY) build/lib
 	cp src/sdk/sdk.h build/include/mdt.h
 	cp src/sdk/c.h build/include/mdt_c.h
