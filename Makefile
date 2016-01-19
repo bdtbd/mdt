@@ -20,6 +20,7 @@ PROTO_OUT_CC := $(PROTO_FILES:.proto=.pb.cc)
 PROTO_OUT_H := $(PROTO_FILES:.proto=.pb.h)
 
 ############################################################
+OTHER_SRC := src/trace_flags.cc
 SDK_SRC := $(wildcard src/sdk/*.cc)
 COMMON_SRC := $(wildcard src/common/*.cc)
 UTIL_SRC := $(wildcard src/util/*.cc)
@@ -42,6 +43,7 @@ COLLECTOR_SRC := $(wildcard src/collector/*.cc)
 SCHEDULER_SRC := $(wildcard src/scheduler/*.cc)
 
 ############################################################
+OTHER_OBJ := $(OTHER_SRC:.cc=.o)
 SDK_OBJ := $(SDK_SRC:.cc=.o)
 COMMON_OBJ := $(COMMON_SRC:.cc=.o)
 UTIL_OBJ := $(UTIL_SRC:.cc=.o)
@@ -115,8 +117,8 @@ src/leveldb/libleveldb.a: FORCE
 sample: $(SAMPLE_OBJ) $(LIBRARY)
 	$(CXX) -o $@ $(SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
 
-mdt-tool: $(MDTTOOL_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(MDTTOOL_OBJ) $(LIBRARY) $(LDFLAGS) -lreadline -lhistory -lncurses
+mdt-tool: $(MDTTOOL_OBJ) $(LIBRARY) $(OTHER_OBJ)
+	$(CXX) -o $@ $(MDTTOOL_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS) -lreadline -lhistory -lncurses
 
 test_update_schema: $(UPDATESCHEMA_OBJ) $(LIBRARY)
 	$(CXX) -o $@ $(UPDATESCHEMA_OBJ) $(LIBRARY) $(LDFLAGS) 
@@ -148,14 +150,14 @@ libftrace.a: $(FTRACE_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 TEST_log: $(FTRACE_TEST_OBJ) $(FTRACELIBRARY)
 	$(CXX) -o $@ $(FTRACE_TEST_OBJ) $(FTRACELIBRARY) $(LDFLAGS)
 
-agent_main: $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB)
-	$(CXX) -o agent_main $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LDFLAGS) $(LEVELDB_LIB)
+agent_main: $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB) $(OTHER_OBJ) 
+	$(CXX) -o agent_main $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LDFLAGS) $(LEVELDB_LIB) $(OTHER_OBJ) 
 
-collector_main: $(COLLECTOR_OBJ) $(LIBRARY) 
-	$(CXX) -o collector_main $(COLLECTOR_OBJ) $(LIBRARY) $(LDFLAGS)
+collector_main: $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) 
+	$(CXX) -o collector_main $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS)
 
-scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
-	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LDFLAGS)
+scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) 
+	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LDFLAGS)
 
 $(CXX_OBJ): %.o: %.cc $(PROTO_OUT_H)
 	$(CXX) $(CXXFLAGS) -c $< -o $@

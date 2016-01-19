@@ -20,15 +20,18 @@
 #include "sdk/sdk.h"
 #include "sdk/db.h"
 #include "sdk/table.h"
-
 #include "util/env.h"
 #include "util/coding.h"
-
+#include "rpc/rpc_client.h"
 #include "proto/kv.pb.h"
+#include "proto/scheduler.pb.h"
 
 DECLARE_string(flagfile);
 DEFINE_string(tera_flagfile, "../conf/tera.flag", "tera flagfile");
 DEFINE_int64(max_timestamp_tables, 10, "max number of ts tables");
+
+DECLARE_string(scheduler_addr);
+DECLARE_string(agent_service_port);
 
 char* StripWhite(char* line) {
     char *s, *t;
@@ -862,6 +865,39 @@ int DupNfsSterr() {
     return res;
 }
 
+// cmd::AddWatchPath agent_addr[hostname:port or self] log_dir
+int AddWatchPathOp(std::vector<std::string>& cmd_vec) {
+    // parse param
+    std::string agent_addr = cmd_vec[1];
+    const std::string& log_dir = cmd_vec[2];
+    //const std::string& module_name = cmd_vec[3];
+
+    if (agent_addr == "self") {
+        char hostname[255];
+        if (0 != gethostname(hostname, 256)) {
+            LOG(FATAL) << "fail to report message";
+        }
+        std::string hostname_str = hostname;
+        agent_addr = hostname_str + ":" + FLAGS_agent_service_port;
+    }
+    std::string scheduler_addr = FLAGS_scheduler_addr;
+
+    mdt::RpcClient* rpc_client = new mdt::RpcClient;
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client->GetMethodList(scheduler_addr, &service);
+    mdt::LogSchedulerService::RpcAddAgentWatchPathRequest* req = new mdt::LogSchedulerService::RpcAddAgentWatchPathRequest();
+    mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* resp = new mdt::LogSchedulerService::RpcAddAgentWatchPathResponse();
+    req->set_agent_addr(agent_addr);
+    req->set_watch_path(log_dir);
+
+    rpc_client->SyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcAddAgentWatchPath, req, resp);
+
+    delete req;
+    delete resp;
+    delete service;
+    return 0;
+}
+
 int main(int ac, char* av[]) {
     /*
     if (DupNfsSterr() < 0) {
@@ -869,7 +905,7 @@ int main(int ac, char* av[]) {
     }
     */
     // Parse flagfile
-    ParseFlagFile("../conf/mdt.flag");
+    ParseFlagFile("../conf/trace.flag");
     while (1) {
         char *line = readline("mdt:");
         char *cmd = StripWhite(line);
@@ -891,6 +927,13 @@ int main(int ac, char* av[]) {
             HelpManue();
             add_history(line);
             free(line);
+            continue;
+        } else if (cmd_vec[0].compare("AddWatchPath") == 0 && cmd_vec.size() >= 3) {
+            // cmd::AddWatchPath agent_addr[hostname:port or self] log_dir
+            std::cout << "add watch path: agent_addr " << cmd_vec[1]
+                << ", log dir " << cmd_vec[2] << "\n";
+            AddWatchPathOp(cmd_vec);
+            add_history(line);
             continue;
         } else if (cmd_vec[0].compare("CreateTable") == 0 && cmd_vec.size() >= 4) {
             // cmd: CreateTable dbname tablename primary_key_type [index_name index_type]...
@@ -953,7 +996,7 @@ int main(int ac, char* av[]) {
             add_history(line);
             free(line);
             continue;
-    } else if (cmd_vec[0].compare("dumpcache") == 0 && cmd_vec.size() == 3) {
+        } else if (cmd_vec[0].compare("dumpcache") == 0 && cmd_vec.size() == 3) {
             DumpCacheOp(cmd_vec);
             add_history(line);
             free(line);
