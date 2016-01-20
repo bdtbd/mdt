@@ -40,6 +40,7 @@ public:
         filename_ = filename;
     }
     void GetRedoList(std::map<uint64_t, uint64_t>* redo_list);
+    void ReSetFileStreamCheckPoint();
     int RecoveryCheckPoint();
     void GetCheckpoint(DBKey* key, uint64_t* offset, uint64_t* size);
     ssize_t ParseLine(char* buf, ssize_t size, std::vector<std::string>* line_vec);

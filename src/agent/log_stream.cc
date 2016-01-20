@@ -214,7 +214,7 @@ void LogStream::Run() {
                         if (size) {
                             VLOG(30) << "file " << key->filename << ", async push error, re-send";
                             std::vector<std::string> line_vec;
-                            DBKey* rkey;
+                            DBKey* rkey = NULL;
                             file_stream->CheckPointRead(&line_vec, &rkey, offset, size);
 
                             std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
@@ -538,14 +538,22 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
     std::map<uint64_t, uint64_t> redo_list;
     file_stream->GetRedoList(&redo_list);
     std::map<uint64_t, uint64_t>::iterator redo_it = redo_list.begin();
+    bool file_rename = false;
     for (; redo_it != redo_list.end(); ++redo_it) {
-        DBKey* key;
+        DBKey* key = NULL;
         std::vector<std::string> line_vec;
         std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
 
-        file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second);
-        ParseMdtRequest(line_vec, &req_vec);
-        AsyncPush(req_vec, key);
+        // agent restart, check log file rename
+        if (file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second) >= 0) {
+            ParseMdtRequest(line_vec, &req_vec);
+            AsyncPush(req_vec, key);
+        } else {
+            file_rename = true;
+        }
+    }
+    if (file_rename) {
+        file_stream->ReSetFileStreamCheckPoint();
     }
 }
 
@@ -814,6 +822,38 @@ int FileStream::RecoveryCheckPoint() {
     return 0;
 }
 
+void FileStream::ReSetFileStreamCheckPoint() {
+    leveldb::Iterator* db_it;
+    std::string startkey, endkey;
+
+    VLOG(30) << "log file rename after agent down, file " << filename_;
+    pthread_spin_lock(&lock_);
+    mem_checkpoint_list_.clear();
+    redo_list_.clear();
+    current_offset_ = 0;
+    pthread_spin_unlock(&lock_);
+
+    // delete cp in leveldb
+    db_it = log_options_.db->NewIterator(leveldb::ReadOptions());
+    MakeKeyValue(module_name_, filename_, 0, &startkey, 0, NULL);
+    MakeKeyValue(module_name_, filename_, 0xffffffffffffffff, &endkey, 0, NULL);
+    for (db_it->Seek(startkey);
+            db_it->Valid() && db_it->key().ToString() < endkey;
+            db_it->Next()) {
+        leveldb::Slice key = db_it->key();
+        leveldb::Slice value = db_it->value();
+        uint64_t offset, size;
+        ParseKeyValue(key, value, &offset, &size);
+        leveldb::Status s = log_options_.db->Delete(leveldb::WriteOptions(), key);
+        if (!s.ok()) {
+            LOG(WARNING) << "delete db checkpoint error, " << filename_ << ", offset " << offset
+                << ", size " << size;
+        }
+    }
+    delete db_it;
+    return;
+}
+
 void FileStream::GetCheckpoint(DBKey* key, uint64_t* offset, uint64_t* size) {
     *size = 0;
     pthread_spin_lock(&lock_);
@@ -960,6 +1000,7 @@ int FileStream::CheckPointRead(std::vector<std::string>* line_vec, DBKey** key,
         } else {
             *key = new DBKey;
             (*key)->filename = filename_;
+            (*key)->ino = ino_;
             (*key)->offset = offset;
             (*key)->ref.Set(0);
         }
