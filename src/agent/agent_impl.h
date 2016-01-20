@@ -55,9 +55,16 @@ public:
                          mdt::LogAgentService::RpcAddWatchPathResponse* response,
                          ::google::protobuf::Closure* done);
 
+    void RpcAddWatchModuleStream(::google::protobuf::RpcController* controller,
+                                 const mdt::LogAgentService::RpcAddWatchModuleStreamRequest* request,
+                                 mdt::LogAgentService::RpcAddWatchModuleStreamResponse* response,
+                                 ::google::protobuf::Closure* done);
+
 private:
     void ParseLogDir(std::vector<std::string>& log_vec);
     void ParseModuleName(const std::string& filename, std::string* module_name);
+    int FilterFileByMoudle(const std::string& filename, std::string* expect_module_name);
+    int AddWatchModuleStream(const std::string& module_name, const std::string& log_name);
 
     // watch event
     void DestroyWatchPath(FileSystemInotify* fs_inotify);
@@ -77,6 +84,7 @@ private:
     pthread_spinlock_t lock_;
     std::map<std::string, FileSystemInotify*> inotify_; // log dir notify
     std::map<std::string, LogStream*> log_streams_; // each module has its log stream
+    std::map<std::string, std::string> module_file_set_; // use for filter useless log file
 
     // all modules use the same db
     LogOptions log_options_;

@@ -280,6 +280,40 @@ void SchedulerImpl::RpcAddAgentWatchPath(::google::protobuf::RpcController* cont
     return;
 }
 
+void SchedulerImpl::DoRpcAddWatchModuleStream(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest* request,
+                 mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* response,
+                 ::google::protobuf::Closure* done) {
+    mdt::LogAgentService::LogAgentService_Stub* service;
+    rpc_client_->GetMethodList(request->agent_addr(), &service);
+    mdt::LogAgentService::RpcAddWatchModuleStreamRequest* req = new mdt::LogAgentService::RpcAddWatchModuleStreamRequest();
+    mdt::LogAgentService::RpcAddWatchModuleStreamResponse* resp = new mdt::LogAgentService::RpcAddWatchModuleStreamResponse();
+    req->set_production_name(request->production_name());
+    req->set_log_name(request->log_name());
+
+    rpc_client_->SyncCall(service, &mdt::LogAgentService::LogAgentService_Stub::RpcAddWatchModuleStream, req, resp);
+    if (resp->status() == mdt::LogAgentService::kRpcOk) {
+        response->set_status(mdt::LogSchedulerService::kRpcOk);
+    } else {
+        response->set_status(mdt::LogSchedulerService::kRpcError);
+    }
+
+    delete req;
+    delete resp;
+    delete service;
+
+    done->Run();
+}
+
+void SchedulerImpl::RpcAddWatchModuleStream(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest* request,
+                 mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* response,
+                 ::google::protobuf::Closure* done) {
+    ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcAddWatchModuleStream, this, controller, request, response, done);
+    agent_thread_.AddTask(task);
+    return;
+}
+
 }
 }
 
