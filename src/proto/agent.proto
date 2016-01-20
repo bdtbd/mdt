@@ -21,6 +21,15 @@ message RpcAddWatchPathResponse {
     optional RpcResponseStatus status = 1; 
 }
 
+message RpcAddWatchModuleStreamRequest {
+    optional string production_name = 1;
+    optional string match_log_name = 2;
+}
+
+message RpcAddWatchModuleStreamResponse {
+    optional RpcResponseStatus status = 1; 
+}
+
 // rpc service
 service LogAgentService {
     rpc Echo(EchoRequest) returns(EchoResponse);
