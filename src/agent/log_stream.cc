@@ -215,11 +215,13 @@ void LogStream::Run() {
                             VLOG(30) << "file " << key->filename << ", async push error, re-send";
                             std::vector<std::string> line_vec;
                             DBKey* rkey = NULL;
-                            file_stream->CheckPointRead(&line_vec, &rkey, offset, size);
-
-                            std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
-                            ParseMdtRequest(line_vec, &req_vec);
-                            AsyncPush(req_vec, rkey);
+                            if (file_stream->CheckPointRead(&line_vec, &rkey, offset, size) >= 0) {
+                                std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
+                                ParseMdtRequest(line_vec, &req_vec);
+                                AsyncPush(req_vec, rkey);
+                            } else {
+                                file_stream->ReSetFileStreamCheckPoint();
+                            }
                         }
                     }
                 }
