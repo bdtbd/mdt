@@ -2,6 +2,9 @@
 #include "agent/options.h"
 #include <gflags/gflags.h>
 
+///////////////////////////////////////////
+// agent flags
+///////////////////////////////////////////
 mdt::agent::EventMask event_masks[] = {
     {IN_ACCESS        , "IN_ACCESS"}        ,
     {IN_ATTRIB        , "IN_ATTRIB"}        ,
@@ -28,7 +31,7 @@ mdt::agent::EventMask event_masks[] = {
 
 DEFINE_string(agent_service_port, "33331", "agent port");
 DEFINE_int32(file_stream_max_pending_request, 1000, "max pending write req");
-DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler server addr");
+//DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler server addr");
 DEFINE_string(db_dir, "../leveldb_dir/", "leveldb dir for cp");
 DEFINE_string(watch_log_dir, "../watch_log_dir/", "log dir");
 DEFINE_string(module_name_list, "tabletnode.1.", "identify module name");
@@ -55,4 +58,26 @@ DEFINE_bool(use_fixed_index_list, true, "use fixed index list");
 DEFINE_string(fixed_index_list, "url:5,time:2", "use for fix index list match");
 
 DEFINE_int64(delay_retry_time, 1000000, "in second, time period after async push fail to retry");
+
+///////////////////////////////////////////
+// scheduler flags
+///////////////////////////////////////////
+DEFINE_string(scheduler_service_port, "11111", "scheduler service port");
+DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler service addr");
+DEFINE_int32(agent_timeout, 60, "agent info will be delete after x second");
+DEFINE_int32(agent_qps_quota, 10000, "max qps agent can be use per second");
+DEFINE_int32(agent_bandwidth_quota, 20000000, "max bandwidth agent can be use per second");
+
+DEFINE_int32(collector_timeout, 60000000, "collector info will be delete after x us");
+DEFINE_int32(collector_max_error, 10, "max error can occur in collector");
+
+///////////////////////////////////////////
+// scheduler flags
+///////////////////////////////////////////
+DEFINE_int32(se_num_threads, 10, "num of thread handle search req");
+DEFINE_string(se_service_port, "22221", "listen port for query service");
+//DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler service addr");
+DEFINE_bool(mdt_flagfile_set, false, "force user set mdt.flag");
+DEFINE_string(mdt_flagfile, "../conf/trace.flag", "search service flagfile");
+
 

@@ -5,6 +5,7 @@
 #include "util/timer.h"
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
+#include "proto/agent.pb.h"
 
 DECLARE_string(scheduler_service_port);
 DECLARE_int32(agent_timeout);
@@ -25,6 +26,8 @@ void* BgHandleCollectorInfoWrapper(void* arg) {
 SchedulerImpl::SchedulerImpl()
     : agent_thread_(40),
     collector_thread_(4) {
+
+    rpc_client_ = new RpcClient();
 
     //pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&agent_lock_, PTHREAD_PROCESS_PRIVATE);
@@ -236,10 +239,43 @@ void SchedulerImpl::SelectAndUpdateCollector(AgentInfo info, std::string* select
 }
 
 void SchedulerImpl::GetNodeList(::google::protobuf::RpcController* controller,
-                                const mdt::LogSchedulerService::GetNodeListRequest* request,
-                                mdt::LogSchedulerService::GetNodeListResponse* response,
-                                ::google::protobuf::Closure* done) {
+                 const mdt::LogSchedulerService::GetNodeListRequest* request,
+                 mdt::LogSchedulerService::GetNodeListResponse* response,
+                 ::google::protobuf::Closure* done) {
     ThreadPool::Task task = boost::bind(&SchedulerImpl::DoUpdateAgentInfo, this, controller, request, response, done);
+    agent_thread_.AddTask(task);
+    return;
+}
+
+void SchedulerImpl::DoRpcAddAgentWatchPath(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcAddAgentWatchPathRequest* request,
+                 mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* response,
+                 ::google::protobuf::Closure* done) {
+    mdt::LogAgentService::LogAgentService_Stub* service;
+    rpc_client_->GetMethodList(request->agent_addr(), &service);
+    mdt::LogAgentService::RpcAddWatchPathRequest* req = new mdt::LogAgentService::RpcAddWatchPathRequest();
+    mdt::LogAgentService::RpcAddWatchPathResponse* resp = new mdt::LogAgentService::RpcAddWatchPathResponse();
+    req->set_watch_path(request->watch_path());
+
+    rpc_client_->SyncCall(service, &mdt::LogAgentService::LogAgentService_Stub::RpcAddWatchPath, req, resp);
+    if (resp->status() == mdt::LogAgentService::kRpcOk) {
+        response->set_status(mdt::LogSchedulerService::kRpcOk);
+    } else {
+        response->set_status(mdt::LogSchedulerService::kRpcError);
+    }
+
+    delete req;
+    delete resp;
+    delete service;
+
+    done->Run();
+}
+
+void SchedulerImpl::RpcAddAgentWatchPath(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcAddAgentWatchPathRequest* request,
+                 mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* response,
+                 ::google::protobuf::Closure* done) {
+    ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcAddAgentWatchPath, this, controller, request, response, done);
     agent_thread_.AddTask(task);
     return;
 }

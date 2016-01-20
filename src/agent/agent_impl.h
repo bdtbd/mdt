@@ -50,6 +50,11 @@ public:
          mdt::LogAgentService::EchoResponse* response,
          ::google::protobuf::Closure* done);
 
+    void RpcAddWatchPath(::google::protobuf::RpcController* controller,
+                         const mdt::LogAgentService::RpcAddWatchPathRequest* request,
+                         mdt::LogAgentService::RpcAddWatchPathResponse* response,
+                         ::google::protobuf::Closure* done);
+
 private:
     void ParseLogDir(std::vector<std::string>& log_vec);
     void ParseModuleName(const std::string& filename, std::string* module_name);
