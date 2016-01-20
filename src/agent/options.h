@@ -37,6 +37,10 @@ struct AgentInfo {
     std::string collector_addr;
 };
 
+struct FileStruct {
+    std::string filename;
+};
+
 }
 }
 #endif

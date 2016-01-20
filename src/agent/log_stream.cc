@@ -3,6 +3,7 @@
 #include <gflags/gflags.h>
 #include <pthread.h>
 #include "agent/log_stream.h"
+#include "agent/options.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "util/coding.h"
@@ -139,8 +140,8 @@ LogStream::~LogStream() {
 void LogStream::Run() {
     while (1) {
         bool has_event = false;
-        std::set<std::string> local_write_event;
-        std::set<std::string> local_delete_event;
+        std::map<uint64_t, std::string> local_write_event;
+        std::map<uint64_t, std::string> local_delete_event;
         std::queue<DBKey*> local_key_queue;
         std::queue<DBKey*> local_failed_key_queue;
 
@@ -176,7 +177,7 @@ void LogStream::Run() {
         // handle push callback event
         while (!local_key_queue.empty()) {
             DBKey* key = local_key_queue.front();
-            std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(key->filename);
+            std::map<uint64_t, FileStream*>::iterator file_it = file_streams_.find(key->ino);
             FileStream* file_stream = NULL;
             if (file_it != file_streams_.end()) {
                 file_stream = file_it->second;
@@ -196,7 +197,7 @@ void LogStream::Run() {
         // handle fail push callback
         while (!local_failed_key_queue.empty()) {
             DBKey* key = local_failed_key_queue.front();
-            std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(key->filename);
+            std::map<uint64_t, FileStream*>::iterator file_it = file_streams_.find(key->ino);
             FileStream* file_stream = NULL;
             if (file_it != file_streams_.end()) {
                 file_stream = file_it->second;
@@ -228,21 +229,28 @@ void LogStream::Run() {
         }
 
         // handle write event
-        std::set<std::string>::iterator write_it = local_write_event.begin();
+        std::map<uint64_t, std::string>::iterator write_it = local_write_event.begin();
         for(; write_it != local_write_event.end(); ++write_it) {
-            const std::string& filename = *write_it;
-            std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(filename);
+            uint64_t ino = write_it->first;
+            const std::string& filename = write_it->second;
+            std::map<uint64_t, FileStream*>::iterator file_it = file_streams_.find(ino);
             FileStream* file_stream;
             if (file_it != file_streams_.end()) {
                 file_stream = file_it->second;
+                if (filename != file_stream->GetFileName()) {
+                    // file has been rename
+                    VLOG(30) << "file " << file_stream->GetFileName() << " has been rename, new name " << filename
+                        << ", ino " << ino;
+                    file_stream->SetFileName(filename);
+                }
             } else {
                 int success;
-                file_stream = new FileStream(module_name_, log_options_, filename, &success);
+                file_stream = new FileStream(module_name_, log_options_, filename, ino, &success);
                 if (success < 0) {
                     // TODO: do something
                     LOG(WARNING) << "new file stream " << filename << ", faile";
                 }
-                file_streams_[filename] = file_stream;
+                file_streams_[ino] = file_stream;
                 // may take a little long
                 ApplyRedoList(file_stream);
             }
@@ -261,10 +269,11 @@ void LogStream::Run() {
         }
 
         // handle delete event
-        std::set<std::string>::iterator delete_it = local_delete_event.begin();
+        std::map<uint64_t, std::string>::iterator delete_it = local_delete_event.begin();
         for(; delete_it != local_delete_event.end(); ++delete_it) {
-            const std::string& filename = *delete_it;
-            std::map<std::string, FileStream*>::iterator file_it = file_streams_.find(filename);
+            uint64_t ino = delete_it->first;
+            const std::string& filename = delete_it->second;
+            std::map<uint64_t, FileStream*>::iterator file_it = file_streams_.find(ino);
             if (file_it != file_streams_.end()) {
                 VLOG(30) << "delete filestream, " << filename;
                 FileStream* file_stream = file_it->second;
@@ -532,9 +541,9 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
     for (; redo_it != redo_list.end(); ++redo_it) {
         DBKey* key;
         std::vector<std::string> line_vec;
-        file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second);
-
         std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
+
+        file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second);
         ParseMdtRequest(line_vec, &req_vec);
         AsyncPush(req_vec, key);
     }
@@ -546,6 +555,18 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
     std::string server_addr = info_->collector_addr;
     pthread_spin_unlock(server_addr_lock_);
     VLOG(30) << "async send data to " << server_addr << ", nr req " << req_vec.size() << ", offset " << key->offset;
+
+    if (req_vec.size() == 0) {
+        // assume async send success.
+        key->ref.Set(1);
+        mdt::SearchEngine::RpcStoreRequest* req = new mdt::SearchEngine::RpcStoreRequest;
+        mdt::SearchEngine::RpcStoreResponse* resp = new mdt::SearchEngine::RpcStoreResponse;
+        rpc_client_->GetMethodList(server_addr, &service);
+        VLOG(30) << "assume async send success, file " << key->filename << ", offset " << key->offset
+            << ", ino " << key->ino;
+        AsyncPushCallback(req, resp, 0, 0, service, key);
+        return 0;
+    }
 
     key->ref.Set((uint64_t)(req_vec.size()));
     for (uint32_t i = 0; i < req_vec.size(); i++) {
@@ -604,18 +625,26 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
 }
 
 int LogStream::AddWriteEvent(std::string filename) {
-    VLOG(35) << "file " << filename << " add to write event queue";
+    struct stat stat_buf;
+    lstat(filename.c_str(), &stat_buf);
+    uint64_t ino = (uint64_t)stat_buf.st_ino;
+    VLOG(35) << "ino " << ino << ", file " << filename << " add to write event queue";
+
     pthread_spin_lock(&lock_);
-    write_event_.insert(filename);
+    write_event_.insert(std::pair<uint64_t, std::string>(ino, filename));
     pthread_spin_unlock(&lock_);
     thread_event_.Set();
     return 0;
 }
 
 int LogStream::DeleteWatchEvent(std::string filename, bool need_wakeup) {
+    struct stat stat_buf;
+    lstat(filename.c_str(), &stat_buf);
+    uint64_t ino = (uint64_t)stat_buf.st_ino;
     VLOG(30) << "file " << filename << " add to delete event queue, wakup " << need_wakeup;
+
     pthread_spin_lock(&lock_);
-    delete_event_.insert(filename);
+    delete_event_.insert(std::pair<uint64_t, std::string>(ino, filename));
     pthread_spin_unlock(&lock_);
     if (need_wakeup) {
         thread_event_.Set();
@@ -627,9 +656,12 @@ int LogStream::DeleteWatchEvent(std::string filename, bool need_wakeup) {
 //      FileStream implementation       //
 //////////////////////////////////////////
 FileStream::FileStream(std::string module_name, LogOptions log_options,
-                       std::string filename, int* success)
+                       std::string filename,
+                       uint64_t ino,
+                       int* success)
     : module_name_(module_name),
     filename_(filename),
+    ino_(ino),
     log_options_(log_options) {
     *success = -1;
     fd_ = open(filename.c_str(), O_RDONLY);
@@ -703,6 +735,11 @@ int FileStream::RecoveryCheckPoint() {
     int64_t end_ts;
     leveldb::Iterator* db_it = log_options_.db->NewIterator(leveldb::ReadOptions());
 
+    struct stat stat_buf;
+    lstat(filename_.c_str(), &stat_buf);
+    uint64_t file_size = stat_buf.st_size;
+    bool file_rename = false;
+
     std::string startkey, endkey;
     MakeKeyValue(module_name_, filename_, 0, &startkey, 0, NULL);
     MakeKeyValue(module_name_, filename_, 0xffffffffffffffff, &endkey, 0, NULL);
@@ -714,6 +751,12 @@ int FileStream::RecoveryCheckPoint() {
         uint64_t offset, size;
         ParseKeyValue(key, value, &offset, &size);
         VLOG(30) << "recovery cp, offset " << offset << ", size " << size;
+
+        if (file_rename || (file_size < (offset + size))) {
+            // file has been rename
+            file_rename = true;
+            break;
+        }
 
         // insert [offset, size] into mem cp list
         pthread_spin_lock(&lock_);
@@ -735,8 +778,37 @@ int FileStream::RecoveryCheckPoint() {
             current_offset_ = offset + size;
         }
     }
-
     delete db_it;
+
+    // clear old file stat
+    if (file_rename) {
+        VLOG(30) << "log file rename after agent down, file " << filename_;
+        pthread_spin_lock(&lock_);
+        mem_checkpoint_list_.clear();
+        redo_list_.clear();
+        current_offset_ = 0;
+        pthread_spin_unlock(&lock_);
+
+        // delete cp in leveldb
+        db_it = log_options_.db->NewIterator(leveldb::ReadOptions());
+        MakeKeyValue(module_name_, filename_, 0, &startkey, 0, NULL);
+        MakeKeyValue(module_name_, filename_, 0xffffffffffffffff, &endkey, 0, NULL);
+        for (db_it->Seek(startkey);
+                db_it->Valid() && db_it->key().ToString() < endkey;
+                db_it->Next()) {
+            leveldb::Slice key = db_it->key();
+            leveldb::Slice value = db_it->value();
+            uint64_t offset, size;
+            ParseKeyValue(key, value, &offset, &size);
+            leveldb::Status s = log_options_.db->Delete(leveldb::WriteOptions(), key);
+            if (!s.ok()) {
+                LOG(WARNING) << "delete db checkpoint error, " << filename_ << ", offset " << offset
+                    << ", size " << size;
+            }
+        }
+        delete db_it;
+    }
+
     end_ts = timer::get_micros();
     LOG(INFO) << "recovery " << filename_ << ", cost time " << end_ts - begin_ts;
     return 0;
@@ -805,6 +877,7 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         } else {
             *key = new DBKey;
             (*key)->filename = filename_;
+            (*key)->ino = ino_;
             (*key)->offset = offset;
             (*key)->ref.Set(0);
 
@@ -891,6 +964,8 @@ int FileStream::CheckPointRead(std::vector<std::string>* line_vec, DBKey** key,
             (*key)->ref.Set(0);
         }
         delete buf;
+    } else {
+        ret = -1;
     }
     return ret;
 }
