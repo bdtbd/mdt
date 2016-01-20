@@ -267,12 +267,28 @@ void AgentImpl::ParseModuleName(const std::string& filename, std::string* module
     return;
 }
 
+int AgentImpl::FilterFileByMoudle(const std::string& filename, std::string* expect_module_name) {
+    pthread_spin_lock(&lock_);
+    std::map<std::string, std::string>::iterator it = module_file_set_.begin();
+    for (; it != module_file_set_.end(); ++it) {
+        const std::string& module_file_name = it->first;
+        const std::string& module_name = it->second;
+        if (filename.find(module_file_name) != std::string::npos) {
+            *expect_module_name = module_name;
+            break;
+        }
+    }
+    pthread_spin_unlock(&lock_);
+    return 0;
+}
+
 int AgentImpl::AddWriteEvent(const std::string& logdir, const std::string& filename, inotify_event* event) {
     std::string module_name;
-    ParseModuleName(filename, &module_name);
+    //ParseModuleName(filename, &module_name);
+    FilterFileByMoudle(filename, &module_name);
     VLOG(35) << "write event, module name " << module_name << ", log dir " << logdir;
     if (module_name.size() == 0) {
-        VLOG(30) << "dir " << filename << ", no module match";
+        VLOG(35) << "dir " << filename << ", no module match";
         return -1;
     }
 
@@ -293,10 +309,11 @@ int AgentImpl::AddWriteEvent(const std::string& logdir, const std::string& filen
 
 int AgentImpl::DeleteWatchEvent(const std::string& logdir, const std::string& filename, inotify_event* event) {
     std::string module_name;
-    ParseModuleName(filename, &module_name);
-    VLOG(30) << "delete event, module name " << module_name << ", log dir " << logdir;
+    //ParseModuleName(filename, &module_name);
+    FilterFileByMoudle(filename, &module_name);
+    VLOG(35) << "delete event, module name " << module_name << ", log dir " << logdir;
     if (module_name.size() == 0) {
-        VLOG(30) << "dir " << filename << ", no module match";
+        VLOG(35) << "dir " << filename << ", no module match";
         return -1;
     }
 
@@ -383,6 +400,26 @@ int AgentImpl::AddWatchPath(const std::string& dir) {
     return 0;
 }
 
+int AgentImpl::AddWatchModuleStream(const std::string& module_name, const std::string& log_name) {
+    VLOG(30) << "add module stream, module name " << module_name << ", file name " << log_name;
+    LogStream* stream = NULL;
+    pthread_spin_lock(&lock_);
+    std::map<std::string, LogStream*>::iterator it = log_streams_.find(module_name);
+    if (it != log_streams_.end()) {
+        stream = log_streams_[module_name];
+    } else {
+        stream = new LogStream(module_name, log_options_, rpc_client_, &server_lock_, &info_);
+        log_streams_[module_name] = stream;
+    }
+
+    std::map<std::string, std::string>::iterator file_it = module_file_set_.find(log_name);
+    if (file_it == module_file_set_.end()) {
+        module_file_set_[log_name] = module_name;
+    }
+    pthread_spin_unlock(&lock_);
+    return 0;
+}
+
 ///////////////////////////////////////////
 /////       rpc method                /////
 ///////////////////////////////////////////
@@ -401,6 +438,22 @@ void AgentImpl::RpcAddWatchPath(::google::protobuf::RpcController* controller,
     if (AddWatchPath(request->watch_path()) < 0) {
         response->set_status(mdt::LogAgentService::kRpcError);
         LOG(WARNING) << "add watch event in dir " << request->watch_path() << " failed";
+    } else {
+        response->set_status(mdt::LogAgentService::kRpcOk);
+    }
+    done->Run();
+}
+
+void AgentImpl::RpcAddWatchModuleStream(::google::protobuf::RpcController* controller,
+                                        const mdt::LogAgentService::RpcAddWatchModuleStreamRequest* request,
+                                        mdt::LogAgentService::RpcAddWatchModuleStreamResponse* response,
+                                        ::google::protobuf::Closure* done) {
+    const std::string& module_name = request->production_name();
+    const std::string& log_name = request->log_name(); // use for match log file name, if not match, discard such log file
+
+    if (AddWatchModuleStream(module_name, log_name) < 0) {
+        response->set_status(mdt::LogAgentService::kRpcError);
+        VLOG(35) << "add watch module " << module_name << " failed";
     } else {
         response->set_status(mdt::LogAgentService::kRpcOk);
     }

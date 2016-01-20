@@ -87,6 +87,11 @@ public:
                  mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* response,
                  ::google::protobuf::Closure* done);
 
+    void RpcAddWatchModuleStream(::google::protobuf::RpcController* controller,
+                                 const mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest* request,
+                                 mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* response,
+                                 ::google::protobuf::Closure* done);
+
 private:
     void DoRegisterNode(::google::protobuf::RpcController* controller,
                                        const mdt::LogSchedulerService::RegisterNodeRequest* request,
@@ -103,6 +108,11 @@ private:
                  const mdt::LogSchedulerService::RpcAddAgentWatchPathRequest* request,
                  mdt::LogSchedulerService::RpcAddAgentWatchPathResponse* response,
                  ::google::protobuf::Closure* done);
+
+    void DoRpcAddWatchModuleStream(::google::protobuf::RpcController* controller,
+                                   const mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest* request,
+                                   mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* response,
+                                   ::google::protobuf::Closure* done);
 
 private:
     RpcClient* rpc_client_;

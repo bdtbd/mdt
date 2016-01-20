@@ -34,6 +34,10 @@ DEFINE_string(cmd, "", "non interactive mode's cmd");
 DEFINE_string(cmd_agent_addr, "self", "in non interactive mode, agent addr");
 DEFINE_string(cmd_log_dir, "", "in non interactive mode, add watch log dir");
 
+// add watch module stream
+DEFINE_string(cmd_module_name, "", "in non interactive mode, add watch module");
+DEFINE_string(cmd_module_file_name, "", "in non interactive mode, add watch module file");
+
 DEFINE_string(tera_flagfile, "../conf/tera.flag", "tera flagfile");
 DEFINE_int64(max_timestamp_tables, 10, "max number of ts tables");
 
@@ -83,6 +87,7 @@ void HelpManue() {
     printf("cmd: UpdateSingleTable internaltablename <table_prop_key> <tale_prop_value>\n\n");
     printf("cmd: dumpcache dbname tablename\n\n");
     printf("cmd::AddWatchPath agent_addr[hostname:port or self] log_dir\n\n");
+    printf("cmd::AddWatchModuleStream agent_addr[hostname:port or self] module_name file_name\n\n");
     printf("===========================\n");
 }
 
@@ -368,9 +373,9 @@ uint64_t TranslateTime(std::string ts_str) {
 
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    std::cout << "year " << ts_year << ", month " << ts_month << ", day " << ts_day
-        << ", hour " << ts_hour << ", min " << ts_min << ", sec " << ts_sec
-        << ", convert to sec " << (uint64_t)now_ts << ", tv.sec " << tv.tv_sec << std::endl;
+    //std::cout << "year " << ts_year << ", month " << ts_month << ", day " << ts_day
+    //    << ", hour " << ts_hour << ", min " << ts_min << ", sec " << ts_sec
+    //    << ", convert to sec " << (uint64_t)now_ts << ", tv.sec " << tv.tv_sec << std::endl;
     return (uint64_t)(now_ts) * 1000000;
 }
 
@@ -450,7 +455,7 @@ int GetByTimeOp(std::vector<std::string>& cmd_vec) {
     std::cout << "\n=============================================\n";
     //std::cout << "search time: begin: tv_sec " << now_ts.tv_sec << ", tv_usec " << now_ts.tv_usec
     //    << ", now: tv_sec " << finish_ts.tv_sec << ", tv_usec " << finish_ts.tv_usec;
-    std::cout << "cost time: " << finish_ts.tv_sec - now_ts.tv_sec;
+    std::cout << "cost time(sec): " << finish_ts.tv_sec - now_ts.tv_sec;
     std::cout << "\n=============================================\n";
     return 0;
 }
@@ -1002,6 +1007,41 @@ int DupNfsSterr() {
     return res;
 }
 
+// cmd::AddWatchModuleStream agent_addr[hostname:port or self] module_name file_name
+int AddWatchModuleStreamOp(std::vector<std::string>& cmd_vec) {
+    // parse param
+    std::string agent_addr = cmd_vec[1];
+    const std::string& module_name = cmd_vec[2];
+    const std::string& file_name = cmd_vec[3];
+
+    if (agent_addr == "self") {
+        char hostname[255];
+        if (0 != gethostname(hostname, 256)) {
+            LOG(FATAL) << "fail to report message";
+        }
+        std::string hostname_str = hostname;
+        agent_addr = hostname_str + ":" + FLAGS_agent_service_port;
+    }
+    std::string scheduler_addr = FLAGS_scheduler_addr;
+
+    mdt::RpcClient* rpc_client = new mdt::RpcClient;
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client->GetMethodList(scheduler_addr, &service);
+    mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest* req = new mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest();
+    mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* resp = new mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse();
+    req->set_agent_addr(agent_addr);
+    req->set_production_name(module_name);
+    req->set_log_name(file_name);
+
+    rpc_client->SyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcAddWatchModuleStream, req, resp);
+
+    delete req;
+    delete resp;
+    delete service;
+    return 0;
+
+}
+
 // cmd::AddWatchPath agent_addr[hostname:port or self] log_dir
 int AddWatchPathOp(std::vector<std::string>& cmd_vec) {
     // parse param
@@ -1054,6 +1094,15 @@ int main(int ac, char* av[]) {
             std::cout << "add watch path: agent_addr " << non_interactive_cmd_vec[1]
                 << ", log dir " << non_interactive_cmd_vec[2] << "\n";
             AddWatchPathOp(non_interactive_cmd_vec);
+        } else if (FLAGS_cmd == "AddWatchModuleStream") {
+            non_interactive_cmd_vec.push_back(FLAGS_cmd);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_agent_addr);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_module_name);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_module_file_name);
+            std::cout << "add module stream: agent_adr " << non_interactive_cmd_vec[1]
+                << ", module name " << non_interactive_cmd_vec[2]
+                << ", file name " << non_interactive_cmd_vec[3] << "\n";
+            AddWatchModuleStreamOp(non_interactive_cmd_vec);
         } else {
             std::cout << "interactive mode, cmd " << FLAGS_cmd << " not know\n";
             exit(-1);
