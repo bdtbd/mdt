@@ -20,6 +20,7 @@ namespace agent {
 struct DBKey {
     //std::string module_name;
     std::string filename;
+    uint64_t ino;
     uint64_t timestamp;
     uint64_t offset;
     Counter ref;
@@ -28,8 +29,16 @@ struct DBKey {
 class FileStream {
 public:
     explicit FileStream(std::string module_name, LogOptions log_options,
-                        std::string filename, int* success);
+                        std::string filename,
+                        uint64_t ino,
+                        int* success);
     ~FileStream();
+    std::string GetFileName() {
+        return filename_;
+    }
+    void SetFileName(const std::string& filename) {
+        filename_ = filename;
+    }
     void GetRedoList(std::map<uint64_t, uint64_t>* redo_list);
     int RecoveryCheckPoint();
     void GetCheckpoint(DBKey* key, uint64_t* offset, uint64_t* size);
@@ -57,6 +66,7 @@ private:
 private:
     std::string module_name_;
     std::string filename_; // abs path
+    uint64_t ino_;
     LogOptions log_options_;
     int fd_;
     // current send point
@@ -128,11 +138,14 @@ private:
     volatile bool stop_;
     AutoResetEvent thread_event_;
 
-    std::map<std::string, FileStream*> file_streams_;
+    //std::map<std::string, FileStream*> file_streams_;
+    std::map<uint64_t, FileStream*> file_streams_; // ino, filestream map
     // all event queue
     pthread_spinlock_t lock_;
-    std::set<std::string> delete_event_;
-    std::set<std::string> write_event_;
+    //std::set<std::string> delete_event_;
+    //std::set<std::string> write_event_;
+    std::map<uint64_t, std::string> delete_event_;
+    std::map<uint64_t, std::string> write_event_; // [inode, filename]
     std::queue<DBKey*> key_queue_;
     std::queue<DBKey*> failed_key_queue_;
     ThreadPool fail_delay_thread_;
