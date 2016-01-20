@@ -8,6 +8,7 @@
 #include <iostream>
 #include <vector>
 #include <sys/types.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -26,9 +27,17 @@
 #include "proto/kv.pb.h"
 #include "proto/scheduler.pb.h"
 
-DECLARE_string(flagfile);
+DEFINE_string(tool_mode, "", "mdt-tool cmd mode, --tool_mode=i for interactive");
+DEFINE_string(cmd, "", "non interactive mode's cmd");
+
+// add watch path cmd
+DEFINE_string(cmd_agent_addr, "self", "in non interactive mode, agent addr");
+DEFINE_string(cmd_log_dir, "", "in non interactive mode, add watch log dir");
+
 DEFINE_string(tera_flagfile, "../conf/tera.flag", "tera flagfile");
 DEFINE_int64(max_timestamp_tables, 10, "max number of ts tables");
+
+DECLARE_string(flagfile);
 
 DECLARE_string(scheduler_addr);
 DECLARE_string(agent_service_port);
@@ -52,12 +61,15 @@ static inline int64_t get_micros() {
     return static_cast<int64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
 }
 
+            // GetByTime dbname tablename start(year-month-day-hour:min:sec)  end(year-month-day-hour:min:sec) limit [index_table [>,>=,==,<,<=] key]
 void HelpManue() {
     printf("========= usage ===========\n");
     printf("cmd: quit\n\n");
     printf("cmd: help\n\n");
     printf("cmd: CreateTable <dbname> <tablename> <primary_key_type> "
             "[<index_table> <index_type=kBytes,kUInt64>]\n\n");
+    printf("cmd: GetByTime <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> "
+            "[<index_name> cmp[==, >=, >, <=, <] <index_key>]\n\n");
     printf("cmd: Put <dbname> <tablename> <value> <primary_key> "
             "[<index_table> <key>]\n\n");
     printf("cmd: Get <dbname> <tablename> <start_ts> <end_ts> <limit> "
@@ -70,6 +82,7 @@ void HelpManue() {
     printf("cmd: showschema dbname tablename\n\n");
     printf("cmd: UpdateSingleTable internaltablename <table_prop_key> <tale_prop_value>\n\n");
     printf("cmd: dumpcache dbname tablename\n\n");
+    printf("cmd::AddWatchPath agent_addr[hostname:port or self] log_dir\n\n");
     printf("===========================\n");
 }
 
@@ -319,6 +332,129 @@ int GetCmp(std::string& cmp_str) {
     return -1;
 }
 
+uint64_t TranslateTime(std::string ts_str) {
+    std::vector<std::string> ts_vec;
+    boost::split(ts_vec, ts_str, boost::is_any_of("-"));
+    if (ts_vec.size() != 4) {
+        return 0;
+    }
+    uint64_t ts_year = boost::lexical_cast<uint64_t>(ts_vec[0]);
+    uint64_t ts_month = boost::lexical_cast<uint64_t>(ts_vec[1]);
+    uint64_t ts_day = boost::lexical_cast<uint64_t>(ts_vec[2]);
+
+    std::string hms_ts_str = ts_vec[3];
+    std::vector<std::string> hms_ts_vec;
+    boost::split(hms_ts_vec, hms_ts_str, boost::is_any_of(":"));
+    if (hms_ts_vec.size() != 3) {
+        return 0;
+    }
+
+    uint64_t ts_hour = boost::lexical_cast<uint64_t>(hms_ts_vec[0]);
+    uint64_t ts_min = boost::lexical_cast<uint64_t>(hms_ts_vec[1]);
+    uint64_t ts_sec = boost::lexical_cast<uint64_t>(hms_ts_vec[2]);
+
+    // time convert
+    time_t rawtime;
+    struct tm * timeinfo;
+    time( &rawtime );
+    timeinfo = localtime(&rawtime);
+    timeinfo->tm_year = (int)(ts_year - 1900);
+    timeinfo->tm_mon = (int)(ts_month - 1);
+    timeinfo->tm_mday = (int)ts_day;
+    timeinfo->tm_hour = (int)ts_hour;
+    timeinfo->tm_min = (int)ts_min;
+    timeinfo->tm_sec = (int)ts_sec;
+    time_t now_ts = mktime(timeinfo);
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    std::cout << "year " << ts_year << ", month " << ts_month << ", day " << ts_day
+        << ", hour " << ts_hour << ", min " << ts_min << ", sec " << ts_sec
+        << ", convert to sec " << (uint64_t)now_ts << ", tv.sec " << tv.tv_sec << std::endl;
+    return (uint64_t)(now_ts) * 1000000;
+}
+
+// GetByTime dbname tablename start(year-month-day-hour:min:sec)  end(year-month-day-hour:min:sec) limit [index_table [>,>=,==,<,<=] key]
+int GetByTimeOp(std::vector<std::string>& cmd_vec) {
+    // parse param
+    std::string db_name = cmd_vec[1];
+    std::string table_name = cmd_vec[2];
+    uint64_t start_timestamp = TranslateTime(cmd_vec[3]);
+    uint64_t end_timestamp = TranslateTime(cmd_vec[4]);
+    int32_t limit = boost::lexical_cast<int32_t>(cmd_vec[5]);
+
+    // create db
+    std::cout << "open db ..." << std::endl;
+    mdt::Database* db;
+    db = mdt::OpenDatabase(db_name);
+    if (db == NULL) {
+        std::cout << "open db " << db_name << " fail...\n";
+        return -1;
+    }
+
+    std::cout << "open table ..." << std::endl;
+    mdt::Table* table;
+    table = OpenTable(db, table_name);
+    if (table == NULL) {
+        std::cout << "open table " << table_name << " fail...\n";
+        return -1;
+    }
+
+    // search test
+    mdt::SearchRequest* search_req = new mdt::SearchRequest;
+    //search_req->primary_key = cmd_vec[];
+    search_req->limit = limit;
+    search_req->start_timestamp = start_timestamp;
+    if (end_timestamp == 0) {
+        search_req->end_timestamp = get_micros();
+    } else {
+        search_req->end_timestamp = end_timestamp;
+    }
+    int num_index = cmd_vec.size() - 6;
+    if (num_index % 3 != 0) {
+        std::cout << "num of condition index not match\n";
+        return 0;
+    }
+    for (int i = 0; i < num_index; i += 3) {
+        mdt::IndexCondition index;
+        int cmp;
+        index.index_name = cmd_vec[i + 6];
+        cmp = GetCmp(cmd_vec[i + 7]);
+        if (cmp == -1) {
+            std::cout << "cmp " << cmd_vec[i + 7] << " not support\n";
+            return -1;
+        }
+        index.comparator = (mdt::COMPARATOR)cmp;
+        index.compare_value = cmd_vec[i + 8];
+        search_req->index_condition_list.push_back(index);
+    }
+
+    mdt::SearchResponse* search_resp = new mdt::SearchResponse;
+
+    std::cout << "=============================================\n";
+    std::cout << "              Get by Index Key               \n";
+    std::cout << "=============================================\n";
+    // calulate time
+    struct timeval now_ts, finish_ts;
+    gettimeofday(&now_ts, NULL);
+    table->Get(search_req, search_resp);
+    gettimeofday(&finish_ts, NULL);
+
+    for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
+        const mdt::ResultStream& result = search_resp->result_stream[i];
+        const std::string& pri_key = result.primary_key;
+        for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
+            std::cout << pri_key << ":" << result.result_data_list[j] << std::endl;
+        }
+    }
+    std::cout << "\n=============================================\n";
+    //std::cout << "search time: begin: tv_sec " << now_ts.tv_sec << ", tv_usec " << now_ts.tv_usec
+    //    << ", now: tv_sec " << finish_ts.tv_sec << ", tv_usec " << finish_ts.tv_usec;
+    std::cout << "cost time: " << finish_ts.tv_sec - now_ts.tv_sec;
+    std::cout << "\n=============================================\n";
+    return 0;
+}
+
 // Get dbname tablename start end limit [index_table [>,>=,==,<,<=] key]
 int GetOp(std::vector<std::string>& cmd_vec) {
     // parse param
@@ -389,12 +525,13 @@ int GetOp(std::vector<std::string>& cmd_vec) {
         const mdt::ResultStream& result = search_resp->result_stream[i];
         const std::string& pri_key = result.primary_key;
         for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
-            std::cout << "###PrimaryKey :" << pri_key << ", ###Value :" << result.result_data_list[j] << std::endl;
+            std::cout << pri_key << ":" << result.result_data_list[j] << std::endl;
         }
     }
     std::cout << "\n=============================================\n";
-    std::cout << "search time: begin: tv_sec " << now_ts.tv_sec << ", tv_usec " << now_ts.tv_usec
-        << ", now: tv_sec " << finish_ts.tv_sec << ", tv_usec " << finish_ts.tv_usec;
+    //std::cout << "search time: begin: tv_sec " << now_ts.tv_sec << ", tv_usec " << now_ts.tv_usec
+    //    << ", now: tv_sec " << finish_ts.tv_sec << ", tv_usec " << finish_ts.tv_usec;
+    std::cout << "cost time: " << finish_ts.tv_sec - now_ts.tv_sec;
     std::cout << "\n=============================================\n";
     return 0;
 }
@@ -904,8 +1041,26 @@ int main(int ac, char* av[]) {
         return -1;
     }
     */
+    // parse cmd in interactive mode
+    ::google::ParseCommandLineFlags(&ac, &av, true);
     // Parse flagfile
     ParseFlagFile("../conf/trace.flag");
+    if (FLAGS_tool_mode == "") {
+        std::vector<std::string> non_interactive_cmd_vec;
+        if (FLAGS_cmd == "AddWatchPath") {
+            non_interactive_cmd_vec.push_back(FLAGS_cmd);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_agent_addr);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_log_dir);
+            std::cout << "add watch path: agent_addr " << non_interactive_cmd_vec[1]
+                << ", log dir " << non_interactive_cmd_vec[2] << "\n";
+            AddWatchPathOp(non_interactive_cmd_vec);
+        } else {
+            std::cout << "interactive mode, cmd " << FLAGS_cmd << " not know\n";
+            exit(-1);
+        }
+        return 0;
+    }
+
     while (1) {
         char *line = readline("mdt:");
         char *cmd = StripWhite(line);
@@ -950,15 +1105,14 @@ int main(int ac, char* av[]) {
             add_history(line);
             free(line);
             continue;
+        } else if (cmd_vec[0].compare("GetByTime") == 0 && cmd_vec.size() >= 6) {
+            // GetByTime dbname tablename start(year-month-day-hour:min:sec)  end(year-month-day-hour:min:sec) limit [index_table [>,>=,==,<,<=] key]
+            GetByTimeOp(cmd_vec);
+            add_history(line);
+            continue;
         } else if (cmd_vec[0].compare("Get") == 0 && cmd_vec.size() >= 6) {
             // cmd: Get dbname tablename start_ts(ignore) end_ts(ignore) limit(ignore) [index_name cmp(=, >=, >, <=, <) index_key]
             GetOp(cmd_vec);
-            add_history(line);
-            free(line);
-            continue;
-        } else if (cmd_vec[0].compare("GetPri") == 0 && cmd_vec.size() == 7) {
-            // cmd: GetPri dbname tablename start_ts(ignore) end_ts(ignore) limit(ignore) primary_key
-            SearchPrimaryKey(cmd_vec);
             add_history(line);
             free(line);
             continue;

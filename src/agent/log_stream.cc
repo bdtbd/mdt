@@ -905,6 +905,7 @@ int FileStream::MarkDelete() {
     uint32_t nr_pending = mem_checkpoint_list_.size();
     pthread_spin_unlock(&lock_);
 
+    LOG(WARNING) << "delete file stream " << filename_ << ", nr_pending " << nr_pending;
     if (nr_pending == 0) {
         close(fd_);
         return 1;
