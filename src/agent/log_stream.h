@@ -51,6 +51,7 @@ public:
                        uint64_t offset, uint64_t size);
     int HanleFailKey(DBKey* key);
     int MarkDelete();
+    int OpenFile();
 
 private:
     void EncodeUint64BigEndian(uint64_t value, std::string* str);

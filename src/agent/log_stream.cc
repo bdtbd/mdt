@@ -245,6 +245,7 @@ void LogStream::Run() {
                         << ", ino " << ino;
                     file_stream->SetFileName(filename);
                 }
+                file_stream->OpenFile();
             } else {
                 int success;
                 file_stream = new FileStream(module_name_, log_options_, filename, ino, &success);
@@ -281,6 +282,7 @@ void LogStream::Run() {
                 FileStream* file_stream = file_it->second;
                 // if no one refer this file stream, then delete it
                 if (file_stream->MarkDelete() >= 0) {
+                    // TODO: need delete file_stream ??
                     file_streams_.erase(file_it);
                     delete file_stream;
                 } else {
@@ -473,7 +475,7 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
                                std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec) {
     for (uint32_t i = 0; i < line_vec.size(); i++) {
         int res = 0;
-        std::string& line  = line_vec[0];
+        std::string& line  = line_vec[i];
         mdt::SearchEngine::RpcStoreRequest* req = NULL;
 
         LogRecord log;
@@ -1026,9 +1028,20 @@ int FileStream::MarkDelete() {
     LOG(WARNING) << "delete file stream " << filename_ << ", nr_pending " << nr_pending;
     if (nr_pending == 0) {
         close(fd_);
+        fd_ = -1;
         return 1;
     }
     return -1;
+}
+
+int FileStream::OpenFile() {
+    if (fd_ < 0) {
+        fd_ = open(filename_.c_str(), O_RDONLY);
+        if (fd_ < 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 }

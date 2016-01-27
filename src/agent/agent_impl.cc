@@ -238,7 +238,8 @@ void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
         // parse event
         if (event.mask & (IN_CREATE | IN_MOVED_TO)) {
             AddWriteEvent(fs_inotify->log_dir, filename, &event);
-        } else if (event.mask & (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF| IN_MOVED_FROM | IN_CLOSE_WRITE)) {
+        //} else if (event.mask & (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF| IN_MOVED_FROM | IN_CLOSE_WRITE)) {
+        } else if (event.mask & (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF| IN_MOVED_FROM)) {
             DeleteWatchEvent(fs_inotify->log_dir, filename, &event);
         } else if (event.mask & (IN_MODIFY)) {
             AddWriteEvent(fs_inotify->log_dir, filename, &event);
