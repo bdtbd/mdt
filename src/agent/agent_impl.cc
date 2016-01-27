@@ -401,6 +401,7 @@ int AgentImpl::AddWatchPath(const std::string& dir) {
     return 0;
 }
 
+// log_name := module name's log file name prefix
 int AgentImpl::AddWatchModuleStream(const std::string& module_name, const std::string& log_name) {
     VLOG(30) << "add module stream, module name " << module_name << ", file name " << log_name;
     LogStream* stream = NULL;
@@ -416,6 +417,7 @@ int AgentImpl::AddWatchModuleStream(const std::string& module_name, const std::s
     std::map<std::string, std::string>::iterator file_it = module_file_set_.find(log_name);
     if (file_it == module_file_set_.end()) {
         module_file_set_[log_name] = module_name;
+        stream->AddTableName(log_name);
     }
     pthread_spin_unlock(&lock_);
     return 0;

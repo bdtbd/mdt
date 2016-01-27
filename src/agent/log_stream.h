@@ -87,14 +87,17 @@ public:
               AgentInfo* info);
     ~LogStream();
 
+    int AddTableName(const std::string& log_name);
     int AddWriteEvent(std::string filename);
     int DeleteWatchEvent(std::string filename, bool need_wakeup);
     void Run();
 
 private:
+    void GetTableName(std::string file_name, std::string* table_name);
     uint64_t ParseTime(const std::string& time_str);
     std::string TimeToString(struct timeval* filetime);
-    int ParseMdtRequest(std::vector<std::string>& line_vec,
+    int ParseMdtRequest(const std::string table_name,
+                        std::vector<std::string>& line_vec,
                         std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec);
     void ApplyRedoList(FileStream* file_stream);
     int AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_vec, DBKey* key);
@@ -107,6 +110,8 @@ private:
 
 private:
     std::string module_name_;
+    std::set<std::string> log_name_prefix_; // use for table name
+
     // all modules use the same db
     LogOptions log_options_;
     // rpc data send
@@ -115,8 +120,9 @@ private:
     AgentInfo* info_;
     //std::string* server_addr_;
 
-    std::string db_name_;
-    std::string table_name_;
+    std::string db_name_; // DISCARD: useless
+    std::string table_name_; // DISCARD: useless
+
     // log line parse relatively
     std::vector<std::string> string_delims_; // special split line use string
     std::string line_delims_; // general split line into items list
