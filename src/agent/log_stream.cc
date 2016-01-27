@@ -137,6 +137,18 @@ LogStream::~LogStream() {
     //pthread_spin_destroy(&lock_);
 }
 
+void LogStream::GetTableName(std::string file_name, std::string* table_name) {
+    std::set<std::string>::iterator it = log_name_prefix_.begin();
+    for (; it != log_name_prefix_.end(); ++it) {
+        const std::string& log_name = *it;
+        if (file_name.find(log_name) != std::string::npos) {
+            *table_name = log_name;
+            return;
+        }
+    }
+    *table_name = "trash";
+}
+
 void LogStream::Run() {
     while (1) {
         bool has_event = false;
@@ -217,7 +229,9 @@ void LogStream::Run() {
                             DBKey* rkey = NULL;
                             if (file_stream->CheckPointRead(&line_vec, &rkey, offset, size) >= 0) {
                                 std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
-                                ParseMdtRequest(line_vec, &req_vec);
+                                std::string table_name;
+                                GetTableName(file_stream->GetFileName(), &table_name);
+                                ParseMdtRequest(table_name, line_vec, &req_vec);
                                 AsyncPush(req_vec, rkey);
                             } else {
                                 file_stream->ReSetFileStreamCheckPoint();
@@ -261,7 +275,9 @@ void LogStream::Run() {
             std::vector<std::string> line_vec;
             if (file_stream->Read(&line_vec, &key) > 0) {
                 std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
-                ParseMdtRequest(line_vec, &req_vec);
+                std::string table_name;
+                GetTableName(file_stream->GetFileName(), &table_name);
+                ParseMdtRequest(table_name, line_vec, &req_vec);
                 AsyncPush(req_vec, key);
 
                 // read next offset
@@ -471,7 +487,8 @@ uint64_t LogStream::ParseTime(const std::string& time_str) {
 // case 1: key1=001,key2=002,key3=003||key4=004,key005=005,key006=006
 // case 2: 001 002 003 004 005 006
 // case 3: key1 001, key2 002, key3 003, key4 004, key5 005, key6 006
-int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
+int LogStream::ParseMdtRequest(const std::string table_name,
+                               std::vector<std::string>& line_vec,
                                std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec) {
     for (uint32_t i = 0; i < line_vec.size(); i++) {
         int res = 0;
@@ -494,8 +511,8 @@ int LogStream::ParseMdtRequest(std::vector<std::string>& line_vec,
             }
 
             req = new mdt::SearchEngine::RpcStoreRequest();
-            req->set_db_name(db_name_);
-            req->set_table_name(table_name_);
+            req->set_db_name(module_name_);
+            req->set_table_name(table_name);
             // set index
             std::map<std::string, std::string>::iterator it = kv.kv_annotation.begin();
             for (; it != kv.kv_annotation.end(); ++it) {
@@ -550,7 +567,9 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
 
         // agent restart, check log file rename
         if (file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second) >= 0) {
-            ParseMdtRequest(line_vec, &req_vec);
+            std::string table_name;
+            GetTableName(file_stream->GetFileName(), &table_name);
+            ParseMdtRequest(table_name, line_vec, &req_vec);
             AsyncPush(req_vec, key);
         } else {
             file_rename = true;
@@ -661,6 +680,11 @@ int LogStream::DeleteWatchEvent(std::string filename, bool need_wakeup) {
     if (need_wakeup) {
         thread_event_.Set();
     }
+    return 0;
+}
+
+int LogStream::AddTableName(const std::string& log_name) {
+    log_name_prefix_.insert(log_name);
     return 0;
 }
 
