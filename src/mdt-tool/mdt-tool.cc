@@ -70,7 +70,7 @@ void HelpManue() {
     printf("========= usage ===========\n");
     printf("cmd: quit\n\n");
     printf("cmd: help\n\n");
-    printf("cmd: CreateTable <dbname> <tablename> <primary_key_type> "
+    printf("cmd: CreateTable <dbname> <tablename> <primary_key_type> <table_ttl> "
             "[<index_table> <index_type=kBytes,kUInt64>]\n\n");
     printf("cmd: GetByTime <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> "
             "[<index_name> cmp[==, >=, >, <=, <] <index_key>]\n\n");
@@ -601,6 +601,7 @@ int PutOp(std::vector<std::string>& cmd_vec) {
     return 0;
 }
 
+// cmd: CreateTable dbname tablename primary_key_type ttl [index_name index_type]...
 int CreateTableOp(std::vector<std::string>& cmd_vec) {
     // create db
     std::cout << "open db ..." << std::endl;
@@ -627,26 +628,29 @@ int CreateTableOp(std::vector<std::string>& cmd_vec) {
         return 0;
     }
 
-    int num_index = cmd_vec.size() - 4;
+    int64_t ttl = atol(cmd_vec[4].c_str());
+    table_desc.table_ttl = ttl > 0? ttl : 0;
+
+    int num_index = cmd_vec.size() - 5;
     if (num_index % 2 != 0) {
         std::cout << "create table fail, [index_name index_type] not match!\n";
         return 0;
     }
     for (int i = 0; i < num_index; i += 2) {
         mdt::IndexDescription table_index;
-        table_index.index_name = cmd_vec[i + 4];
-        if (cmd_vec[i + 5].compare("kBytes") == 0) {
+        table_index.index_name = cmd_vec[i + 5];
+        if (cmd_vec[i + 6].compare("kBytes") == 0) {
             table_index.index_key_type = mdt::kBytes;
-        } else if (cmd_vec[i + 5].compare("kUInt64") == 0) {
+        } else if (cmd_vec[i + 6].compare("kUInt64") == 0) {
             table_index.index_key_type = mdt::kUInt64;
-        } else if (cmd_vec[i + 5].compare("kInt64") == 0) {
+        } else if (cmd_vec[i + 6].compare("kInt64") == 0) {
             table_index.index_key_type = mdt::kInt64;
-        } else if (cmd_vec[i + 5].compare("kUInt32") == 0) {
+        } else if (cmd_vec[i + 6].compare("kUInt32") == 0) {
             table_index.index_key_type = mdt::kUInt32;
-        } else if (cmd_vec[i + 5].compare("kInt32") == 0) {
+        } else if (cmd_vec[i + 6].compare("kInt32") == 0) {
             table_index.index_key_type = mdt::kInt32;
         } else {
-            std::cout << "create table fail, index key: " << cmd_vec[i + 4]
+            std::cout << "create table fail, index key: " << cmd_vec[i + 5]
                 << ", key type not support!\n";
             return 0;
         }
@@ -951,9 +955,20 @@ int UpdateTableCF(std::vector<std::string>& cmd_vec) {
         std::cout << " Get index table name from " << schema_table << " fail\n";
         return -1;
     }
-    delete table;
     mdt::BigQueryTableSchema schema;
     schema.ParseFromString(schema_value);
+    LOG(INFO) << "old shcema " << schema.DebugString();
+    if (prop_key == "ttl") {
+        uint64_t ttl = (int32_t)atoi(prop_value.c_str());
+        schema.set_table_ttl(ttl);
+        LOG(INFO) << "new shcema " << schema.DebugString();
+        std::string new_schema_str;
+        schema.SerializeToString(&new_schema_str);
+        table->Put(schema.table_name(), "", "", new_schema_str, &error);
+        LOG(INFO) << "Put Schema: table name " << schema.table_name() << ", size " << schema_value.size()
+            << ", error code " << tera::strerr(error);
+    }
+    //delete table;
 
     // update primary table
     std::string primary_table = db_name + "#pri#" + table_name;
@@ -1139,8 +1154,8 @@ int main(int ac, char* av[]) {
             AddWatchPathOp(cmd_vec);
             add_history(line);
             continue;
-        } else if (cmd_vec[0].compare("CreateTable") == 0 && cmd_vec.size() >= 4) {
-            // cmd: CreateTable dbname tablename primary_key_type [index_name index_type]...
+        } else if (cmd_vec[0].compare("CreateTable") == 0 && cmd_vec.size() >= 5) {
+            // cmd: CreateTable dbname tablename primary_key_type ttl [index_name index_type]...
             std::cout << "create table: dbname " << cmd_vec[1]
                 << "tablename " << cmd_vec[2]
                 << "\n";

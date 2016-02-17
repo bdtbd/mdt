@@ -20,7 +20,7 @@ PROTO_OUT_CC := $(PROTO_FILES:.proto=.pb.cc)
 PROTO_OUT_H := $(PROTO_FILES:.proto=.pb.h)
 
 ############################################################
-OTHER_SRC := src/trace_flags.cc
+OTHER_SRC := src/trace_flags.cc src/fs_inotify.cc
 SDK_SRC := $(wildcard src/sdk/*.cc)
 COMMON_SRC := $(wildcard src/common/*.cc)
 UTIL_SRC := $(wildcard src/util/*.cc)

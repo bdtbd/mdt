@@ -197,7 +197,8 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
     lg->SetBlockSize(32 * 1024);
     lg->SetCompress(tera::kSnappyCompress);
     tera::ColumnFamilyDescriptor* cf = primary_table_desc.AddColumnFamily("Location", "lg");
-    cf->SetTimeToLive(FLAGS_tera_table_ttl);
+    //cf->SetTimeToLive(FLAGS_tera_table_ttl);
+    cf->SetTimeToLive(schema.table_ttl());
     tera_adapter_.opt_.client_->CreateTable(primary_table_desc, &error_code);
 
     // create index key table
@@ -214,7 +215,8 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
         index_lg->SetBlockSize(32 * 1024);
         index_lg->SetCompress(tera::kSnappyCompress);
         tera::ColumnFamilyDescriptor* index_cf = index_table_desc.AddColumnFamily("PrimaryKey", "lg");
-        index_cf->SetTimeToLive(FLAGS_tera_table_ttl);
+        //index_cf->SetTimeToLive(FLAGS_tera_table_ttl);
+        index_cf->SetTimeToLive(schema.table_ttl());
         tera_adapter_.opt_.client_->CreateTable(index_table_desc, &error_code);
     }
 
@@ -232,7 +234,8 @@ Status DatabaseImpl::CreateTable(const TableDescription& table_desc) {
         index_lg->SetBlockSize(32 * 1024);
         index_lg->SetCompress(tera::kSnappyCompress);
         tera::ColumnFamilyDescriptor* index_cf = index_table_desc.AddColumnFamily("PrimaryKey", "lg");
-        index_cf->SetTimeToLive(FLAGS_tera_table_ttl);
+        //index_cf->SetTimeToLive(FLAGS_tera_table_ttl);
+        index_cf->SetTimeToLive(schema.table_ttl());
         tera_adapter_.opt_.client_->CreateTable(index_table_desc, &error_code);
     }
 
@@ -292,6 +295,7 @@ Status DatabaseImpl::ReleaseTables() {
 int DatabaseImpl::AssembleTableSchema(const TableDescription& table_desc,
                                       BigQueryTableSchema* schema) {
     schema->set_table_name(table_desc.table_name);
+    schema->set_table_ttl(table_desc.table_ttl);
     schema->set_primary_key_type(table_desc.primary_key_type);
     LOG(INFO) << "Assemble: table name " << schema->table_name();
     std::vector<IndexDescription>::const_iterator it;
@@ -310,6 +314,7 @@ int DatabaseImpl::AssembleTableSchema(const TableDescription& table_desc,
 int DatabaseImpl::DisassembleTableSchema(const BigQueryTableSchema& schema,
                                          TableDescription* table_desc) {
     table_desc->table_name = schema.table_name();
+    table_desc->table_ttl = schema.table_ttl();
     table_desc->primary_key_type = (TYPE)schema.primary_key_type();
     LOG(INFO) << "Disassemble: table name" << table_desc->table_name;
     for (int32_t i = 0; i < schema.index_descriptor_list_size(); i++) {
