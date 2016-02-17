@@ -165,7 +165,8 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 
     // create gc
-    ttl_ = FLAGS_tera_table_ttl;
+    //ttl_ = FLAGS_tera_table_ttl;
+    ttl_ = table_desc.table_ttl;
     gc_stop_ = false;
     pthread_create(&gc_tid_, NULL, &TableImpl::GarbageCleanThreadWrapper, this);
 }
@@ -1562,7 +1563,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 		    nr_reader.Dec();
 		    continue;
 		}
-		
+
 		// get data from filesystem
                 AsyncReadParam* async_read_param = new AsyncReadParam;
                 async_read_param->param = param;
@@ -1998,7 +1999,7 @@ void TableImpl::GarbageClean() {
     std::string dummyfname = fs_.root_path_ + "/" + TimeToString(&dummyfiletime) + ".data";
 
     // random sleep
-    /* 
+    /*
     struct timeval randtime;
     gettimeofday(&randtime, NULL);
     uint64_t sleep_duration = (randtime.tv_usec % 60) * 60000;
@@ -2015,7 +2016,7 @@ void TableImpl::GarbageClean() {
         if (ttl_ == 0) {
             continue;
         }
-
+        VLOG(50) << "path " << fs_.root_path_ << ", table ttl " << ttl_;
         std::vector<std::string> result;
         fs_.env_->GetChildren(fs_.root_path_, &result, NULL);
 
@@ -2050,10 +2051,12 @@ void TableImpl::GarbageClean() {
                     LOG(INFO) << "Garbage Clean, error, max delete file " << delete_file << ", unkown";
                     continue;
                 }
-		
+
                 if (filename < delete_file) {
                     VLOG(30) << "Garbage Clean, ttl " << ttl_ << ", file " << filename << ", delete " << delete_file;
                     fs_.env_->DeleteFile(filename);
+                } else {
+                    VLOG(50) << "Garbage Clean, not timeout, delete file " << delete_file << ", current file " << filename;
                 }
 
             } else {

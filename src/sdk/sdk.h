@@ -143,8 +143,11 @@ struct IndexDescription {
 // 数据类描述
 struct TableDescription {
     std::string table_name;
+    uint64_t table_ttl;
     enum TYPE primary_key_type;
     std::vector<struct IndexDescription> index_descriptor_list;
+
+    TableDescription(): table_ttl(0) {}
 };
 
 // 建表

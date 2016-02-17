@@ -411,7 +411,13 @@ struct LogTailerSpan {
                 if (it != alias_index_map.end()) {
                     logkv.insert(std::pair<std::string, std::string>(it->second, kv[1]));
                 }
+            } else if (kv.size() > 2 && kv[kv.size() - 2].size() > 0 && kv[kv.size() - 1].size() > 0) {
+                std::map<std::string, std::string>::const_iterator it = alias_index_map.find(kv[kv.size() - 2]);
+                if (it != alias_index_map.end()) {
+                    logkv.insert(std::pair<std::string, std::string>(it->second, kv[kv.size() - 1]));
+                }
             }
+
         }
         return linevec[0].size() + 1;
     }
