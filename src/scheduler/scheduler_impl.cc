@@ -135,7 +135,7 @@ void SchedulerImpl::DoUpdateAgentInfo(::google::protobuf::RpcController* control
                                       ::google::protobuf::Closure* done) {
     std::string select_server_addr;
 
-    VLOG(30) << "agent " << request->agent_addr() << ", update info";
+    VLOG(50) << "agent " << request->agent_addr() << ", update info";
     pthread_spin_lock(&agent_lock_);
     std::map<std::string, AgentInfo>::iterator it = agent_map_.find(request->agent_addr());
     if (it == agent_map_.end()) {
@@ -196,7 +196,7 @@ void SchedulerImpl::DoUpdateAgentInfo(::google::protobuf::RpcController* control
 
 void SchedulerImpl::SelectAndUpdateCollector(AgentInfo info, std::string* select_server_addr) {
     int64_t min_nr_agent = INT64_MAX;
-    VLOG(30) << "current agent's collector addr " << info.collector_addr << ", error_nr " << info.error_nr;
+    VLOG(50) << "current agent's collector addr " << info.collector_addr << ", error_nr " << info.error_nr;
     *select_server_addr = info.collector_addr;
 
     std::map<std::string, CollectorInfo>::iterator collector_it, min_it;

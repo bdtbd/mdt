@@ -83,11 +83,13 @@ void HelpManue() {
     printf("cmd: UpdateLG dbname tablename lgname['lg'] <lg_prop_key> <lg_prop_value>\n\n");
     printf("cmd: UpdateCF dbname tablename lgname['lg'] cfname['Location', 'PrimaryKey'] "
             "<cf_prop_key> <cf_prop_value>\n\n");
-    printf("cmd: showschema dbname tablename\n\n");
+    printf("cmd: ShowSchema dbname tablename\n\n");
     printf("cmd: UpdateSingleTable internaltablename <table_prop_key> <tale_prop_value>\n\n");
-    printf("cmd: dumpcache dbname tablename\n\n");
-    printf("cmd::AddWatchPath agent_addr[hostname:port or self] log_dir\n\n");
-    printf("cmd::AddWatchModuleStream agent_addr[hostname:port or self] module_name file_name\n\n");
+    printf("cmd: DumpCache dbname tablename\n\n");
+    printf("cmd: AddWatchPath agent_addr[hostname:port or self] log_dir\n\n");
+    printf("cmd: AddWatchModuleStream agent_addr[hostname:port or self] module_name file_name\n\n");
+    printf("cmd: ShowAgent\n\n");
+    printf("cmd: ShowCollector\n\n");
     printf("===========================\n");
 }
 
@@ -993,7 +995,7 @@ int UpdateTableCF(std::vector<std::string>& cmd_vec) {
 }
 
 void ParseFlagFile(const std::string& flagfile) {
-    std::cout << "default configure path, ../conf/mdt.flag, ../conf/tera.flag\n";
+    std::cout << "[default configure path: ../conf/trace.flag]\n";
     if (access(flagfile.c_str(), F_OK) || access(FLAGS_tera_flagfile.c_str(), F_OK)) {
         exit(-1);
     }
@@ -1090,6 +1092,120 @@ int AddWatchPathOp(std::vector<std::string>& cmd_vec) {
     return 0;
 }
 
+int ShowAgent(std::vector<std::string>& cmd_vec) {
+    std::string scheduler_addr = FLAGS_scheduler_addr;
+    mdt::RpcClient* rpc_client = new mdt::RpcClient;
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client->GetMethodList(scheduler_addr, &service);
+
+    mdt::LogSchedulerService::RpcShowAgentInfoRequest* req = new mdt::LogSchedulerService::RpcShowAgentInfoRequest();
+    mdt::LogSchedulerService::RpcShowAgentInfoResponse* resp = new mdt::LogSchedulerService::RpcShowAgentInfoResponse();
+    req->set_id(1);
+
+    rpc_client->SyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcShowAgentInfo, req, resp);
+
+    char headers[2048] = {'\0'};
+    snprintf(headers, sizeof(headers),
+            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
+            35, "agent_addr",
+            35, "collector_addr",
+            10, "agent_state",
+            10, "ctime",
+            10, "qps_quota",
+            10, "qps_use",
+            10, "bandwidth_quota",
+            10, "bandwidth_use",
+            10, "max_packet_size",
+            10, "min_packet_size",
+            10, "average_packet_size",
+            10, "error_nr");
+    std::string header_line;
+    header_line.resize(strlen(headers) + 8);
+    std::fill(header_line.begin(), header_line.end(), '-');
+
+    std::cout << headers << std::endl
+        << header_line << std::endl;
+    for (int i = 0; i < resp->info_size(); i++) {
+        const mdt::LogSchedulerService::AgentInformation& info = resp->info(i);
+        const mdt::LogSchedulerService::AgentInfo& agent_info = info.agent_info();
+        char line_str[1024] = {'\0'};
+        snprintf(line_str, sizeof(line_str),
+                "%-*s\t%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*d\t",
+                35, info.agent_addr().c_str(),
+                35, info.collector_addr().c_str(),
+                10, info.agent_state(),
+                10, info.ctime(),
+                10, agent_info.qps_quota(),
+                10, agent_info.qps_use(),
+                10, agent_info.bandwidth_quota(),
+                10, agent_info.bandwidth_use(),
+                10, agent_info.max_packet_size(),
+                10, agent_info.min_packet_size(),
+                10, agent_info.average_packet_size(),
+                10, agent_info.error_nr());
+        std::cout << line_str << std::endl;
+    }
+
+    delete req;
+    delete resp;
+    delete service;
+    return 0;
+}
+
+int ShowCollector(std::vector<std::string>& cmd_vec) {
+    std::string scheduler_addr = FLAGS_scheduler_addr;
+    mdt::RpcClient* rpc_client = new mdt::RpcClient;
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client->GetMethodList(scheduler_addr, &service);
+
+    mdt::LogSchedulerService::RpcShowCollectorInfoRequest* req = new mdt::LogSchedulerService::RpcShowCollectorInfoRequest();
+    mdt::LogSchedulerService::RpcShowCollectorInfoResponse* resp = new mdt::LogSchedulerService::RpcShowCollectorInfoResponse();
+    req->set_id(1);
+
+    rpc_client->SyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcShowCollectorInfo, req, resp);
+
+    char headers[2048] = {'\0'};
+    snprintf(headers, sizeof(headers),
+            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
+            35, "collector_addr",
+            10, "nr_agent",
+            10, "ctime",
+            10, "collector_state",
+            10, "qps",
+            10, "max_packet_size",
+            10, "min_packet_size",
+            10, "average_packet_size",
+            10, "error_nr");
+    std::string header_line;
+    header_line.resize(strlen(headers) + 8);
+    std::fill(header_line.begin(), header_line.end(), '-');
+
+    std::cout << headers << std::endl
+        << header_line << std::endl;
+    for (int i = 0; i < resp->info_size(); i++) {
+        const mdt::LogSchedulerService::CollectorInformation& info = resp->info(i);
+        const mdt::LogSchedulerService::CollectorInfo& collector_info = info.collector_info();
+        char line_str[1024] = {'\0'};
+        snprintf(line_str, sizeof(line_str),
+                "%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t",
+                35, info.collector_addr().c_str(),
+                10, info.nr_agents(),
+                10, info.ctime(),
+                10, info.collector_state(),
+                10, collector_info.qps(),
+                10, collector_info.max_packet_size(),
+                10, collector_info.min_packet_size(),
+                10, collector_info.average_packet_size(),
+                10, info.error_nr());
+        std::cout << line_str << std::endl;
+    }
+
+    delete req;
+    delete resp;
+    delete service;
+    return 0;
+}
+
 int main(int ac, char* av[]) {
     /*
     if (DupNfsSterr() < 0) {
@@ -1118,6 +1234,12 @@ int main(int ac, char* av[]) {
                 << ", module name " << non_interactive_cmd_vec[2]
                 << ", file name " << non_interactive_cmd_vec[3] << "\n";
             AddWatchModuleStreamOp(non_interactive_cmd_vec);
+        } else if (FLAGS_cmd == "ShowAgent") {
+            non_interactive_cmd_vec.push_back(FLAGS_cmd);
+            ShowAgent(non_interactive_cmd_vec);
+        } else if (FLAGS_cmd == "ShowCollector") {
+            non_interactive_cmd_vec.push_back(FLAGS_cmd);
+            ShowCollector(non_interactive_cmd_vec);
         } else {
             std::cout << "interactive mode, cmd " << FLAGS_cmd << " not know\n";
             exit(-1);
@@ -1204,7 +1326,7 @@ int main(int ac, char* av[]) {
             add_history(line);
             free(line);
             continue;
-        } else if (cmd_vec[0].compare("showschema") == 0 && cmd_vec.size() == 3) {
+        } else if (cmd_vec[0].compare("ShowSchema") == 0 && cmd_vec.size() == 3) {
             ShowTableSchema(cmd_vec);
             add_history(line);
             free(line);
@@ -1214,13 +1336,24 @@ int main(int ac, char* av[]) {
             add_history(line);
             free(line);
             continue;
-        } else if (cmd_vec[0].compare("dumpcache") == 0 && cmd_vec.size() == 3) {
+        } else if (cmd_vec[0].compare("DumpCache") == 0 && cmd_vec.size() == 3) {
             DumpCacheOp(cmd_vec);
+            add_history(line);
+            free(line);
+            continue;
+        } else if (cmd_vec[0].compare("ShowAgent") == 0 && cmd_vec.size() == 1) {
+            ShowAgent(cmd_vec);
+            add_history(line);
+            free(line);
+            continue;
+        } else if (cmd_vec[0].compare("ShowCollector") == 0 && cmd_vec.size() == 1) {
+            ShowCollector(cmd_vec);
             add_history(line);
             free(line);
             continue;
         } else {
             std::cout << "cmd not known\n";
+            add_history(line);
             free(line);
             continue;
         }
