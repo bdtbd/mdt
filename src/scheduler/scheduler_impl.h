@@ -76,6 +76,7 @@ public:
                  mdt::LogSchedulerService::RegisterNodeResponse* response,
                  ::google::protobuf::Closure* done);
     void BgHandleCollectorInfo();
+    void BgHandleAgentInfo();
 
     void GetNodeList(::google::protobuf::RpcController* controller,
                  const mdt::LogSchedulerService::GetNodeListRequest* request,
@@ -148,6 +149,9 @@ private:
 
     pthread_t collector_tid_;
     volatile bool collector_thread_stop_;
+
+    pthread_t agent_tid_;
+    volatile bool agent_thread_stop_;
 };
 
 }
