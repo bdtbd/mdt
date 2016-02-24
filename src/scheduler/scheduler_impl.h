@@ -91,6 +91,15 @@ public:
                                  const mdt::LogSchedulerService::RpcAddWatchModuleStreamRequest* request,
                                  mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* response,
                                  ::google::protobuf::Closure* done);
+    void RpcShowAgentInfo(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcShowAgentInfoRequest* request,
+                          mdt::LogSchedulerService::RpcShowAgentInfoResponse* response,
+                          ::google::protobuf::Closure* done);
+
+    void RpcShowCollectorInfo(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcShowCollectorInfoRequest* request,
+                          mdt::LogSchedulerService::RpcShowCollectorInfoResponse* response,
+                          ::google::protobuf::Closure* done);
 
 private:
     void DoRegisterNode(::google::protobuf::RpcController* controller,
@@ -114,6 +123,15 @@ private:
                                    mdt::LogSchedulerService::RpcAddWatchModuleStreamResponse* response,
                                    ::google::protobuf::Closure* done);
 
+    void DoRpcShowAgentInfo(::google::protobuf::RpcController* controller,
+                      const mdt::LogSchedulerService::RpcShowAgentInfoRequest* request,
+                      mdt::LogSchedulerService::RpcShowAgentInfoResponse* response,
+                      ::google::protobuf::Closure* done);
+
+    void DoRpcShowCollectorInfo(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcShowCollectorInfoRequest* request,
+                          mdt::LogSchedulerService::RpcShowCollectorInfoResponse* response,
+                          ::google::protobuf::Closure* done);
 private:
     RpcClient* rpc_client_;
 
@@ -125,6 +143,8 @@ private:
     ThreadPool collector_thread_;
     pthread_spinlock_t collector_lock_;
     std::map<std::string, CollectorInfo> collector_map_;
+
+    ThreadPool ctrl_thread_;
 
     pthread_t collector_tid_;
     volatile bool collector_thread_stop_;

@@ -72,6 +72,39 @@ message RpcAddWatchModuleStreamResponse {
     optional RpcResponseStatus status = 1; 
 }
 
+message RpcShowAgentInfoRequest {
+    optional int64 id = 1;
+}
+
+message AgentInformation {
+    optional string agent_addr = 1;
+    optional AgentInfo agent_info = 2;
+    optional int64 ctime = 3;
+    optional string collector_addr = 4;
+    optional int64 agent_state = 5;
+}
+
+message RpcShowAgentInfoResponse {
+    repeated AgentInformation info = 1;
+}
+
+message RpcShowCollectorInfoRequest {
+    optional int64 id = 1;
+}
+
+message CollectorInformation {
+    optional string collector_addr = 1;
+    optional CollectorInfo collector_info = 2;
+    optional int64 nr_agents = 3;
+    optional int64 ctime = 4;
+    optional int64 error_nr = 5;
+    optional int64 collector_state = 6;
+}
+
+message RpcShowCollectorInfoResponse {
+    repeated CollectorInformation info = 1;
+}
+
 // rpc service
 service LogSchedulerService {
     rpc Echo(EchoRequest) returns(EchoResponse);
@@ -79,6 +112,8 @@ service LogSchedulerService {
     rpc GetNodeList(GetNodeListRequest) returns(GetNodeListResponse);
     rpc RpcAddAgentWatchPath(RpcAddAgentWatchPathRequest) returns(RpcAddAgentWatchPathResponse);
     rpc RpcAddWatchModuleStream(RpcAddWatchModuleStreamRequest) returns(RpcAddWatchModuleStreamResponse);
+    rpc RpcShowAgentInfo(RpcShowAgentInfoRequest) returns(RpcShowAgentInfoResponse);
+    rpc RpcShowCollectorInfo(RpcShowCollectorInfoRequest) returns(RpcShowCollectorInfoResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;

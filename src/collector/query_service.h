@@ -76,6 +76,7 @@ public:
 private:
     SearchEngineImpl* se_;
     ThreadPool* se_thread_pool_; // operate on se's method
+    ThreadPool* se_read_thread_pool_; // operate on se's method
 };
 
 }

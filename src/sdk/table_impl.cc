@@ -602,7 +602,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         const std::string& index_key = map_it->second;
         tera::Table* index_table = GetIndexTable(index_name);
         if (index_table == NULL) {
-            VLOG(12) << "write index table: " << it->index_name << ", no such table";
+            VLOG(12) << "write index table: " << index_name << ", no such table";
             ReleasePutContext(context);
             continue;
         }
