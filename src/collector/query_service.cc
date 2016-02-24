@@ -193,6 +193,7 @@ void SearchEngineImpl::Search(::google::protobuf::RpcController* ctrl,
                                 const ::mdt::SearchEngine::RpcSearchRequest* req,
                                 ::mdt::SearchEngine::RpcSearchResponse* resp,
                                 ::google::protobuf::Closure* done) {
+    VLOG(50) << "begin to search>>>";
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();
@@ -281,19 +282,22 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
 /////////////////////////////////
 SearchEngineServiceImpl::SearchEngineServiceImpl(SearchEngineImpl* se)
     : se_(se),
-      se_thread_pool_(new ThreadPool(FLAGS_se_num_threads)) {
+      se_thread_pool_(new ThreadPool(FLAGS_se_num_threads)),
+      se_read_thread_pool_(new ThreadPool(FLAGS_se_num_threads)) {
 }
 
 SearchEngineServiceImpl::~SearchEngineServiceImpl() {
     delete se_thread_pool_;
+    delete se_read_thread_pool_;
 }
 
 void SearchEngineServiceImpl::Search(::google::protobuf::RpcController* ctrl,
                                      const ::mdt::SearchEngine::RpcSearchRequest* req,
                                      ::mdt::SearchEngine::RpcSearchResponse* resp,
                                      ::google::protobuf::Closure* done) {
+    VLOG(50) << "begin to search, enqueue task >>";
     ThreadPool::Task task = boost::bind(&SearchEngineImpl::Search, se_, ctrl, req, resp, done);
-    se_thread_pool_->AddTask(task);
+    se_read_thread_pool_->AddTask(task);
 }
 
 void SearchEngineServiceImpl::Store(::google::protobuf::RpcController* ctrl,

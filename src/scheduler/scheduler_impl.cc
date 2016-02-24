@@ -25,7 +25,8 @@ void* BgHandleCollectorInfoWrapper(void* arg) {
 
 SchedulerImpl::SchedulerImpl()
     : agent_thread_(40),
-    collector_thread_(4) {
+    collector_thread_(4),
+    ctrl_thread_(10) {
 
     rpc_client_ = new RpcClient();
 
@@ -62,6 +63,7 @@ void SchedulerImpl::DoRegisterNode(::google::protobuf::RpcController* controller
                                  const mdt::LogSchedulerService::RegisterNodeRequest* request,
                                  mdt::LogSchedulerService::RegisterNodeResponse* response,
                                  ::google::protobuf::Closure* done) {
+    int64_t begin_ts = mdt::timer::get_micros();
     pthread_spin_lock(&collector_lock_);
     std::map<std::string, CollectorInfo>::iterator it = collector_map_.find(request->server_addr());
     if (it == collector_map_.end()) {
@@ -78,7 +80,7 @@ void SchedulerImpl::DoRegisterNode(::google::protobuf::RpcController* controller
         info.ctime = mdt::timer::get_micros();
 
         collector_map_.insert(std::pair<std::string, CollectorInfo>(request->server_addr(), info));
-        VLOG(30) << "new node register, " << request->server_addr();
+        VLOG(50) << "new node register, " << request->server_addr();
     } else {
         // update collector info
         CollectorInfo& info = it->second;
@@ -95,6 +97,9 @@ void SchedulerImpl::DoRegisterNode(::google::protobuf::RpcController* controller
 
     response->set_error_code(0);
     done->Run();
+
+    int64_t end_ts = mdt::timer::get_micros();
+    VLOG(50) << "register collector, cost time " << end_ts - begin_ts;
 }
 
 // try to set collector to inactive state
@@ -312,6 +317,91 @@ void SchedulerImpl::RpcAddWatchModuleStream(::google::protobuf::RpcController* c
     ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcAddWatchModuleStream, this, controller, request, response, done);
     agent_thread_.AddTask(task);
     return;
+}
+
+// query agent info
+void SchedulerImpl::RpcShowAgentInfo(::google::protobuf::RpcController* controller,
+                      const mdt::LogSchedulerService::RpcShowAgentInfoRequest* request,
+                      mdt::LogSchedulerService::RpcShowAgentInfoResponse* response,
+                      ::google::protobuf::Closure* done) {
+    int64_t begin_ts = mdt::timer::get_micros();
+    ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcShowAgentInfo, this, controller, request, response, done);
+    ctrl_thread_.AddTask(task);
+    int64_t end_ts = mdt::timer::get_micros();
+    VLOG(20) << "ShowAgentInfo, add task, cost time " << end_ts - begin_ts;
+}
+
+void SchedulerImpl::DoRpcShowAgentInfo(::google::protobuf::RpcController* controller,
+                      const mdt::LogSchedulerService::RpcShowAgentInfoRequest* request,
+                      mdt::LogSchedulerService::RpcShowAgentInfoResponse* response,
+                      ::google::protobuf::Closure* done) {
+    int64_t begin_ts = mdt::timer::get_micros();
+    pthread_spin_lock(&agent_lock_);
+    std::map<std::string, AgentInfo>::iterator it = agent_map_.begin();
+    for (; it != agent_map_.end(); ++it) {
+        AgentInfo& info = it->second;
+
+        mdt::LogSchedulerService::AgentInformation* agent_info = response->add_info();
+        agent_info->set_agent_addr(it->first);
+        agent_info->set_ctime(info.ctime);
+        agent_info->set_collector_addr(info.collector_addr);
+        agent_info->set_agent_state(info.state);
+
+        mdt::LogSchedulerService::AgentInfo* information = agent_info->mutable_agent_info();
+        information->set_qps_quota(info.qps_quota);
+        information->set_qps_use(info.qps_use);
+        information->set_bandwidth_quota(info.bandwidth_quota);
+        information->set_bandwidth_use(info.bandwidth_use);
+        information->set_max_packet_size(info.max_packet_size);
+        information->set_min_packet_size(info.min_packet_size);
+        information->set_average_packet_size(info.average_packet_size);
+        information->set_error_nr(info.error_nr);
+    }
+    pthread_spin_unlock(&agent_lock_);
+    done->Run();
+    int64_t end_ts = mdt::timer::get_micros();
+    VLOG(20) << "ShowAgentInfo, response agent info, cost time " << end_ts - begin_ts;
+}
+
+// query collector info
+void SchedulerImpl::RpcShowCollectorInfo(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcShowCollectorInfoRequest* request,
+                          mdt::LogSchedulerService::RpcShowCollectorInfoResponse* response,
+                          ::google::protobuf::Closure* done) {
+    int64_t begin_ts = mdt::timer::get_micros();
+    ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcShowCollectorInfo, this, controller, request, response, done);
+    ctrl_thread_.AddTask(task);
+    int64_t end_ts = mdt::timer::get_micros();
+    VLOG(20) << "ShowCollectorInfo, add task, cost time " << end_ts - begin_ts;
+}
+
+void SchedulerImpl::DoRpcShowCollectorInfo(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcShowCollectorInfoRequest* request,
+                          mdt::LogSchedulerService::RpcShowCollectorInfoResponse* response,
+                          ::google::protobuf::Closure* done) {
+    int64_t begin_ts = mdt::timer::get_micros();
+    pthread_spin_lock(&collector_lock_);
+    std::map<std::string, CollectorInfo>::iterator it = collector_map_.begin();
+    for (; it != collector_map_.end(); ++it) {
+        CollectorInfo& info = it->second;
+        mdt::LogSchedulerService::CollectorInformation* collector_info = response->add_info();
+        collector_info->set_collector_addr(it->first);
+        collector_info->set_nr_agents(info.nr_agents);
+        collector_info->set_ctime(info.ctime);
+        collector_info->set_collector_state(info.state);
+        collector_info->set_error_nr(info.error_nr);
+
+        mdt::LogSchedulerService::CollectorInfo* information = collector_info->mutable_collector_info();
+        information->set_qps(info.qps);
+        information->set_max_packet_size(info.max_packet_size);
+        information->set_min_packet_size(info.min_packet_size);
+        information->set_average_packet_size(info.average_packet_size);
+    }
+    pthread_spin_unlock(&collector_lock_);
+    done->Run();
+
+    int64_t end_ts = mdt::timer::get_micros();
+    VLOG(20) << "query collector info, cost time " << end_ts - begin_ts;
 }
 
 }
