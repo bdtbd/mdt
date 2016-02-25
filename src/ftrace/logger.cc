@@ -2,8 +2,8 @@
 #include <sstream>
 
 #include <gflags/gflags.h>
-#include "ftrace/collector/logger.h"
-#include "ftrace/collector/trace.h"
+#include "ftrace/logger.h"
+#include "ftrace/trace.h"
 #include <google/protobuf/message.h>
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/descriptor.pb.h>
@@ -74,7 +74,9 @@ void KvLog(int level, const char* value, const char* fmt, ...) {
     return;
 }
 
-// LOG interface for galaxy
+////////////////////////////////////////////////
+///////    LOG interface for galaxy   //////////
+////////////////////////////////////////////////
 void OpenProtoBufLog(const std::string& dbname, const std::string& tablename) {
     TraceModule::OpenProtoBufLog(dbname, tablename);
 }
@@ -97,6 +99,12 @@ inline int64_t get_micros() {
     return static_cast<int64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
 }
 
+// log pb:
+//  1. export pb to local service
+//  2. support string, bytes, int32, int64, uint32, uint64 to build index
+//  3. TODO: support enum index, repeate type index
+//  4. dbname = package name
+//  5. tablename = message name
 void LogProtoBuf(const std::string& primary_key_name, ::google::protobuf::Message* message) {
     const ::google::protobuf::Descriptor* descriptor = message->GetDescriptor();
     const std::string& tablename = descriptor->name();

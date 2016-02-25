@@ -8,15 +8,12 @@
 
 #include <gflags/gflags.h>
 
-#include "ftrace/collector/trace.h"
+#include "ftrace/trace.h"
 //#include "util/coding.h"
 
 DECLARE_string(flagfile);
 DECLARE_uint64(max_text_annotation_size);
 DECLARE_uint64(log_level);
-
-DECLARE_bool(use_mdt_flag);
-DECLARE_string(mdt_flagfile);
 
 namespace mdt {
 
@@ -48,6 +45,7 @@ void TraceModule::InitTraceModule(const std::string& flagfile) {
     }
 
     //mdt.flag enable
+    /*
     if (FLAGS_use_mdt_flag) {
         int ac = 1;
         char** av = new char*[2];
@@ -59,6 +57,7 @@ void TraceModule::InitTraceModule(const std::string& flagfile) {
         delete av;
         FLAGS_flagfile = local_flagfile;
     }
+    */
     pthread_key_create(&thread_key, NilCallback);
 
     // init rpc channel
