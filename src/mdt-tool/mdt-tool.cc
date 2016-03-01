@@ -99,7 +99,7 @@ int GetClientAndTableList(const std::string& db_name,
                           std::vector<std::string>& table_list) {
     // new tera client
     tera::ErrorCode error;
-    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "mdt", &error);
     if (client == NULL) {
         std::cout << "new tera::Client error\n";
         return -1;
@@ -119,7 +119,7 @@ int GetClientAndTableList(const std::string& db_name,
         std::cout << " Get index table name from " << schema_table << " fail\n";
         return -1;
     }
-    delete table;
+    //delete table;
     mdt::BigQueryTableSchema schema;
     schema.ParseFromString(schema_value);
     std::cout << "SCHEMA:\n" << schema.DebugString() << "\n";
@@ -224,7 +224,7 @@ int ShowTableSchema(std::vector<std::string>& cmd_vec) {
 
     // open client
     tera::ErrorCode error;
-    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "mdt", &error);
     if (client == NULL) {
         std::cout << "new tera::Client error\n";
         return -1;
@@ -242,7 +242,7 @@ int ShowTableSchema(std::vector<std::string>& cmd_vec) {
         std::cout << " Get index table name from " << schema_table << " fail\n";
         return -1;
     }
-    delete table;
+    //delete table;
     mdt::BigQueryTableSchema schema;
     schema.ParseFromString(schema_value);
     std::cout << "SCHEMA:\n" << schema.DebugString() << "\n";
@@ -714,7 +714,7 @@ int UpdateSingleTableProp(std::vector<std::string>& cmd_vec) {
 
     // open client
     tera::ErrorCode error;
-    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "mdt", &error);
     if (client == NULL) {
         std::cout << "new tera::Client error\n";
         return -1;
@@ -734,7 +734,7 @@ int UpdateMdtTableProp(std::vector<std::string>& cmd_vec) {
 
     // open client
     tera::ErrorCode error;
-    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "mdt", &error);
     if (client == NULL) {
         std::cout << "new tera::Client error\n";
         return -1;
@@ -752,7 +752,7 @@ int UpdateMdtTableProp(std::vector<std::string>& cmd_vec) {
         std::cout << " Get index table name from " << schema_table << " fail\n";
         return -1;
     }
-    delete table;
+    //delete table;
     mdt::BigQueryTableSchema schema;
     schema.ParseFromString(schema_value);
 
@@ -834,7 +834,7 @@ int UpdateMdtLgProp(std::vector<std::string>& cmd_vec) {
 
     // open client
     tera::ErrorCode error;
-    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "mdt", &error);
     if (client == NULL) {
         std::cout << "new tera::Client error\n";
         return -1;
@@ -852,7 +852,7 @@ int UpdateMdtLgProp(std::vector<std::string>& cmd_vec) {
         std::cout << " Get index table name from " << schema_table << " fail\n";
         return -1;
     }
-    delete table;
+    //delete table;
     mdt::BigQueryTableSchema schema;
     schema.ParseFromString(schema_value);
 
@@ -939,7 +939,7 @@ int UpdateTableCF(std::vector<std::string>& cmd_vec) {
 
     // open client
     tera::ErrorCode error;
-    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "test_update", &error);
+    tera::Client* client = tera::Client::NewClient(FLAGS_tera_flagfile, "mdt", &error);
     if (client == NULL) {
         std::cout << "new tera::Client error\n";
         return -1;
