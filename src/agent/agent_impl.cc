@@ -244,7 +244,7 @@ void AgentImpl::WatchLogDir(FileSystemInotify* fs_inotify) {
         } else if (event.mask & (IN_MODIFY)) {
             AddWriteEvent(fs_inotify->log_dir, filename, &event);
         } else {
-            //for (int i = 0; i < sizeof(event_masks)/sizeof(mdt::agent::EventMask); ++i) {
+
         }
     }
 }
@@ -460,6 +460,13 @@ void AgentImpl::RpcAddWatchModuleStream(::google::protobuf::RpcController* contr
     } else {
         response->set_status(mdt::LogAgentService::kRpcOk);
     }
+    done->Run();
+}
+
+void AgentImpl::RpcStoreSpan(::google::protobuf::RpcController* controller,
+                             const mdt::LogAgentService::RpcStoreSpanRequest* request,
+                             mdt::LogAgentService::RpcStoreSpanResponse* response,
+                             ::google::protobuf::Closure* done) {
     done->Run();
 }
 

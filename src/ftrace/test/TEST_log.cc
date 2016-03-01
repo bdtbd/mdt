@@ -1,6 +1,6 @@
 #include <queue>
 #include <unistd.h>
-#include "ftrace/collector/logger.h"
+#include "ftrace/logger.h"
 #include "util/mutex.h"
 #include <sstream>
 #include "proto/ftrace_test.pb.h"
@@ -107,7 +107,7 @@ ThreadQueue prepare_queue(FuncA);
 void TEST_case002() {
     ::mdt::galaxy::test::PodStat pod_stat;
     std::cout << "case002...\n";
-    ::mdt::OpenProtoBufLog("mdt.galaxy.test", "PodStat");
+    //::mdt::OpenProtoBufLog("mdt.galaxy.test", "PodStat");
     ::mdt::LogProtoBuf("id", &pod_stat);
     //::mdt::CloseProtoBufLog("mdt.galaxy.test", "PodStat");
 }
@@ -136,10 +136,10 @@ void TEST_case003() {
 
 void TEST_case004() {
     std::cout << "test case4 ..., open 4 table, begin\n";
-    ::mdt::OpenProtoBufLog("baidu.galaxy", "PodStat");
-    ::mdt::OpenProtoBufLog("baidu.galaxy", "PodEvent");
-    ::mdt::OpenProtoBufLog("baidu.galaxy", "JobStat");
-    ::mdt::OpenProtoBufLog("baidu.galaxy", "JobEvent");
+    //::mdt::OpenProtoBufLog("baidu.galaxy", "PodStat");
+    //::mdt::OpenProtoBufLog("baidu.galaxy", "PodEvent");
+    //::mdt::OpenProtoBufLog("baidu.galaxy", "JobStat");
+    //::mdt::OpenProtoBufLog("baidu.galaxy", "JobEvent");
     std::cout << "test case4 ..., open 4 table, success\n";
 }
 

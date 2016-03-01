@@ -23,6 +23,12 @@ void* BgHandleCollectorInfoWrapper(void* arg) {
     return NULL;
 }
 
+void* BgHandleAgentInfoWrapper(void* arg) {
+    SchedulerImpl* scheduler = (SchedulerImpl*)arg;
+    scheduler->BgHandleAgentInfo();
+    return NULL;
+}
+
 SchedulerImpl::SchedulerImpl()
     : agent_thread_(40),
     collector_thread_(4),
@@ -34,6 +40,8 @@ SchedulerImpl::SchedulerImpl()
     pthread_spin_init(&agent_lock_, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&collector_lock_, PTHREAD_PROCESS_PRIVATE);
 
+    agent_thread_stop_ = false;
+    pthread_create(&collector_tid_, NULL, BgHandleAgentInfoWrapper, this);
     collector_thread_stop_ = false;
     pthread_create(&collector_tid_, NULL, BgHandleCollectorInfoWrapper, this);
 }
@@ -124,8 +132,55 @@ void SchedulerImpl::BgHandleCollectorInfo() {
         }
         pthread_spin_unlock(&collector_lock_);
         int64_t end_ts = mdt::timer::get_micros();
-        VLOG(30) << "bg handle cost time " << end_ts - start_ts;
-        sleep(5);
+        VLOG(30) << "bg handle collector cost time " << end_ts - start_ts;
+        sleep(2);
+    }
+}
+
+void SchedulerImpl::BgHandleAgentInfo() {
+    while (1) {
+        if (agent_thread_stop_) {
+            break;
+        }
+
+        std::map<std::string, int64_t> collector_set;
+        int64_t start_ts = mdt::timer::get_micros();
+        pthread_spin_lock(&agent_lock_);
+        std::map<std::string, AgentInfo>::iterator it = agent_map_.begin();
+        for (; it != agent_map_.end(); ++it) {
+            AgentInfo& info = it->second;
+            int64_t ts = mdt::timer::get_micros();
+            if ((info.state == AGENT_ACTIVE) &&
+                (info.ctime + FLAGS_agent_timeout < ts)) {
+                info.state = AGENT_INACTIVE;
+                if (collector_set.find(info.collector_addr) == collector_set.end()) {
+                    collector_set.insert(std::pair<std::string, int64_t>(info.collector_addr, 1));
+                } else {
+                    (collector_set[info.collector_addr])++;
+                }
+            }
+        }
+        pthread_spin_unlock(&agent_lock_);
+
+        // update collector info
+        std::map<std::string, int64_t>::iterator set_it = collector_set.begin();
+        for (; set_it != collector_set.end(); ++set_it) {
+            pthread_spin_lock(&collector_lock_);
+            std::map<std::string, CollectorInfo>::iterator collector_map_it = collector_map_.find(set_it->first);
+            if (collector_map_it != collector_map_.end()) {
+                CollectorInfo& c_info = collector_map_it->second;
+                if (c_info.nr_agents < set_it->second) {
+                    c_info.nr_agents = 0;
+                } else {
+                    c_info.nr_agents -= set_it->second;
+                }
+            }
+            pthread_spin_unlock(&collector_lock_);
+        }
+
+        int64_t end_ts = mdt::timer::get_micros();
+        VLOG(30) << "bg handle agent cost time " << end_ts - start_ts;
+        sleep(2);
     }
 }
 

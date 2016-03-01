@@ -36,8 +36,9 @@ MULWRITE_TEST_SRC := $(wildcard src/benchmark/mulcli_write_test.cc)
 SCAN_TEST_SRC := $(wildcard src/benchmark/scan_test.cc)
 C_SAMPLE_SRC := $(wildcard src/sample/c_sample.c)
 
-FTRACE_SRC := $(wildcard src/ftrace/collector/*.cc)
-FTRACE_TEST_SRC := $(wildcard src/ftrace/collector/test/*.cc)
+FTRACE_SRC := $(wildcard src/ftrace/*.cc)
+FTRACE_TEST_SRC := $(wildcard src/ftrace/test/*.cc)
+
 AGENT_SRC := $(wildcard src/agent/*.cc)
 COLLECTOR_SRC := $(wildcard src/collector/*.cc)
 SCHEDULER_SRC := $(wildcard src/scheduler/*.cc)
@@ -144,8 +145,8 @@ c_sample: $(C_SAMPLE_OBJ) $(LIBRARY)
 libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 	$(AR) -rs $@ $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
 
-libftrace.a: $(FTRACE_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
-	$(AR) -rs $@ $(FTRACE_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
+libftrace.a: $(FTRACE_OBJ) $(PROTO_OBJ)
+	$(AR) -rs $@ $(FTRACE_OBJ) $(PROTO_OBJ)
 
 TEST_log: $(FTRACE_TEST_OBJ) $(FTRACELIBRARY)
 	$(CXX) -o $@ $(FTRACE_TEST_OBJ) $(FTRACELIBRARY) $(LDFLAGS)

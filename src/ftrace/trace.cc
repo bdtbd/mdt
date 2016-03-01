@@ -1,21 +1,23 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <iostream>
+#include <sstream>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <sstream>
-
+#include <google/protobuf/message.h>
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/descriptor.pb.h>
+#include "proto/agent.pb.h"
 #include <gflags/gflags.h>
 
-#include "ftrace/collector/trace.h"
-//#include "util/coding.h"
+#include "ftrace/trace.h"
+#include "rpc/rpc_client.h"
 
 DECLARE_string(flagfile);
-DECLARE_uint64(max_text_annotation_size);
-DECLARE_uint64(log_level);
-
-DECLARE_bool(use_mdt_flag);
+DECLARE_uint64(mdt_max_text_annotation_size);
+DECLARE_string(mdt_server_addr);
+DECLARE_uint64(mdt_log_level);
 DECLARE_string(mdt_flagfile);
 
 namespace mdt {
@@ -24,49 +26,67 @@ pthread_key_t TraceModule::thread_key; // thread_load variable
 Mutex TraceModule::kmutex;
 std::map<uint64_t, Trace*> TraceModule::ktrace_map;
 std::map<uint64_t, Trace*> TraceModule::kspan_map; // gobal span map
-::sofa::pbrpc::RpcClient TraceModule::rpc_client;
+::mdt::RpcClient* TraceModule::rpc_client;
+bool TraceModule::TraceInited = false;
+pthread_t TraceModule::async_log_tid;
+std::string TraceModule::FlagFile;
 
 ///////////////////////
 ///// TraceModule /////
 ///////////////////////
+void TraceModule::SetGoogleFlag(const std::string& flagfile) {
+    int ac = 1;
+    char** av = new char*[2];
+    av[0] = (char*)"dummy";
+    av[1] = NULL;
+    std::string local_flagfile = FLAGS_flagfile;
+    FLAGS_flagfile = flagfile;
+    ::google::ParseCommandLineFlags(&ac, &av, true);
+    delete av;
+    FLAGS_flagfile = local_flagfile;
+    return;
+}
+
+/*
+void* TraceModule::AsyncLogThread(void* arg) {
+    while (1) {
+        // update param every 5 sec
+        if (TraceModule::FlagFile.size() > 0 && (access(TraceModule::FlagFile.c_str(), F_OK) == 0)) {
+            TraceModule::SetGoogleFlag(TraceModule::FlagFile);
+        } else if (FLAGS_mdt_flagfile.size() > 0 && (access(FLAGS_mdt_flagfile.c_str(), F_OK) == 0)) {
+            TraceModule::SetGoogleFlag(FLAGS_mdt_flagfile);
+        } else {
+            // use default configure
+        }
+        usleep(10000000); // sleep 5 sec
+    }
+    return NULL;
+}
+*/
+
 void NilCallback(void* arg) {}
-void TraceModule::InitTraceModule(const std::string& flagfile) {
-    // Get configure
-    if (flagfile.size() == 0 || access(flagfile.c_str(), F_OK)) {
-        std::cout << "ZIPLOG: use default configure\n";
+static pthread_once_t trace_once = PTHREAD_ONCE_INIT;
+static void TraceModuleInitOnce() {
+    pthread_key_create(&TraceModule::thread_key, NilCallback);
+    // local rpc client
+    TraceModule::rpc_client = new RpcClient();
+    TraceModule::TraceInited = true;
+
+    if (TraceModule::FlagFile.size() > 0 && (access(TraceModule::FlagFile.c_str(), F_OK) == 0)) {
+        TraceModule::SetGoogleFlag(TraceModule::FlagFile);
+    } else if (FLAGS_mdt_flagfile.size() > 0 && (access(FLAGS_mdt_flagfile.c_str(), F_OK) == 0)) {
+        TraceModule::SetGoogleFlag(FLAGS_mdt_flagfile);
     } else {
-        int ac = 1;
-        char** av = new char*[2];
-        av[0] = (char*)"dummy";
-        av[1] = NULL;
-        std::string local_flagfile = FLAGS_flagfile;
-        FLAGS_flagfile = flagfile;
-        ::google::ParseCommandLineFlags(&ac, &av, true);
-        delete av;
-        FLAGS_flagfile = local_flagfile;
-        std::cout << "ZIPLOG: use " << flagfile << " to configure lib\n";
+        // use default configure
     }
+}
 
-    //mdt.flag enable
-    if (FLAGS_use_mdt_flag) {
-        int ac = 1;
-        char** av = new char*[2];
-        av[0] = (char*)"dummy";
-        av[1] = NULL;
-        std::string local_flagfile = FLAGS_flagfile;
-        FLAGS_flagfile = FLAGS_mdt_flagfile;
-        ::google::ParseCommandLineFlags(&ac, &av, true);
-        delete av;
-        FLAGS_flagfile = local_flagfile;
+// trace module init once
+void TraceModule::InitTraceModule(const std::string& flagfile) {
+    if (TraceModule::TraceInited == false) {
+        TraceModule::FlagFile = flagfile;
     }
-    pthread_key_create(&thread_key, NilCallback);
-
-    // init rpc channel
-    ::sofa::pbrpc::RpcClientOptions client_options;
-    client_options.max_throughput_in = -1;
-    client_options.max_throughput_out = -1;
-    client_options.work_thread_num = 10;
-    TraceModule::rpc_client.ResetOptions(client_options);
+    pthread_once(&trace_once, TraceModuleInitOnce);
     return;
 }
 
@@ -155,6 +175,74 @@ void TraceModule::CloseProtoBufLog(const std::string& dbname, const std::string&
     return;
 }
 
+void StoreCallback(const mdt::LogAgentService::RpcStoreRequest* req,
+                   mdt::LogAgentService::RpcStoreResponse* resp,
+                   bool failed, int error,
+                   mdt::LogAgentService::LogAgentService_Stub* service) {
+    delete req;
+    delete service;
+    delete resp;
+}
+
+inline int64_t get_micros() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return static_cast<int64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
+}
+
+// log pb:
+//  1. export pb to local service
+//  2. support string, bytes, int32, int64, uint32, uint64 to build index
+//  3. TODO: support enum index, repeate type index
+//  4. dbname = package name
+//  5. tablename = message name
+void TraceModule::LogProtoBuf(const std::string& primary_key_name, ::google::protobuf::Message* message) {
+    TraceModule::InitTraceModule("");
+
+    const ::google::protobuf::Descriptor* descriptor = message->GetDescriptor();
+    const std::string& tablename = descriptor->name();
+    const std::string& fullname = descriptor->full_name();
+    std::string dbname(fullname, 0, fullname.size() - tablename.size() - 1);
+
+    mdt::LogAgentService::LogAgentService_Stub* service;
+    TraceModule::rpc_client->GetMethodList(FLAGS_mdt_server_addr, &service);
+    mdt::LogAgentService::RpcStoreRequest* req = new mdt::LogAgentService::RpcStoreRequest;
+    mdt::LogAgentService::RpcStoreResponse* resp = new mdt::LogAgentService::RpcStoreResponse;
+    boost::function<void (const mdt::LogAgentService::RpcStoreRequest*,
+                          mdt::LogAgentService::RpcStoreResponse*,
+                          bool, int)> callback = boost::bind(&mdt::StoreCallback, _1, _2, _3, _4, service);
+
+    // prepare request
+    req->set_db_name(dbname);
+    req->set_table_name(tablename);
+    for (int i = 0; i < descriptor->field_count(); i++) {
+        const ::google::protobuf::FieldDescriptor* field = descriptor->field(i);
+        const ::google::protobuf::Reflection* reflection = message->GetReflection();
+        if (field == NULL ||
+            (field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED) ||
+            !reflection->HasField(*message, field)) continue;
+        // set primary key
+        if (primary_key_name == field->name()) {
+            req->set_primary_key(TraceModule::GetFieldValue(message, field));
+            req->set_timestamp(get_micros());
+            if (message->SerializeToString(req->mutable_data())) {
+
+            } else {
+                //std::cout << "serialstring fail\n";
+            }
+        } else {
+            ::mdt::LogAgentService::RpcStoreIndex* idx = req->add_index_list();
+            idx->set_index_table(field->name());
+            idx->set_key(TraceModule::GetFieldValue(message, field));
+        }
+    }
+
+    TraceModule::rpc_client->AsyncCall(service,
+                                &mdt::LogAgentService::LogAgentService_Stub::Store,
+                                req, resp, callback);
+    return;
+}
+
 /////////////////////////////////////////
 /////   internal interface          /////
 /////////////////////////////////////////
@@ -237,8 +325,10 @@ uint64_t TraceModule::GenerateUUID() {
 void Trace::OpenTrace(uint64_t trace_id,
                       uint64_t parent_span_id,
                       uint64_t span_id,
-                      const std::string& name,
-                      const std::string& trace_name) {
+                      const std::string& db_name,
+                      const std::string& table_name) {
+    TraceModule::InitTraceModule("");
+
     bool new_span = false;
     Trace* trace = NULL;
     if (trace_id == 0) {
@@ -252,12 +342,12 @@ void Trace::OpenTrace(uint64_t trace_id,
     } else {
         trace = TraceModule::GetTraceBySpanId(span_id);
         if (trace == NULL) {
-            std::cout << "trace id " << trace_id << ", span id " << span_id << ", not exist, New it";
+            std::cout << "trace id " << trace_id << ", span id " << span_id << ", not exist, New it\n";
             new_span = true;
         }
     }
     if (new_span) {
-        trace = new Trace(trace_id, parent_span_id, span_id, name, trace_name);
+        trace = new Trace(trace_id, parent_span_id, span_id, db_name, table_name);
         TraceModule::SetTraceBySpanId(span_id, trace);
     }
 
@@ -267,17 +357,25 @@ void Trace::OpenTrace(uint64_t trace_id,
 }
 
 void Trace::ReleaseTrace() {
+    TraceModule::InitTraceModule("");
+
     Trace* trace = TopThreadValue();
     if (trace == NULL) {
         return;
     }
     trace->PopThreadValue();
-    TraceModule::ClearTraceBySpanId(trace->GetTraceID().span_id());
+    uint64_t tid, pid, id;
+    std::string db_name, table_name;
+    if (trace->GetTraceIdentify(&tid, &pid, &id, &db_name, &table_name) == 0) {
+        TraceModule::ClearTraceBySpanId(id);
+    }
     return;
 }
 
 // BEGIN jump to next thread
 void Trace::AttachTrace(uint64_t attach_id) {
+    TraceModule::InitTraceModule("");
+
     Trace* trace = TopThreadValue();
     if (trace == NULL) {
         return;
@@ -287,6 +385,8 @@ void Trace::AttachTrace(uint64_t attach_id) {
 
 // FINISH jump to next thread
 void Trace::DetachAndOpenTrace(uint64_t attach_id) {
+    TraceModule::InitTraceModule("");
+
     Trace* trace = TraceModule::ClearAndGetTrace(attach_id);
     if (trace == NULL) {
         return;
@@ -296,10 +396,12 @@ void Trace::DetachAndOpenTrace(uint64_t attach_id) {
 }
 
 void Trace::Log(int level, const char* fmt, ...) {
-    if (FLAGS_log_level < (uint64_t)level) {
+    TraceModule::InitTraceModule("");
+
+    if (FLAGS_mdt_log_level < (uint64_t)level) {
         return;
     }
-    char anno_buf[FLAGS_max_text_annotation_size];
+    char anno_buf[FLAGS_mdt_max_text_annotation_size];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(anno_buf, sizeof(anno_buf), fmt, ap);
@@ -314,10 +416,12 @@ void Trace::Log(int level, const char* fmt, ...) {
 }
 
 void Trace::KvLog(int level, const char* value, const char* fmt, ...) {
-    if (FLAGS_log_level < (uint64_t)level) {
+    TraceModule::InitTraceModule("");
+
+    if (FLAGS_mdt_log_level < (uint64_t)level) {
         return;
     }
-    char anno_buf[FLAGS_max_text_annotation_size];
+    char anno_buf[FLAGS_mdt_max_text_annotation_size];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(anno_buf, sizeof(anno_buf), fmt, ap);
@@ -333,18 +437,41 @@ void Trace::KvLog(int level, const char* value, const char* fmt, ...) {
 ///////////////////////////////////
 /////   internal interface    /////
 ///////////////////////////////////
+void FlushLogCallback(const mdt::LogAgentService::RpcStoreSpanRequest* req,
+                      mdt::LogAgentService::RpcStoreSpanResponse* resp,
+                      bool failed, int error,
+                      mdt::LogAgentService::LogAgentService_Stub* service) {
+    delete req;
+    delete service;
+    delete resp;
+}
+
 void Trace::FlushLog() {
+#if 0
     mu_.Lock();
     // TODO: flush annotations
     std::cout << "\n[stub]flush annotations =====>\n";
     TEST_PrintLog();
     span_.clear_annotations();
     mu_.Unlock();
+#endif
+    mdt::LogAgentService::LogAgentService_Stub* service;
+    TraceModule::rpc_client->GetMethodList(FLAGS_mdt_server_addr, &service);
+    mdt::LogAgentService::RpcStoreSpanRequest* req = new mdt::LogAgentService::RpcStoreSpanRequest;
+    mdt::LogAgentService::RpcStoreSpanResponse* resp = new mdt::LogAgentService::RpcStoreSpanResponse;
+    req->mutable_span()->CopyFrom(span_);
+    boost::function<void (const mdt::LogAgentService::RpcStoreSpanRequest*,
+                          mdt::LogAgentService::RpcStoreSpanResponse*,
+                          bool, int)> callback = boost::bind(&mdt::FlushLogCallback, _1, _2, _3, _4, service);
+    TraceModule::rpc_client->AsyncCall(service,
+                                &mdt::LogAgentService::LogAgentService_Stub::RpcStoreSpan,
+                                req, resp, callback);
+    std::cout << span_.DebugString() << std::endl;
 }
 
 void Trace::AddTextAnnotation(const std::string& text) {
     mu_.Lock();
-    FunctionAnnotation* anno = span_.add_annotations();
+    ::mdt::LogAgentService::FunctionAnnotation* anno = span_.add_annotations();
     anno->set_timestamp(timer::get_micros());
     anno->set_text_context(text);
     mu_.Unlock();
@@ -352,7 +479,7 @@ void Trace::AddTextAnnotation(const std::string& text) {
 
 void Trace::AddKvAnnotation(const std::string& key, const std::string& value) {
     mu_.Lock();
-    FunctionAnnotation* anno = span_.add_annotations();
+    ::mdt::LogAgentService::FunctionAnnotation* anno = span_.add_annotations();
     anno->set_timestamp(timer::get_micros());
     anno->mutable_kv_context()->set_key(key);
     anno->mutable_kv_context()->set_value(value);
@@ -360,12 +487,12 @@ void Trace::AddKvAnnotation(const std::string& key, const std::string& value) {
 }
 
 Trace::Trace(uint64_t trace_id, uint64_t parent_span_id, uint64_t span_id,
-             const std::string& name, const std::string& trace_name) {
+             const std::string& db_name, const std::string& table_name) {
     span_.mutable_id()->set_trace_id(trace_id);
     span_.mutable_id()->set_parent_span_id(parent_span_id);
     span_.mutable_id()->set_span_id(span_id);
-    span_.set_span_name(name);
-    span_.set_trace_name(trace_name);
+    span_.set_db_name(db_name);
+    span_.set_table_name(table_name);
     ref.Set(0);
 }
 
@@ -374,9 +501,11 @@ Trace::~Trace() {
 }
 
 Trace* Trace::TopThreadValue() {
+    TraceModule::InitTraceModule("");
+
     Trace* trace = (Trace*)pthread_getspecific(TraceModule::thread_key);
     if (trace == NULL) {
-        std::cout << "WARNING: trace in thread local is nil\n";
+        //std::cout << "WARNING: trace in thread local is nil\n";
     }
     return trace;
 }
@@ -387,17 +516,17 @@ void Trace::PushThreadValue() {
     void* prev_trace = pthread_getspecific(TraceModule::thread_key);
     pthread_setspecific(TraceModule::thread_key, (void*)this);
 
-    std::cout << "<tid> " << tid << ", <trace> " << (uint64_t)this << std::endl;
+    //std::cout << "<tid> " << tid << ", <trace> " << (uint64_t)this << std::endl;
 
     mu_.Lock();
     std::map<uint64_t, std::stack<void*> >::iterator it = thread_value_.find(tid);
     if (it != thread_value_.end()) {
         std::stack<void*>& st = it->second;
         st.push(prev_trace);
-    } else {
-        std::stack<void*> st;
-        st.push(prev_trace);
-        thread_value_.insert(std::pair<uint64_t, std::stack<void*> >(tid, st));
+    } else if (prev_trace) {
+        std::stack<void*> new_st;
+        new_st.push(prev_trace);
+        thread_value_.insert(std::pair<uint64_t, std::stack<void*> >(tid, new_st));
     }
     mu_.Unlock();
 }
@@ -420,17 +549,23 @@ void Trace::PopThreadValue() {
     pthread_setspecific(TraceModule::thread_key, prev_trace);
 }
 
-TraceIdentify Trace::GetTraceID() {
-    return span_.id();
+int Trace::GetTraceIdentify(uint64_t* tid, uint64_t* pid, uint64_t* id,
+                     std::string* db_name, std::string* table_name) {
+    *tid = span_.id().trace_id();
+    *pid = span_.id().parent_span_id();
+    *id = span_.id().span_id();
+    *db_name = span_.db_name();
+    *table_name = span_.table_name();
+    return 0;
 }
 
-void Trace::MergeTrace(FunctionSpan span) {
+void Trace::MergeTrace(::mdt::LogAgentService::FunctionSpan span) {
     mu_.Lock();
     if ((span_.id().trace_id() == span.id().trace_id()) &&
        (span_.id().parent_span_id() == span.id().parent_span_id()) &&
        (span_.id().span_id() == span.id().span_id())) {
         for (int i = 0; i < span.annotations_size(); i++) {
-            FunctionAnnotation* anno = span_.add_annotations();
+            ::mdt::LogAgentService::FunctionAnnotation* anno = span_.add_annotations();
             anno->CopyFrom(span.annotations(i));
         }
     }
