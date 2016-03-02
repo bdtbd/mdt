@@ -19,6 +19,7 @@ DECLARE_uint64(mdt_max_text_annotation_size);
 DECLARE_string(mdt_server_addr);
 DECLARE_uint64(mdt_log_level);
 DECLARE_string(mdt_flagfile);
+DECLARE_bool(mdt_trace_debug_enable);
 
 namespace mdt {
 
@@ -243,6 +244,252 @@ void TraceModule::LogProtoBuf(const std::string& primary_key_name, ::google::pro
     return;
 }
 
+void TraceModule::TraceEventClientSend(::google::protobuf::Message* req, ::google::protobuf::Message* resp) {
+    const ::google::protobuf::Descriptor* req_desc = req->GetDescriptor();
+    const ::google::protobuf::Reflection* req_reflection = req->GetReflection();
+    if (req_desc == NULL || req_reflection == NULL) {
+        return;
+    }
+    for (int i = 0; i < req_desc->field_count(); i++) {
+        const ::google::protobuf::FieldDescriptor* field = req_desc->field(i);
+        if ((field == NULL) ||
+            (strcmp(field->type_name(), "message")) ||
+            (field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED)) {
+            continue;
+        }
+
+        ::google::protobuf::Message* trace_req = req_reflection->MutableMessage(req, field);
+        const ::google::protobuf::Descriptor* trace_req_desc = trace_req->GetDescriptor();
+        const ::google::protobuf::Reflection* trace_req_reflection = trace_req->GetReflection();
+        if ((trace_req_desc == NULL) || (trace_req_reflection == NULL) ||
+            (trace_req_desc->name() != "RpcTraceRequest")) {
+            continue;
+        }
+
+        uint64_t tid, pid, id;
+        std::string db_name, table_name;
+        Trace* trace = Trace::TopThreadValue();
+        if (trace == NULL) {
+            continue;
+        }
+        if (trace->GetTraceIdentify(&tid, &pid, &id, &db_name, &table_name) == 0) {
+            for (int idx = 0; idx < trace_req_desc->field_count(); idx++) {
+                const ::google::protobuf::FieldDescriptor* trace_req_field = trace_req_desc->field(idx);
+                if (trace_req_field->name() == "trace_enable") {
+                    trace_req_reflection->SetBool(trace_req, trace_req_field, true);
+                } else if (trace_req_field->name() == "db_name") {
+                    trace_req_reflection->SetString(trace_req, trace_req_field, db_name);
+                } else if (trace_req_field->name() == "table_name") {
+                    trace_req_reflection->SetString(trace_req, trace_req_field, table_name);
+                } else if (trace_req_field->name() == "trace_id") {
+                    trace_req_reflection->SetUInt64(trace_req, trace_req_field, tid);
+                } else if (trace_req_field->name() == "parent_span_id") {
+                    trace_req_reflection->SetUInt64(trace_req, trace_req_field, pid);
+                } else if (trace_req_field->name() == "span_id") {
+                    trace_req_reflection->SetUInt64(trace_req, trace_req_field, id);
+                } else if (trace_req_field->name() == "cs") {
+                    trace_req_reflection->SetUInt64(trace_req, trace_req_field, get_micros());
+                }
+            }
+        }
+    }
+    return;
+}
+
+void TraceModule::TraceEventServerReceive(::google::protobuf::Message* req, ::google::protobuf::Message* resp) {
+    const ::google::protobuf::Descriptor* req_desc = req->GetDescriptor();
+    const ::google::protobuf::Reflection* req_reflection = req->GetReflection();
+    if (req_desc == NULL || req_reflection == NULL) {
+        return;
+    }
+    for (int i = 0; i < req_desc->field_count(); i++) {
+        const ::google::protobuf::FieldDescriptor* field = req_desc->field(i);
+        if ((field == NULL) ||
+            (strcmp(field->type_name(), "message")) ||
+            (field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED)) {
+            continue;
+        }
+
+        const ::google::protobuf::Message& trace_req = req_reflection->GetMessage(*req, field);
+        const ::google::protobuf::Descriptor* trace_req_desc = field->message_type();
+        const ::google::protobuf::Reflection* trace_req_reflection = trace_req.GetReflection();
+        if ((trace_req_desc == NULL) || (trace_req_reflection == NULL) ||
+            (trace_req_desc->name() != "RpcTraceRequest")) {
+            continue;
+        }
+
+        bool trace_enable = false;
+        uint64_t tid, id;
+        std::string db_name, table_name;
+        for (int idx = 0 ;idx < trace_req_desc->field_count(); idx++) {
+            const ::google::protobuf::FieldDescriptor* trace_req_field = trace_req_desc->field(idx);
+            if (trace_req_field->name() == "trace_enable") {
+                trace_enable = trace_req_reflection->GetBool(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "db_name") {
+                db_name = trace_req_reflection->GetString(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "table_name") {
+                table_name = trace_req_reflection->GetString(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "trace_id") {
+                tid = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "parent_span_id") {
+                //pid = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "span_id") {
+                id = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            }
+        }
+
+        if (trace_enable) {
+            const ::google::protobuf::Descriptor* resp_desc = resp->GetDescriptor();
+            const ::google::protobuf::Reflection* resp_reflection = resp->GetReflection();
+            if ((resp_desc == NULL) || (resp_reflection == NULL)) {
+                continue;
+            }
+            for (int j = 0; j < resp_desc->field_count(); j++) {
+                const ::google::protobuf::FieldDescriptor* resp_field = resp_desc->field(j);
+                if ((resp_field == NULL) ||
+                    (strcmp(resp_field->type_name(), "message")) ||
+                    (resp_field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED)) {
+                    continue;
+                }
+
+                ::google::protobuf::Message*  trace_resp = resp_reflection->MutableMessage(resp, resp_field);
+                const ::google::protobuf::Descriptor* trace_resp_desc = trace_resp->GetDescriptor();
+                const ::google::protobuf::Reflection* trace_resp_reflection = trace_resp->GetReflection();
+                if ((trace_resp_desc == NULL) || (trace_resp_reflection == NULL) ||
+                    (trace_resp_desc->name() != "RpcTraceResponse")) {
+                    continue;
+                }
+
+                for (int resp_idx = 0; resp_idx < trace_resp_desc->field_count(); resp_idx++) {
+                    const ::google::protobuf::FieldDescriptor* trace_resp_field = trace_resp_desc->field(resp_idx);
+                    if (trace_resp_field->name() == "sr") {
+                        trace_resp_reflection->SetUInt64(trace_resp, trace_resp_field, get_micros());
+                    }
+                }
+            }
+            ::mdt::Trace::OpenTrace(tid, id, 0, db_name, table_name);
+        }
+    }
+    return;
+}
+
+void TraceModule::TraceEventServerSend(::google::protobuf::Message* req, ::google::protobuf::Message* resp) {
+    const ::google::protobuf::Descriptor* resp_desc = resp->GetDescriptor();
+    const ::google::protobuf::Reflection* resp_reflection = resp->GetReflection();
+    if ((resp_desc == NULL) || (resp_reflection == NULL)) {
+        return;
+    }
+    for (int i = 0; i < resp_desc->field_count(); i++) {
+        const ::google::protobuf::FieldDescriptor* resp_field = resp_desc->field(i);
+        if ((resp_field == NULL) ||
+             (strcmp(resp_field->type_name(), "message")) ||
+             (resp_field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED)) {
+            continue;
+        }
+
+        ::google::protobuf::Message*  trace_resp = resp_reflection->MutableMessage(resp, resp_field);
+        const ::google::protobuf::Descriptor* trace_resp_desc = trace_resp->GetDescriptor();
+        const ::google::protobuf::Reflection* trace_resp_reflection = trace_resp->GetReflection();
+        if ((trace_resp_desc == NULL) || (trace_resp_reflection == NULL) ||
+                (trace_resp_desc->name() != "RpcTraceResponse")) {
+            continue;
+        }
+
+        for (int resp_idx = 0; resp_idx < trace_resp_desc->field_count(); resp_idx++) {
+            const ::google::protobuf::FieldDescriptor* trace_resp_field = trace_resp_desc->field(resp_idx);
+            if (trace_resp_field->name() == "ss") {
+                trace_resp_reflection->SetUInt64(trace_resp, trace_resp_field, get_micros());
+            }
+        }
+    }
+}
+
+void TraceModule::TraceEventClientReceive(int level, ::google::protobuf::Message* req, ::google::protobuf::Message* resp) {
+    const ::google::protobuf::Descriptor* req_desc = req->GetDescriptor();
+    const ::google::protobuf::Reflection* req_reflection = req->GetReflection();
+    if (req_desc == NULL || req_reflection == NULL) {
+        return;
+    }
+    for (int i = 0; i < req_desc->field_count(); i++) {
+        const ::google::protobuf::FieldDescriptor* field = req_desc->field(i);
+        if ((field == NULL) ||
+            (strcmp(field->type_name(), "message")) ||
+            (field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED)) {
+            continue;
+        }
+
+        const ::google::protobuf::Message& trace_req = req_reflection->GetMessage(*req, field);
+        const ::google::protobuf::Descriptor* trace_req_desc = trace_req.GetDescriptor();
+        const ::google::protobuf::Reflection* trace_req_reflection = trace_req.GetReflection();
+        if ((trace_req_desc == NULL) || (trace_req_reflection == NULL) ||
+            (trace_req_desc->name() != "RpcTraceRequest")) {
+            continue;
+        }
+
+        bool trace_enable = false;
+        uint64_t tid, pid, id;
+        std::string db_name, table_name;
+        uint64_t cs, sr, ss, cr;
+        for (int idx = 0 ;idx < trace_req_desc->field_count(); idx++) {
+            const ::google::protobuf::FieldDescriptor* trace_req_field = trace_req_desc->field(idx);
+            if (trace_req_field->name() == "trace_enable") {
+                trace_enable = trace_req_reflection->GetBool(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "db_name") {
+                db_name = trace_req_reflection->GetString(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "table_name") {
+                table_name = trace_req_reflection->GetString(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "trace_id") {
+                tid = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "parent_span_id") {
+                pid = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "span_id") {
+                id = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            } else if (trace_req_field->name() == "cs") {
+                cs = trace_req_reflection->GetUInt64(trace_req, trace_req_field);
+            }
+        }
+
+        if (trace_enable) {
+            const ::google::protobuf::Descriptor* resp_desc = resp->GetDescriptor();
+            const ::google::protobuf::Reflection* resp_reflection = resp->GetReflection();
+            if (resp_desc == NULL || resp_reflection == NULL) {
+                continue;
+            }
+            for (int resp_idx = 0; resp_idx < resp_desc->field_count(); resp_idx++) {
+                const ::google::protobuf::FieldDescriptor* resp_field = resp_desc->field(resp_idx);
+                if ((resp_field == NULL) ||
+                    (strcmp(resp_field->type_name(), "message")) ||
+                    (resp_field->label() == ::google::protobuf::FieldDescriptor::LABEL_REPEATED)) {
+                    continue;
+                }
+
+                ::google::protobuf::Message* trace_resp = resp_reflection->MutableMessage(resp, resp_field);
+                const ::google::protobuf::Descriptor* trace_resp_desc = trace_resp->GetDescriptor();
+                const ::google::protobuf::Reflection* trace_resp_reflection = trace_resp->GetReflection();
+                if ((trace_resp_desc == NULL) || (trace_resp_reflection == NULL) ||
+                        (trace_resp_desc->name() != "RpcTraceResponse")) {
+                    continue;
+                }
+
+                for (int j = 0; j < trace_resp_desc->field_count(); j++) {
+                    const ::google::protobuf::FieldDescriptor* trace_resp_field = trace_resp_desc->field(j);
+                    if (trace_resp_field->name() == "cr") {
+                        cr = get_micros();
+                        trace_resp_reflection->SetUInt64(trace_resp, trace_resp_field, cr);
+                    } else if (trace_resp_field->name() == "sr") {
+                        sr = trace_resp_reflection->GetUInt64(*trace_resp, trace_resp_field);
+                    } else if (trace_resp_field->name() == "ss") {
+                        ss = trace_resp_reflection->GetUInt64(*trace_resp, trace_resp_field);
+                    }
+                }
+            }
+            ::mdt::Trace::OpenTrace(tid, pid, id, db_name, table_name);
+            ::mdt::Trace::Log(level, "rpc event:, cs = %lu, sr = %lu, ss = %lu, cr = %lu", cs, sr, ss, cr);
+        }
+    }
+    return;
+}
+
 /////////////////////////////////////////
 /////   internal interface          /////
 /////////////////////////////////////////
@@ -263,7 +510,7 @@ Trace* TraceModule::ClearAndGetTrace(uint64_t key) {
         trace->ref.Dec(); // erase from ktrace_map, so dec ref
     }
     if (trace == NULL) {
-        std::cout << "trace module, attach trace(key = " << key << "), not found\n";
+        //std::cout << "trace module, attach trace(key = " << key << "), not found\n";
     } else {
         // new thread will ref this trace obj, so add ref
         trace->ref.Inc();
@@ -342,7 +589,7 @@ void Trace::OpenTrace(uint64_t trace_id,
     } else {
         trace = TraceModule::GetTraceBySpanId(span_id);
         if (trace == NULL) {
-            std::cout << "trace id " << trace_id << ", span id " << span_id << ", not exist, New it\n";
+            //std::cout << "trace id " << trace_id << ", span id " << span_id << ", not exist, New it\n";
             new_span = true;
         }
     }
@@ -466,7 +713,9 @@ void Trace::FlushLog() {
     TraceModule::rpc_client->AsyncCall(service,
                                 &mdt::LogAgentService::LogAgentService_Stub::RpcStoreSpan,
                                 req, resp, callback);
-    std::cout << span_.DebugString() << std::endl;
+    if (FLAGS_mdt_trace_debug_enable) {
+        std::cout << span_.DebugString() << std::endl;
+    }
 }
 
 void Trace::AddTextAnnotation(const std::string& text) {

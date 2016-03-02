@@ -1,5 +1,21 @@
 package mdt; 
 
+message RpcTraceRequest {
+    optional bool trace_enable = 1 [default = false];
+    optional string db_name = 2;
+    optional string table_name = 3;
+    optional uint64 trace_id = 4;
+    optional uint64 parent_span_id = 5;
+    optional uint64 span_id = 6;
+    optional uint64 cs = 7; // client send ts
+}
+
+message RpcTraceResponse {
+    optional uint64 sr = 1; // server receive ts 
+    optional uint64 ss = 2; // server send ts 
+    optional uint64 cr = 3; // client receive ts 
+}
+
 message KVContext {
     optional bytes key = 1;
     optional bytes value = 2;

@@ -17,8 +17,17 @@ public:
                         uint64_t span_id,
                         const std::string& db_name,
                         const std::string& table_name);
+    enum RpcEventTyep {
+        CS = 1,
+        SR = 2,
+        SS = 3,
+        CR = 4,
+    };
+    explicit TraceGuard(int level, int event, ::google::protobuf::Message* req, ::google::protobuf::Message* resp);
+
     ~TraceGuard();
 private:
+    bool need_release;
     TraceGuard(const TraceGuard&);
     void operator=(const TraceGuard&);
 };

@@ -100,6 +100,11 @@ struct TraceModule {
 
     static void* AsyncLogThread(void* arg);
 
+    static void TraceEventClientSend(::google::protobuf::Message* req, ::google::protobuf::Message* resp);
+    static void TraceEventServerReceive(::google::protobuf::Message* req, ::google::protobuf::Message* resp);
+    static void TraceEventServerSend(::google::protobuf::Message* req, ::google::protobuf::Message* resp);
+    static void TraceEventClientReceive(int level, ::google::protobuf::Message* req, ::google::protobuf::Message* resp);
+
     ////////////////////////////////
     /////  internal interface  /////
     ////////////////////////////////
