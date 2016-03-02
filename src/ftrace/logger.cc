@@ -42,16 +42,41 @@ TraceGuard::TraceGuard(uint64_t trace_id,
                        uint64_t span_id,
                        const std::string& db_name,
                        const std::string& table_name) {
+    need_release = true;
     Trace::OpenTrace(trace_id, parent_span_id, span_id, db_name, table_name);
 }
 
+TraceGuard::TraceGuard(const std::string& db_name, const std::string& table_name) {
+    need_release = true;
+    Trace::OpenTrace(0, 0, 0, db_name, table_name);
+}
+
 TraceGuard::TraceGuard(uint64_t attach_id) {
+    need_release = true;
     Trace::DetachAndOpenTrace(attach_id);
 }
 
-TraceGuard::~TraceGuard() {
-    Trace::ReleaseTrace();
+TraceGuard::TraceGuard(int level, int event, ::google::protobuf::Message* req, ::google::protobuf::Message* resp) {
+    need_release = false;
+    if (event == CS) {
+        TraceModule::TraceEventClientSend(req, resp);
+    } else if (event == SR) {
+        need_release = true;
+        TraceModule::TraceEventServerReceive(req, resp);
+    } else if (event == SS) {
+        TraceModule::TraceEventServerSend(req, resp);
+    } else if (event == CR) {
+        need_release = true;
+        TraceModule::TraceEventClientReceive(level, req, resp);
+    }
 }
+
+TraceGuard::~TraceGuard() {
+    if (need_release) {
+        Trace::ReleaseTrace();
+    }
+}
+
  // use for rpc
 int GetTraceIdentify(uint64_t* tid, uint64_t* pid, uint64_t* id,
                      std::string* db_name, std::string* table_name) {
