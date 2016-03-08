@@ -246,16 +246,32 @@ type IndexCondition struct {
 type Result struct {
     PrimaryKey string
     DataList []string
+    IndexList []Index
+}
+
+// 索引查询接口（按primary key查）
+func SearchIndexByPrimaryKey(table *Table, primary_key string) (error, []Index) {
+    err, index, _ := searchByPrimaryKey(table, primary_key, 1, 0)
+    return err, index
+}
+
+// 数据查询接口（按primary key查）
+func SearchByPrimaryKey(table *Table, primary_key string) (error, []string) {
+    err, _, data := searchByPrimaryKey(table, primary_key, 0, 1)
+    return err, data
 }
 
 // 查询接口（按primary key查）
-func SearchByPrimaryKey(table *Table, primary_key string) (error, []string) {
+func searchByPrimaryKey(table *Table, primary_key string,
+                        need_index int, need_data int) (error, []Index, []string) {
     var c_request C.mdt_search_request_t
     var c_response C.mdt_search_response_t
 
     // convert request
     c_request.primary_key.data = C.CString(primary_key)
     c_request.primary_key.size = C.size_t(len(primary_key))
+    c_request.need_index = C.int(need_index)
+    c_request.need_data = C.int(need_data)
 
     // invoke C api
     C.mdt_search(table.rep, &c_request, &c_response, nil, nil)
@@ -263,10 +279,22 @@ func SearchByPrimaryKey(table *Table, primary_key string) (error, []string) {
     // convert result & free result memory
     err := Ok
     var data_list []string
+    var index_list []Index
     c_result_list := (*[1<<30]C.mdt_search_result_t)(unsafe.Pointer(c_response.result_list))
     if c_response.result_list_len == C.size_t(1) {
         c_result := &c_result_list[0]
         C.free(unsafe.Pointer(c_result.primary_key.data))
+
+        c_index_list := (*[1<<30]C.mdt_index_t)(unsafe.Pointer(c_result.index_list))
+        for j := C.size_t(0); j < c_result.index_list_len; j++ {
+            index := &Index{}
+            index.IndexName = C.GoStringN(c_index_list[j].index_name.data, C.int(c_index_list[j].index_name.size))
+            index.IndexKey = C.GoStringN(c_index_list[j].index_key.data, C.int(c_index_list[j].index_key.size))
+            index_list = append(index_list, *index)
+            C.free(unsafe.Pointer(c_index_list[j].index_name.data))
+            C.free(unsafe.Pointer(c_index_list[j].index_key.data))
+        }
+        C.free(unsafe.Pointer(c_result.index_list))
 
         c_data_list := (*[1<<30]C.mdt_slice_t)(unsafe.Pointer(c_result.data_list))
         for j := C.size_t(0); j < c_result.data_list_len; j++ {
@@ -282,15 +310,37 @@ func SearchByPrimaryKey(table *Table, primary_key string) (error, []string) {
     // free request memory
     C.free(unsafe.Pointer(c_request.primary_key.data))
 
-    return GetError(err), data_list
+    return GetError(err), index_list, data_list
 }
 
-// 查询接口（按index key查）
+// 索引查询接口（按index key查）
+func SearchIndexByIndexKey(table *Table,
+                           index_condition_list []IndexCondition,
+                           start_timestamp int64,
+                           end_timestamp int64,
+                           limit int32) (error, []Result) {
+    return searchByIndexKey(table, index_condition_list, start_timestamp,
+                            end_timestamp, limit, 1, 0)
+}
+
+// 数据查询接口（按index key查）
 func SearchByIndexKey(table *Table,
                       index_condition_list []IndexCondition,
                       start_timestamp int64,
                       end_timestamp int64,
                       limit int32) (error, []Result) {
+    return searchByIndexKey(table, index_condition_list, start_timestamp,
+                            end_timestamp, limit, 0, 1)
+}
+
+// 查询接口（按index key查）
+func searchByIndexKey(table *Table,
+                      index_condition_list []IndexCondition,
+                      start_timestamp int64,
+                      end_timestamp int64,
+                      limit int32,
+                      need_index int,
+                      need_data int) (error, []Result) {
     var c_request C.mdt_search_request_t
     var c_response C.mdt_search_response_t
 
@@ -311,6 +361,8 @@ func SearchByIndexKey(table *Table,
     c_request.start_timestamp = C.int64_t(start_timestamp)
     c_request.end_timestamp = C.int64_t(end_timestamp)
     c_request.limit = C.int32_t(limit)
+    c_request.need_index = C.int(need_index)
+    c_request.need_data = C.int(need_data)
 
     // invoke C api
     C.mdt_search(table.rep, &c_request, &c_response, nil, nil)
@@ -320,19 +372,31 @@ func SearchByIndexKey(table *Table,
     var result_list []Result
     c_result_list := (*[1<<30]C.mdt_search_result_t)(unsafe.Pointer(c_response.result_list))
     for i := C.size_t(0); i < c_response.result_list_len; i++ {
-        c_result := &c_result_list[i]        
+        c_result := &c_result_list[i]
         result := &Result{}
 
         result.PrimaryKey = C.GoStringN(c_result.primary_key.data, C.int(c_result.primary_key.size))
         C.free(unsafe.Pointer(c_result.primary_key.data))
+
+        c_index_list := (*[1<<30]C.mdt_index_t)(unsafe.Pointer(c_result.index_list))
+        for j := C.size_t(0); j < c_result.index_list_len; j++ {
+            index := &Index{}
+            index.IndexName = C.GoStringN(c_index_list[j].index_name.data, C.int(c_index_list[j].index_name.size))
+            index.IndexKey = C.GoStringN(c_index_list[j].index_key.data, C.int(c_index_list[j].index_key.size))
+            result.IndexList = append(result.IndexList, *index)
+            C.free(unsafe.Pointer(c_index_list[j].index_name.data))
+            C.free(unsafe.Pointer(c_index_list[j].index_key.data))
+        }
+        C.free(unsafe.Pointer(c_result.index_list))
 
         c_data_list := (*[1<<30]C.mdt_slice_t)(unsafe.Pointer(c_result.data_list))
         for j := C.size_t(0); j < c_result.data_list_len; j++ {
             result.DataList = append(result.DataList, C.GoStringN(c_data_list[j].data, C.int(c_data_list[j].size)))
             C.free(unsafe.Pointer(c_data_list[j].data))
         }
-        result_list = append(result_list, *result)
         C.free(unsafe.Pointer(c_result.data_list))
+
+        result_list = append(result_list, *result)
     }
     C.free(unsafe.Pointer(c_response.result_list))
     if result_list == nil {

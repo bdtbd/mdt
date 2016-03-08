@@ -240,6 +240,47 @@ void mdt_store(mdt_table_t* table,
     }
 }
 
+// c++ search response to c response
+void mdt_c_convert_search_response(const mdt::SearchResponse* internal_response,
+                                   mdt_search_response_t* response) {
+    // build response from internal response
+    response->result_list_len = internal_response->result_stream.size();
+    response->result_list = NULL;
+    if (response->result_list_len > 0) {
+        response->result_list = new mdt_search_result_t[response->result_list_len];
+        for (size_t i = 0; i < response->result_list_len; i++) {
+            const mdt::ResultStream& internal_result = internal_response->result_stream[i];
+            mdt_search_result_t& result = response->result_list[i];
+
+            // copy primary_key
+            mdt_string_to_slice(internal_result.primary_key, &result.primary_key);
+
+            // copy index list
+            result.index_list_len = internal_result.result_index_list.size();
+            result.index_list = NULL;
+            if (result.index_list_len > 0) {
+                result.index_list = new mdt_index_t[result.index_list_len];
+            }
+            for (size_t j = 0; j < result.index_list_len; j++) {
+                mdt_string_to_slice(internal_result.result_index_list[j].index_name,
+                                    &result.index_list[j].index_name);
+                mdt_string_to_slice(internal_result.result_index_list[j].index_key,
+                                    &result.index_list[j].index_key);
+            }
+
+            // copy data list
+            result.data_list_len = internal_result.result_data_list.size();
+            result.data_list = NULL;
+            if (result.data_list_len > 0) {
+                result.data_list = new mdt_slice_t[result.data_list_len];
+            }
+            for (size_t j = 0; j < result.data_list_len; j++) {
+                mdt_string_to_slice(internal_result.result_data_list[j], &result.data_list[j]);
+            }
+        }
+    }
+}
+
 struct mdt_c_search_callback_param {
     mdt_table_t* table;
     const mdt_search_request_t* request;
@@ -254,28 +295,9 @@ void mdt_c_search_callback(mdt::Table* internal_table,
                            mdt::SearchResponse* internal_response,
                            void* callback_param) {
     mdt_c_search_callback_param* param = (mdt_c_search_callback_param*)callback_param;
-    mdt_search_response_t* response = param->response;
 
     // build response from internal response
-    response->result_list_len = internal_response->result_stream.size();
-    if (response->result_list_len > 0) {
-        response->result_list = new mdt_search_result_t[response->result_list_len];
-        for (size_t i = 0; i < response->result_list_len; i++) {
-            mdt::ResultStream& internal_result = internal_response->result_stream[i];
-            mdt_search_result_t& result = response->result_list[i];
-
-            // copy primary_key
-            mdt_string_to_slice(internal_result.primary_key, &result.primary_key);
-
-            // copy data list
-            result.data_list_len = internal_result.result_data_list.size();
-            assert(result.data_list_len > 0);
-            result.data_list = new mdt_slice_t[result.data_list_len];
-            for (size_t i = 0; i < result.data_list_len; i++) {
-                mdt_string_to_slice(internal_result.result_data_list[i], &result.data_list[i]);
-            }
-        }
-    }
+    mdt_c_convert_search_response(internal_response, param->response);
 
     (*param->callback)(param->table, param->request, param->response, param->callback_param);
     delete internal_request;
@@ -303,6 +325,8 @@ void mdt_search(mdt_table_t* table,
     internal_request->start_timestamp = request->start_timestamp;
     internal_request->end_timestamp = request->end_timestamp;
     internal_request->limit = request->limit;
+    internal_request->need_index = (bool)request->need_index;
+    internal_request->need_data = (bool)request->need_data;
 
     // build internal response
     mdt::SearchResponse* internal_response = new mdt::SearchResponse;
@@ -324,26 +348,7 @@ void mdt_search(mdt_table_t* table,
     mdt::Get(table->rep, internal_request, internal_response, internal_callback, param);
 
     if (callback == NULL) {
-        // build response from internal response
-        response->result_list_len = internal_response->result_stream.size();
-        if (response->result_list_len > 0) {
-            response->result_list = new mdt_search_result_t[response->result_list_len];
-            for (size_t i = 0; i < response->result_list_len; i++) {
-                mdt::ResultStream& internal_result = internal_response->result_stream[i];
-                mdt_search_result_t& result = response->result_list[i];
-
-                // copy primary_key
-                mdt_string_to_slice(internal_result.primary_key, &result.primary_key);
-
-                // copy data list
-                result.data_list_len = internal_result.result_data_list.size();
-                assert(result.data_list_len > 0);
-                result.data_list = new mdt_slice_t[result.data_list_len];
-                for (size_t i = 0; i < result.data_list_len; i++) {
-                    mdt_string_to_slice(internal_result.result_data_list[i], &result.data_list[i]);
-                }
-            }
-        }
+        mdt_c_convert_search_response(internal_response, response);
         delete internal_request;
         delete internal_response;
     }

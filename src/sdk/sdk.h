@@ -100,12 +100,15 @@ struct SearchRequest {
     int64_t start_timestamp;
     int64_t end_timestamp;
     int32_t limit;
+    bool need_index;
+    bool need_data;
 };
 
 // 查询结果
 struct ResultStream {
     std::string primary_key;
     std::vector<std::string> result_data_list;
+    std::vector<struct Index> result_index_list;
 };
 
 struct SearchResponse {
