@@ -10,15 +10,19 @@
 #include <boost/asio.hpp>
 
 #include "proto/kv.pb.h"
-#include "util/coding.h"
-#include "util/counter.h"
-#include "util/env.h"
-#include "util/mutex.h"
-#include "util/thread_pool.h"
+#include "utils/coding.h"
+#include "utils/counter.h"
+#include "utils/env.h"
+#include "utils/mutex.h"
+#include "utils/thread_pool.h"
+#include "utils/sort_block.h"
 #include "sdk/option.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
 #include <tera.h>
+
+
+#include "leveldb/slice.h"
 
 namespace mdt {
 
@@ -179,7 +183,7 @@ private:
     int InternalCompressBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
     int WriteBatchIndexTable(const std::string& primary_key, uint64_t timestamp,
                              std::vector<WriteContext*>& vec_ctx,
-                             BlockBuilder& index_builder,
+                             BlockBuilder* index_builder,
                              FileLocation& location);
 
     int InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
@@ -330,7 +334,7 @@ public:
     BatchIndexContext() {}
     ~BatchIndexContext() {}
     int64_t SetReference(uint64_t ref) {
-        return ref.Set(ref);
+        return ref_.Set(ref);
     }
     void SetTable(TableImpl* table_impl) {
         table = table_impl;
@@ -341,11 +345,11 @@ public:
 
 private:
     int64_t DecReference() {
-        return ref.Dec();
+        return ref_.Dec();
     }
 
 private:
-    Counter ref;
+    Counter ref_;
     std::vector<const StoreRequest*> req_vec;
     std::vector<StoreResponse*> resp_vec;
     std::vector<StoreCallback> callback_vec;

@@ -1,7 +1,7 @@
 #include <queue>
 #include <unistd.h>
 #include "ftrace/logger.h"
-#include "util/mutex.h"
+#include "utils/mutex.h"
 #include <sstream>
 #include "proto/ftrace_test.pb.h"
 

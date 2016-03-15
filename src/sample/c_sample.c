@@ -112,10 +112,12 @@ int main(int ac, char* av[]) {
 
     printf("get ...\n");
     mdt_search(table, search_req, search_resp, NULL, NULL);
-    for (size_t i = 0; i < search_resp->result_list_len; i++) {
+    size_t i;
+    for (i = 0; i < search_resp->result_list_len; i++) {
         const mdt_search_result_t* result = &search_resp->result_list[i];
         printf("primary key: %s\n", result->primary_key.data);
-        for (size_t j = 0; j < result->data_list_len; j++) {
+        size_t j;
+        for (j = 0; j < result->data_list_len; j++) {
             printf("        data: %s\n", result->data_list[j].data);
         }
     }

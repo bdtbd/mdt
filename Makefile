@@ -7,13 +7,24 @@ OPT ?= -g2 -Wall -Werror      # (B) Debug mode, w/ full line-level debugging sym
 CC = gcc
 CXX = g++
 
-SHARED_CFLAGS = -fPIC
-SHARED_LDFLAGS = -shared -Wl,-soname -Wl,
+PLATFORM=OS_LINUX
+PLATFORM_LDFLAGS=-pthread
+PLATFORM_LIBS=
+PLATFORM_CCFLAGS= -fno-builtin-memcmp -pthread -DOS_LINUX -DLEVELDB_PLATFORM_POSIX -DLEVELDB_ATOMIC_PRESENT
+PLATFORM_CXXFLAGS=-std=c++0x -fno-builtin-memcmp -lpthread -DLEVELDB_PLATFORM_POSIX -DLEVELDB_ATOMIC_PRESENT
+PLATFORM_SHARED_CFLAGS=-fPIC
+PLATFORM_SHARED_EXT=so
+PLATFORM_SHARED_LDFLAGS=-shared -Wl,-soname -Wl,
+PLATFORM_SHARED_VERSIONED=true
 
-INCPATH += -I./src -I./include -I./src/leveldb/include -I./src/leveldb  $(DEPS_INCPATH) 
-CFLAGS += -std=c99 $(OPT) $(SHARED_CFLAGS) $(INCPATH)
-CXXFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH)
-LDFLAGS += -rdynamic $(DEPS_LDPATH) $(DEPS_LDFLAGS) -lpthread -lrt -lz -ldl
+SHARED_CFLAGS = -fPIC 
+SHARED_LDFLAGS = -shared -Wl,-soname -Wl, 
+
+INCPATH += -I./src/leveldb -I./src/leveldb/include -I./src -I./include $(DEPS_INCPATH) 
+#### CFLAGS += -std=c99 $(OPT) $(SHARED_CFLAGS) $(INCPATH) $(PLATFORM_CCFLAGS) 
+CFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH) $(PLATFORM_CCFLAGS) 
+CXXFLAGS += $(OPT) $(SHARED_CFLAGS) $(INCPATH) $(PLATFORM_CXXFLAGS) 
+LDFLAGS += -rdynamic $(DEPS_LDPATH) $(DEPS_LDFLAGS) -lpthread -lrt -lz -ldl 
 
 PROTO_FILES := $(wildcard src/proto/*.proto)
 PROTO_OUT_CC := $(PROTO_FILES:.proto=.pb.cc)
@@ -23,7 +34,7 @@ PROTO_OUT_H := $(PROTO_FILES:.proto=.pb.h)
 OTHER_SRC := src/trace_flags.cc src/fs_inotify.cc
 SDK_SRC := $(wildcard src/sdk/*.cc)
 COMMON_SRC := $(wildcard src/common/*.cc)
-UTIL_SRC := $(wildcard src/util/*.cc)
+UTIL_SRC := $(wildcard src/utils/*.cc)
 PROTO_SRC := $(filter-out %.pb.cc, $(wildcard src/proto/*.cc)) $(PROTO_OUT_CC)
 VERSION_SRC := src/version.cc
 MDTTOOL_SRC := $(wildcard src/mdt-tool/mdt-tool.cc)
@@ -37,7 +48,7 @@ SCAN_TEST_SRC := $(wildcard src/benchmark/scan_test.cc)
 C_SAMPLE_SRC := $(wildcard src/sample/c_sample.c)
 
 FTRACE_SRC := $(wildcard src/ftrace/*.cc)
-FTRACE_TEST_SRC := $(wildcard src/ftrace/test/*.cc)
+###FTRACE_TEST_SRC := $(wildcard src/ftrace/test/*.cc)
 
 AGENT_SRC := $(wildcard src/agent/*.cc)
 COLLECTOR_SRC := $(wildcard src/collector/*.cc)
@@ -61,7 +72,7 @@ SCAN_TEST_OBJ := $(SCAN_TEST_SRC:.cc=.o)
 C_SAMPLE_OBJ := $(C_SAMPLE_SRC:.c=.o)
 
 FTRACE_OBJ := $(FTRACE_SRC:.cc=.o)
-FTRACE_TEST_OBJ := $(FTRACE_TEST_SRC:.cc=.o)
+#FTRACE_TEST_OBJ := $(FTRACE_TEST_SRC:.cc=.o)
 AGENT_OBJ := $(AGENT_SRC:.cc=.o)
 COLLECTOR_OBJ := $(COLLECTOR_SRC:.cc=.o)
 SCHEDULER_OBJ := $(SCHEDULER_SRC:.cc=.o)
@@ -76,7 +87,7 @@ LEVELDB_LIB := src/leveldb/libleveldb.a
 ############################################################
 PROGRAM = agent_main collector_main scheduler_main 
 FTRACELIBRARY = libftrace.a
-FTRACE_TEST = TEST_log
+#FTRACE_TEST = TEST_log
 
 LIBRARY = libmdt.a
 SAMPLE = sample
@@ -115,53 +126,53 @@ cleanall:
 src/leveldb/libleveldb.a: FORCE
 	$(MAKE) -C src/leveldb
 
-sample: $(SAMPLE_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
+sample: $(SAMPLE_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB)
 
-mdt-tool: $(MDTTOOL_OBJ) $(LIBRARY) $(OTHER_OBJ)
-	$(CXX) -o $@ $(MDTTOOL_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS) -lreadline -lhistory -lncurses
+mdt-tool: $(MDTTOOL_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(MDTTOOL_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS) $(LEVELDB_LIB) -lreadline -lhistory -lncurses
 
-test_update_schema: $(UPDATESCHEMA_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(UPDATESCHEMA_OBJ) $(LIBRARY) $(LDFLAGS) 
+test_update_schema: $(UPDATESCHEMA_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(UPDATESCHEMA_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB) 
 
-write_test: $(WRITE_TEST_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(WRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS) 
+write_test: $(WRITE_TEST_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(WRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB) 
 
-dumpfile: $(DUMPFILE_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(DUMPFILE_OBJ) $(LIBRARY) $(LDFLAGS) 
+dumpfile: $(DUMPFILE_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(DUMPFILE_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB) 
 
-sync_write_test: $(SYNC_WRITE_TEST_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(SYNC_WRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS)
+sync_write_test: $(SYNC_WRITE_TEST_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(SYNC_WRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB)
 
-mulcli_write_test: $(MULWRITE_TEST_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(MULWRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS)
+mulcli_write_test: $(MULWRITE_TEST_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(MULWRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB)
 
-scan_test: $(SCAN_TEST_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(SCAN_TEST_OBJ) $(LIBRARY) $(LDFLAGS)
+scan_test: $(SCAN_TEST_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(SCAN_TEST_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB)
 
-c_sample: $(C_SAMPLE_OBJ) $(LIBRARY)
-	$(CXX) -o $@ $(C_SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS)
+c_sample: $(C_SAMPLE_OBJ) $(LIBRARY) $(LEVELDB_LIB)
+	$(CXX) -o $@ $(C_SAMPLE_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB)
 
-libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
-	$(AR) -rs $@ $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ)
+libmdt.a: $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB)
+	$(AR) -rs $@ $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB)
 
 libftrace.a: $(FTRACE_OBJ) $(PROTO_OBJ)
 	$(AR) -rs $@ $(FTRACE_OBJ) $(PROTO_OBJ)
 
-TEST_log: $(FTRACE_TEST_OBJ) $(FTRACELIBRARY)
-	$(CXX) -o $@ $(FTRACE_TEST_OBJ) $(FTRACELIBRARY) $(LDFLAGS)
+#TEST_log: $(FTRACE_TEST_OBJ) $(FTRACELIBRARY)
+#	$(CXX) -o $@ $(FTRACE_TEST_OBJ) $(FTRACELIBRARY) $(LDFLAGS)
 
 agent_main: $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB) $(OTHER_OBJ) 
 	$(CXX) -o agent_main $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LDFLAGS) $(LEVELDB_LIB) $(OTHER_OBJ) 
 
-collector_main: $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) 
-	$(CXX) -o collector_main $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS)
+collector_main: $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LEVELDB_LIB)
+	$(CXX) -o collector_main $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS) $(LEVELDB_LIB)
 
-scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) 
-	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LDFLAGS)
+scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LEVELDB_LIB)
+	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LDFLAGS) $(LEVELDB_LIB)
 
-$(CXX_OBJ): %.o: %.cc $(PROTO_OUT_H)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(CXX_OBJ): %.o: %.cc $(PROTO_OUT_H) $(LEVELDB_LIB) 
+	$(CXX) $(CXXFLAGS)  -c $< -o $@ $(LEVELDB_LIB) 
 
 $(C_OBJ): %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

@@ -15,9 +15,9 @@
 #include "sdk/db.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
-#include "util/counter.h"
-#include "util/env.h"
-#include "util/mutex.h"
+#include "utils/counter.h"
+#include "utils/env.h"
+#include "utils/mutex.h"
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 

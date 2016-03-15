@@ -4,10 +4,10 @@
 #include <map>
 #include "sdk/table.h"
 #include "sdk/db.h"
-#include "util/status.h"
-#include "util/event.h"
-#include "util/thread_pool.h"
-#include "util/mutex.h"
+#include "utils/status.h"
+#include "utils/event.h"
+#include "utils/thread_pool.h"
+#include "utils/mutex.h"
 #include "proto/query.pb.h"
 #include <google/protobuf/service.h>
 #include "proto/scheduler.pb.h"
