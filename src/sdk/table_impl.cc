@@ -12,7 +12,7 @@
 #include "proto/kv.pb.h"
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
-#include "util/string_util.h"
+#include "utils/string_util.h"
 
 DECLARE_int64(concurrent_write_handle_num);
 DECLARE_int64(max_write_handle_seq);
@@ -476,10 +476,10 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
     }
 
     // merge WriteContext
-    BlockBuilder* sort_block = new BlockBuilder(leveldb_options_);
+    BlockBuilder* sort_block = new BlockBuilder(&leveldb_options_);
     std::map<std::string, BlockBuilder*> index_block;
     std::map<std::string, std::vector<WriteContext*> > primary_key_map;
-    std::map<std::string, uint64_t> timestamp_map;
+    std::map<std::string, int64_t> timestamp_map;
     WriteContext* last_writer = NULL;
     std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
     for (; iter != write_handle->write_queue_.end(); ++iter) {
@@ -494,8 +494,8 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
 
         BlockBuilder* iblock = NULL;
         if (index_block.find(last_writer->req_->primary_key) == index_block.end()) {
-            iblock = new BlockBuilder(leveldb_options_);
-            index_block[last_writer->req_->priamry_key] = iblock;
+            iblock = new BlockBuilder(&leveldb_options_);
+            index_block[last_writer->req_->primary_key] = iblock;
         } else {
             iblock = index_block[last_writer->req_->primary_key];
         }
@@ -515,8 +515,8 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
         }
 
         if ((timestamp_map.find(last_writer->req_->primary_key) == timestamp_map.end()) ||
-            (timestamp_map[laster_writer->req_->primary_key] < laster_writer->req_->timestamp)) {
-            timestamp_map[laster_writer->req_->primary_key] = laster_writer->req_->timestamp;
+            (timestamp_map[last_writer->req_->primary_key] < last_writer->req_->timestamp)) {
+            timestamp_map[last_writer->req_->primary_key] = last_writer->req_->timestamp;
         }
     }
     // unlock do io
@@ -764,9 +764,10 @@ void BatchIndexContext::PushBack(const StoreRequest* req, StoreResponse* resp,
 
 void BatchIndexContext::Release() {
     if (DecReference() == 0) {
-        for (int i = 0; i < req_vec.size(); i++) {
-            if (callback_vec[i]) {
-                (callback_vec[i])(table, req_vec[i], resp_vec[i], param_vec[i]);
+        for (uint32_t i = 0; i < req_vec.size(); i++) {
+            StoreCallback callback = callback_vec[i];
+            if (callback) {
+                callback(table, (StoreRequest*)req_vec[i], resp_vec[i], param_vec[i]);
             } else {
                 // callback is null, free req and resp
                 delete req_vec[i];
@@ -818,15 +819,17 @@ int TableImpl::WriteBatchIndexTable(const std::string& primary_key, uint64_t tim
     std::string ts_key(buf, sizeof(buf));
     std::string time_primay_key = ts_key + type_primary_key;
     ::leveldb::BlockContents block_contents;
-    IndexBlock::ConstructBlockContents(index_block, &block_contents, leveldb_options_);
+    ::leveldb::ReadOptions read_options;
+    read_options.verify_checksums = true;
+    IndexBlock::ConstructBlockContents(index_block, &block_contents, read_options);
     IndexBlock iblock(block_contents, leveldb_options_);
 
-    ::leveldb::Iterator* iter = iblock->NewIterator();
+    ::leveldb::Iterator* iter = iblock.NewIterator();
     iter->SeekToFirst();
     while (iter->Valid()) {
         // get user's index table(key, value)
-        ::leveldb::Slice key = iter->Key();
-        ::leveldb::Slice value = iter->Value();
+        ::leveldb::Slice key = iter->key();
+        ::leveldb::Slice value = iter->value();
         tera::Table* index_table = GetIndexTable(key.ToString());
         if (index_table == NULL) {
             context->Release();
@@ -1765,17 +1768,16 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                     VLOG(12) << "finish read data from " << location;
                     // check break
                     ::leveldb::BlockContents block_contents;
-                    ::leveldb::Options options;
+                    ::leveldb::ReadOptions options;
                     options.verify_checksums = true;
                     ::leveldb::Status b_status = IndexBlock::ConstructBlockContents(::leveldb::Slice(data), &block_contents, options);
                     if (b_status.ok()) {
                         // parse compress index from primary table's value
                         IndexBlock data_block(block_contents, leveldb_options_);
-                        ::leveldb::Iterator* iter = data_block->NewIterator();
+                        ::leveldb::Iterator* iter = data_block.NewIterator();
                         iter->Seek(primary_key);
-                        while (iter->Valid() && (leveldb_options_.comparator(iter->Key(), primary_key) == 0)) {
-                            ::leveldb::Slice key = iter->Key();
-                            ::leveldb::Slice value = iter->Value();
+                        while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), primary_key) == 0)) {
+                            ::leveldb::Slice value = iter->value();
                             should_break = BreakOrPushData(param, param->result, Status::OK(), value.ToString(), "");
                             if (should_break) break;
                             nr_record++;
@@ -1874,19 +1876,17 @@ void TableImpl::AsyncRead(void* read_param) {
         VLOG(12) << "finish async read data from " << *location;
 
         ::leveldb::BlockContents block_contents;
-        ::leveldb::Options options;
+        ::leveldb::ReadOptions options;
         options.verify_checksums = true;
         ::leveldb::Status b_status = IndexBlock::ConstructBlockContents(::leveldb::Slice(data), &block_contents, options);
         bool should_break = false;
         if (b_status.ok()) {
             // parse compress index from primary table's value
             IndexBlock data_block(block_contents, leveldb_options_);
-            ::leveldb::Iterator* iter = data_block->NewIterator();
+            ::leveldb::Iterator* iter = data_block.NewIterator();
             iter->Seek(primary_key);
-            while (iter->Valid() && (leveldb_options_.comparator(iter->Key(), primary_key) == 0)) {
-                ::leveldb::Slice key = iter->Key();
-                ::leveldb::Slice value = iter->Value();
-
+            while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), primary_key) == 0)) {
+                ::leveldb::Slice value = iter->value();
                 // check break
                 MutexLock l(lock);
                 should_break = BreakOrPushData(param, param->result, Status::OK(), value.ToString(), "");
@@ -1918,17 +1918,17 @@ void TableImpl::ParseIndexesFromString(const std::string& index_buffer,
                                        std::multimap<std::string, std::string>* indexes,
                                        std::string* value) {
     ::leveldb::BlockContents block_contents;
-    ::leveldb::Options options;
+    ::leveldb::ReadOptions options;
     options.verify_checksums = true;
     ::leveldb::Status s = IndexBlock::ConstructBlockContents(::leveldb::Slice(index_buffer), &block_contents, options);
     if (s.ok()) {
         // parse compress index from primary table's value
         IndexBlock iblock(block_contents, leveldb_options_);
-        ::leveldb::Iterator* iter = iblock->NewIterator();
+        ::leveldb::Iterator* iter = iblock.NewIterator();
         iter->SeekToFirst();
         while (iter->Valid()) {
-            ::leveldb::Slice key = iter->Key();
-            ::leveldb::Slice value = iter->Value();
+            ::leveldb::Slice key = iter->key();
+            ::leveldb::Slice value = iter->value();
             indexes->insert(std::pair<std::string, std::string>(key.ToString(), value.ToString()));
             iter->Next();
         }

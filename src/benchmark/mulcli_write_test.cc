@@ -9,9 +9,9 @@
 #include "sdk/sdk.h"
 #include "sdk/db.h"
 #include "sdk/table.h"
-#include "util/env.h"
-#include "util/counter.h"
-#include "util/mutex.h"
+#include "utils/env.h"
+#include "utils/counter.h"
+#include "utils/mutex.h"
 
 struct WriteTask {
     mdt::Database* db_;
@@ -29,14 +29,14 @@ void StoreCallback_Test(mdt::Table* table, mdt::StoreRequest* request,
     WriteTask* task = (WriteTask*)callback_param;
     if (task->counter_->Dec() == 0) {
 	task->cond_->Signal();
-    } 
+    }
 }
 
 void* write_task(void* arg) {
     WriteTask* task = (WriteTask*)arg;
     std::string value_str(3000, 'x');
     uint64_t key_len = task->num_keys_ > 10 ? (task->num_keys_ / 10): task->num_keys_;
-    
+
     std::cout << "open table ..." << std::endl;
     mdt::Table* table;
     table = OpenTable(task->db_, task->table_name_);
@@ -52,7 +52,7 @@ void* write_task(void* arg) {
 	char* col_ptr = colbuf;
 	uint64_t col_id = i + task->start_key_;
 	col_ptr += snprintf(col_ptr, 11, "%011lu", col_id);
-	std::string col = colbuf;	
+	std::string col = colbuf;
 
         mdt::Index query, costtime, service;
         query.index_name = "Query";
@@ -62,7 +62,7 @@ void* write_task(void* arg) {
         costtime.index_name = "Costtime";
         costtime.index_key = "5ms";
         costtime.index_key += col;
-        
+
 	service.index_name = "Service";
         service.index_key = "bs module";
         service.index_key += col;
@@ -81,7 +81,7 @@ void* write_task(void* arg) {
     return NULL;
 }
 
-void dispatch_task(mdt::Database* db, const std::string& table_name, 
+void dispatch_task(mdt::Database* db, const std::string& table_name,
 		   mdt::Mutex* mu, mdt::CondVar* cond,
 		   mdt::Counter* counter, uint64_t num_task, uint64_t num_keys) {
     for (uint64_t i = 0; i < num_task; i++) {
@@ -91,7 +91,7 @@ void dispatch_task(mdt::Database* db, const std::string& table_name,
 	task->table_name_ = table_name;
 	task->mu_ = mu;
 	task->cond_ = cond;
-	task->counter_ = counter;	
+	task->counter_ = counter;
 	task->start_key_ = num_keys * i;
 	task->num_keys_ = num_keys;
 	pthread_create(&tid, NULL, write_task, task);
@@ -102,7 +102,7 @@ int main(int ac, char* av[]) {
     ::google::ParseCommandLineFlags(&ac, &av, true);
     std::string db_name = "z020";
     std::string table_name = "kepler001";
-    
+
     std::cout << "open db ..." << std::endl;
     mdt::Database* db;
     db = mdt::OpenDatabase(db_name);
@@ -115,11 +115,11 @@ int main(int ac, char* av[]) {
     counter.Set((int64_t)(num_task * num_keys) + 1);
     std::cout << "Test put ..." << std::endl;
     dispatch_task(db, table_name, &mu, &cond, &counter, num_task, num_keys);
-     
+
     if (counter.Dec() != 0) {
 	cond.Wait();
     }
-     
+
     std::cout << "done" << std::endl;
     return 0;
 }

@@ -6,8 +6,8 @@
 #include <map>
 #include <sofa/pbrpc/pbrpc.h>
 #include "proto/scheduler.pb.h"
-#include "util/thread_pool.h"
-#include "util/counter.h"
+#include "utils/thread_pool.h"
+#include "utils/counter.h"
 #include "rpc/rpc_client.h"
 #include "proto/agent.pb.h"
 

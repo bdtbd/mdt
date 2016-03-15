@@ -9,24 +9,24 @@
 #include "sdk/sdk.h"
 #include "sdk/db.h"
 #include "sdk/table.h"
-#include "util/env.h"
-#include "util/coding.h"
+#include "utils/env.h"
+#include "utils/coding.h"
 
 void primary_key_scan(mdt::Table* table, std::string& primary_key) {
     mdt::SearchRequest* search_req = new mdt::SearchRequest;
     mdt::SearchResponse* search_resp = new mdt::SearchResponse;
     search_req->primary_key = primary_key;
     std::cout << "scan table, case 1, primary key scan ..." << std::endl;
-    
+
     LOG(INFO) << "magicscan primary key: begin scan.. ";
     table->Get(search_req, search_resp);
     LOG(INFO) << "magicscan primary key: end scan.. ";
     for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
         const mdt::ResultStream& result = search_resp->result_stream[i];
-        LOG(INFO) << "primary key: " << result.primary_key 
+        LOG(INFO) << "primary key: " << result.primary_key
 	    << ", num of item " << result.result_data_list.size() << std::endl;
         for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
-            std::cout << "        data(size=" << result.result_data_list[j].size() 
+            std::cout << "        data(size=" << result.result_data_list[j].size()
 		<< ") " << result.result_data_list[j] << std::endl;
         }
     }
@@ -61,10 +61,10 @@ void index_key_scan(mdt::Table* table) {
     LOG(INFO) << "magicscan index key: end scan.. ";
     for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
         const mdt::ResultStream& result = search_resp->result_stream[i];
-	LOG(INFO) << "primary key: " << result.primary_key 
+	LOG(INFO) << "primary key: " << result.primary_key
 	    << ", num of item " << result.result_data_list.size() << std::endl;
         for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
-            std::cout << "        data(size=" << result.result_data_list[j].size() 
+            std::cout << "        data(size=" << result.result_data_list[j].size()
 		<< ") " << result.result_data_list[j] << std::endl;
         }
     }
@@ -77,7 +77,7 @@ int main(int ac, char* av[]) {
     ::google::ParseCommandLineFlags(&ac, &av, true);
     std::string db_name = "z012";
     std::string table_name = "kepler001";
-     
+
     // create db
     std::cout << "open db ..." << std::endl;
     mdt::Database* db;
@@ -91,11 +91,11 @@ int main(int ac, char* av[]) {
     // search test: case 1: primary key Scan
     LOG(INFO) << "primary key scan";
     std::string primary_key = "0000000056";
-    primary_key_scan(table, primary_key); 
+    primary_key_scan(table, primary_key);
 
-    LOG(INFO) << "index key scan";    
-    index_key_scan(table);    
- 
+    LOG(INFO) << "index key scan";
+    index_key_scan(table);
+
     std::cout << "done" << std::endl;
     return 0;
 }

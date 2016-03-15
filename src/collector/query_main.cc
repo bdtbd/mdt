@@ -2,7 +2,7 @@
 #include <gflags/gflags.h>
 #include "collector/query_service.h"
 #include <sofa/pbrpc/pbrpc.h>
-#include "util/status.h"
+#include "utils/status.h"
 #include <glog/logging.h>
 
 DECLARE_string(se_service_port);

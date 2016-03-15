@@ -2,7 +2,7 @@
 #include <glog/logging.h>
 #include <gflags/gflags.h>
 #include <iostream>
-#include "util/timer.h"
+#include "utils/timer.h"
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
 #include "proto/agent.pb.h"

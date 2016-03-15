@@ -9,10 +9,10 @@
 #include "agent/options.h"
 #include "proto/query.pb.h"
 #include "rpc/rpc_client.h"
-#include "util/event.h"
 #include <sys/time.h>
-#include "util/counter.h"
-#include "util/thread_pool.h"
+#include "utils/event.h"
+#include "utils/counter.h"
+#include "utils/thread_pool.h"
 
 namespace mdt {
 namespace agent {
