@@ -720,6 +720,17 @@ Status TableImpl::TypeStringToString(const std::string& index_table,
 // search interface
 Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
                       void* callback_param) {
+    struct timeval now_tv;
+    gettimeofday(&now_tv, NULL);
+    int64_t start_timestamp = req->start_timestamp;
+    if (start_timestamp < (int64_t)(now_tv.tv_sec - ttl_) * 1000000) {
+        start_timestamp = (int64_t)(now_tv.tv_sec - ttl_) * 1000000;
+        VLOG(10) << "start timestamp adjust to " << start_timestamp;
+    }
+    if (start_timestamp > req->end_timestamp) {
+        return Status::NotFound("data expired");
+    }
+
     Status s;
     if (!req->primary_key.empty()) {
         // convert primary key
@@ -727,6 +738,7 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
         StringToTypeString("pri", req->primary_key, &type_primary_key);
         GetByPrimaryKey(type_primary_key,
                         req->start_timestamp, req->end_timestamp,
+                        req->need_index, req->need_data,
                         &resp->result_stream);
     } else if (req->index_condition_list.size() > 0) {
         // convert index key
@@ -739,10 +751,11 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
             index.compare_value = type_index_key;
         }
         GetByIndex(index_condition_list, req->start_timestamp, req->end_timestamp,
-                   req->limit, &resp->result_stream);
+                   req->limit, req->need_index, req->need_data, &resp->result_stream);
     } else {
         GetByTimestamp(req->start_timestamp, req->end_timestamp,
-                       req->limit, &resp->result_stream);
+                       req->limit, req->need_index, req->need_data,
+                       &resp->result_stream);
     }
 
     if (resp->result_stream.size() == 0) {
@@ -763,11 +776,12 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
 // with timestamp
 Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
                                   int64_t start_timestamp, int64_t end_timestamp,
+                                  bool need_index, bool need_data,
                                   std::vector<ResultStream>* result_list) {
     VLOG(10) << "get by primary key(with timestamp range): " << DebugString(primary_key);
     ResultStream result;
     Status s = GetSingleRow(primary_key, &result,
-                            start_timestamp, end_timestamp,
+                            start_timestamp, end_timestamp, need_index, need_data,
                             NULL, NULL, NULL, NULL);
     if (s.ok()) {
         result_list->push_back(result);
@@ -777,6 +791,7 @@ Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
 
 Status TableImpl::GetByIndex(const std::vector<IndexCondition>& index_condition_list,
                              int64_t start_timestamp, int64_t end_timestamp, int32_t limit,
+                             bool need_index, bool need_data,
                              std::vector<ResultStream>* result_list) {
     VLOG(10) << "extend index conditions";
     std::vector<IndexConditionExtend> index_cond_ex_list;
@@ -785,14 +800,15 @@ Status TableImpl::GetByIndex(const std::vector<IndexCondition>& index_condition_
     if (s.ok()) {
         VLOG(10) << "get by extend index conditions";
         s = GetByExtendIndex(index_cond_ex_list, start_timestamp, end_timestamp,
-                             limit, result_list);
+                             limit, need_index, need_data, result_list);
     }
 
     return s;
 }
 
 Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
-                                 int32_t limit, std::vector<ResultStream>* result_list) {
+                                 int32_t limit, bool need_index, bool need_data,
+                                 std::vector<ResultStream>* result_list) {
     std::vector<tera::Table*> ts_table_list;
     GetAllTimestampTables(&ts_table_list);
     if (ts_table_list.size() == 0) {
@@ -834,7 +850,7 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
             }
             if ((int32_t)primary_key_list.size() >= limit) {
                 GetRows(primary_key_list, limit - result_list->size(),
-                        result_list);
+                        need_index, need_data, result_list);
                 primary_key_list.clear();
             }
             result->Next();
@@ -843,10 +859,10 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
             //CHECK(result->Done(&err));
             CHECK_LT((int32_t)result_list->size(), limit);
             GetRows(primary_key_list, limit - result_list->size(),
-                    result_list);
+                    need_index, need_data, result_list);
         }
         //delete result;
-	cleaner_thread_.AddTask(boost::bind(&TableImpl::CleanerThread, this, result));
+        cleaner_thread_.AddTask(boost::bind(&TableImpl::CleanerThread, this, result));
         delete scan_desc;
     }
 
@@ -909,7 +925,8 @@ Status TableImpl::ExtendIndexCondition(const std::vector<IndexCondition>& index_
 
 Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& index_condition_ex_list,
                                    int64_t start_timestamp, int64_t end_timestamp,
-                                   int32_t limit, std::vector<ResultStream>* result_list) {
+                                   int32_t limit, bool need_index, bool need_data,
+                                   std::vector<ResultStream>* result_list) {
     size_t nr_index_table = index_condition_ex_list.size();
     if (nr_index_table == 0) {
         result_list->clear();
@@ -1013,8 +1030,8 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         for (int i = 0; i < valid_nr_index_table; i++) {
             scan_threads.AddTask(boost::bind(&TableImpl::GetByFilterIndex, this,
                                              index_table_vec[i], scan_desc_vec[i],
-                                             multi_param,
-                                             &index_condition_ex_list, &result_map));
+                                             multi_param, &index_condition_ex_list,
+                                             need_index, need_data, &result_map));
         }
         scan_threads.Stop(true);
         std::map<std::string, ResultStream>::iterator it = result_map.begin();
@@ -1031,7 +1048,8 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
             std::vector<std::string> primary_key_list;
             PrimaryKeyMergeSort(pri_vec, &primary_key_list);
             VLOG(10) << "select op, primary key merge sort: " << primary_key_list.size();
-            GetRows(primary_key_list, limit - result_list->size(), result_list);
+            GetRows(primary_key_list, limit - result_list->size(),
+                    need_index, need_data, result_list);
         }
     }
 
@@ -1108,11 +1126,13 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
                                  tera::ScanDescriptor* scan_desc,
                                  MultiIndexParam* multi_param,
                                  const std::vector<IndexConditionExtend>* index_cond_list,
+                                 bool need_index, bool need_data,
                                  std::map<std::string, ResultStream>* results) {
+    VLOG(10) << "begin scan index: " << index_table->GetName();
     tera::ErrorCode err;
     tera::ResultStream* stream = index_table->Scan(*scan_desc, &err);
     if (stream == NULL) {
-        VLOG(5) << "new scan stream error\n";
+        LOG(ERROR) << "new scan stream of " << index_table->GetName() << " error: " << err.GetReason();
 
         multi_param->mutex.Lock();
         // last index searcher free multi_param
@@ -1127,12 +1147,12 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     }
 
     // filter by timestamp
-    VLOG(10) << "begin scan index: " << index_table->GetName();
     FilterIndexParam* param = new FilterIndexParam(multi_param);
     param->pending_count = 1;
     while (!stream->Done(&err)) {
         // skip 8 bytes's ts
         std::string primary_key(stream->Qualifier(), 8, std::string::npos);
+        VLOG(12) << "scan " << index_table->GetName() << " get key: " << DebugString(primary_key);
         {
             MutexLock l(&multi_param->mutex);
             /*
@@ -1147,6 +1167,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
             }
             */
             if (multi_param->finish || multi_param->counter >= multi_param->limit) {
+                VLOG(10) << "break from scan index: " << index_table->GetName();
                 break;
             }
             if (results->find(primary_key) != results->end()) {
@@ -1160,7 +1181,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
 
         GetSingleRow(primary_key, &(*results)[primary_key],
                      0, (uint64_t)timer::get_micros(),
-                     index_cond_list,
+                     need_index, need_data, index_cond_list,
                      FilterIndexCallback, param,
                      FilterIndexBreak);
 
@@ -1173,11 +1194,11 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     // stop other index table scan streams
     {
         MutexLock l(&multi_param->mutex);
-	if (multi_param->finish == false) {
-       	    VLOG(10) << "finish scan index: " << index_table->GetName()
+        if (multi_param->finish == false) {
+            VLOG(10) << "finish scan index: " << index_table->GetName()
                  << ", notify other index table scan streams to stop";
-	    multi_param->finish = true;
-	}
+            multi_param->finish = true;
+        }
     }
 
     // wait for background read
@@ -1186,11 +1207,11 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table,
     {
         multi_param->mutex.Lock();
         // :(,  compile optimistic may cause error
-	while (!((param->pending_count == 1) ||
+        while (!((param->pending_count == 1) ||
                (multi_param->counter >= multi_param->limit))) {
             param->cond.Wait();
         }
-    	VLOG(10) << "finish scan index: " << index_table->GetName()
+        VLOG(10) << "finish scan index: " << index_table->GetName()
                 << ", all done, get data_num " << multi_param->counter;
         param->user_leave++;
         param->pending_count--;
@@ -1373,6 +1394,7 @@ void GetRowCallback(Status s, ResultStream* result, void* callback_param) {
 }
 
 int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int32_t limit,
+                           bool need_index, bool need_data,
                            std::vector<ResultStream>* row_list) {
     std::vector<Status> status_list(primary_key_list.size());
     std::vector<ResultStream> tmp_row_list(primary_key_list.size());
@@ -1388,7 +1410,7 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
         param->cond = &cond;
 
         GetSingleRow(primary_key_list[i], &tmp_row_list[i],
-                     0, (uint64_t)timer::get_micros(),
+                     0, (uint64_t)timer::get_micros(), need_index, need_data,
                      NULL, GetRowCallback, param, NULL);
     }
 
@@ -1415,6 +1437,8 @@ int32_t TableImpl::GetRows(const std::vector<std::string>& primary_key_list, int
 struct ReadPrimaryTableContext {
     TableImpl* table;
     std::vector<IndexConditionExtend> index_cond_list;
+    bool need_index;
+    bool need_data;
     void* user_callback;
     void* user_break_func; // break read primary table
     void* user_param;
@@ -1424,6 +1448,7 @@ struct ReadPrimaryTableContext {
     Mutex* mutex;
     CondVar* cond;
     bool* finish;
+    Status* s;
 };
 
 void ReleaseReadPrimaryTableContext(ReadPrimaryTableContext* param, ResultStream* result, Status s) {
@@ -1431,6 +1456,7 @@ void ReleaseReadPrimaryTableContext(ReadPrimaryTableContext* param, ResultStream
         ((GetSingleRowCallback*)param->user_callback)(s, result, param->user_param);
     } else {
         MutexLock l(param->mutex);
+        (*param->s) = s;
         (*param->finish) = true;
         param->cond->Signal();
     }
@@ -1460,6 +1486,7 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
     const std::string& primary_key = reader->RowName();
     VLOG(12) << "finish read primary table: " <<  param->table->table_desc_.table_name
              << ", primary key: " << DebugString(primary_key);
+    // parallelly process row results in same rpc
     param->table->thread_pool_.AddTask(boost::bind(&TableImpl::ReadData, param->table, reader));
 }
 
@@ -1500,77 +1527,89 @@ void TableImpl::ReadData(tera::RowReader* reader) {
         reader->Next();
     }
 
+    bool filter_pass = false;
     int nr_record = 0;
     VLOG(12) << "test indexes of primary key: " << primary_key;
-    if (!should_break && (TestIndexCondition(param->index_cond_list, indexes))) {
-        VLOG(12) << "read data of primary key: " << primary_key;
-        // sync filesystem read
-        if (!FLAGS_enable_async_read) {
-            for (size_t i = 0; i < value_locations.size(); ++i) {
-            	std::pair<FileLocation, std::string>& item = value_locations[i];
-            	FileLocation& location = item.first;
-                VLOG(12) << "begin to read data from " << location;
-            	std::string data = item.second;
-		// data in tera, get it, else get from filesystem
-		if (data.size()) {
-		    VLOG(12) << "finish read data from tera";
-		    // check break
-		    should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
-		    if (should_break) { break; }
-		    nr_record++;
-		    continue;
-		}
+    if (!should_break && (filter_pass = TestIndexCondition(param->index_cond_list, indexes))) {
+        if (param->need_index) {
+            VLOG(12) << "read index of primary key: " << primary_key;
+            std::multimap<std::string, std::string>::const_iterator it = indexes.begin();
+            for (; it != indexes.end(); ++it) {
+                struct Index index = {it->first, it->second};
+                param->result->result_index_list.push_back(index);
+            }
+        }
 
-		// get data from filesystem
-		Status s = param->table->ReadDataFromFile(location, &data);
-                if (s.ok()) {
-                    VLOG(12) << "finish read data from " << location;
-                    // check break
-                    should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
-                    if (should_break) { break; }
-                    nr_record++;
-                } else {
-                    LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
+        if (param->need_data) {
+            VLOG(12) << "read data of primary key: " << primary_key;
+            // sync filesystem read
+            if (!FLAGS_enable_async_read) {
+                for (size_t i = 0; i < value_locations.size(); ++i) {
+                    std::pair<FileLocation, std::string>& item = value_locations[i];
+                    FileLocation& location = item.first;
+                    VLOG(12) << "begin to read data from " << location;
+                    std::string data = item.second;
+                    // data in tera, get it, else get from filesystem
+                    if (data.size()) {
+                        VLOG(12) << "finish read data from tera";
+                        // check break
+                        should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
+                        if (should_break) { break; }
+                        nr_record++;
+                        continue;
+                    }
+
+                    // get data from filesystem
+                    Status s = param->table->ReadDataFromFile(location, &data);
+                    if (s.ok()) {
+                        VLOG(12) << "finish read data from " << location;
+                        // check break
+                        should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
+                        if (should_break) { break; }
+                        nr_record++;
+                    } else {
+                        LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
+                    }
                 }
-            }
-        } else {
-            // use async filesystem read
-            Mutex lock;
-            CondVar cond(&lock);
-            Counter nr_reader;
-            nr_reader.Set((uint64_t)(value_locations.size()) + 1);
+            } else {
+                // use async filesystem read
+                Mutex lock;
+                CondVar cond(&lock);
+                Counter nr_reader;
+                nr_reader.Set((uint64_t)(value_locations.size()) + 1);
 
-            for (size_t i = 0; i < value_locations.size(); ++i) {
-            	std::pair<FileLocation, std::string>& item = value_locations[i];
-            	FileLocation& location = item.first;
-            	std::string data = item.second;
-		// data in tera, get it, else get from filesystem
-		if (data.size()) {
-		    VLOG(12) << "finish read data from tera";
-		    // check break
-		    should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
-		    if (should_break) { break; }
-		    nr_record++;
-		    nr_reader.Dec();
-		    continue;
-		}
+                for (size_t i = 0; i < value_locations.size(); ++i) {
+                    std::pair<FileLocation, std::string>& item = value_locations[i];
+                    FileLocation& location = item.first;
+                    std::string data = item.second;
+                    // data in tera, get it, else get from filesystem
+                    if (data.size()) {
+                        VLOG(12) << "finish read data from tera";
+                        // check break
+                        should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
+                        if (should_break) { break; }
+                        nr_record++;
+                        nr_reader.Dec();
+                        continue;
+                    }
 
-		// get data from filesystem
-                AsyncReadParam* async_read_param = new AsyncReadParam;
-                async_read_param->param = param;
-                async_read_param->lock = &lock;
-                async_read_param->cond = &cond;
-                async_read_param->nr_record = &nr_record;
-                async_read_param->nr_reader = &nr_reader;
-                async_read_param->location = &location;
-                async_read_thread_.AddTask(boost::bind(&TableImpl::AsyncRead, this, async_read_param));
-            }
-            {
-                MutexLock l(&lock);
-		nr_reader.Dec();
-                VLOG(30) << "async read, wait file read finish";
-                while (nr_reader.Get()) {
-                    cond.Wait();
+                    // get data from filesystem
+                    AsyncReadParam* async_read_param = new AsyncReadParam;
+                    async_read_param->param = param;
+                    async_read_param->lock = &lock;
+                    async_read_param->cond = &cond;
+                    async_read_param->nr_record = &nr_record;
+                    async_read_param->nr_reader = &nr_reader;
+                    async_read_param->location = &location;
+                    async_read_thread_.AddTask(boost::bind(&TableImpl::AsyncRead, this, async_read_param));
+                }
+                {
+                    MutexLock l(&lock);
+                    nr_reader.Dec();
+                    VLOG(30) << "async read, wait file read finish";
+                    while (nr_reader.Get()) {
+                        cond.Wait();
+                    }
                 }
             }
         }
@@ -1580,14 +1619,16 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     if (should_break) {
         s = Status::NotFound("break from read data");
     } else if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
-	LOG(WARNING) << "tera row reader error, primary key " << primary_key;
+        LOG(WARNING) << "tera row reader error, primary key " << primary_key;
         s = Status::IOError("tera error");
-    } else if (nr_record > 0) {
+    } else if (!filter_pass) {
+        s = Status::NotFound("row is filter out");
+    } else if (!param->need_data || nr_record > 0) {
         BreakOrPushData(param, param->result, Status::OK(), "", primary_key);
         s = Status::OK();
     } else {
-	LOG(WARNING) << "row not found, priamry key " << primary_key;
-        s = Status::NotFound("row not found");
+        LOG(WARNING) << "empty row, priamry key " << primary_key;
+        s = Status::NotFound("row has no data");
     }
     delete reader;
 
@@ -1654,7 +1695,18 @@ void TableImpl::ParseIndexesFromString(const std::string& index_buffer,
         if (index_name == kTeraValue) {
             *value = index_key;
         } else {
-            indexes->insert(std::pair<std::string, std::string>(index_name, index_key));
+            bool found = false;
+            std::multimap<std::string, std::string>::iterator lo = indexes->lower_bound(index_name);
+            std::multimap<std::string, std::string>::iterator up = indexes->upper_bound(index_name);
+            for (; lo != up; ++lo) {
+                if (lo->second == index_key) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                indexes->insert(std::pair<std::string, std::string>(index_name, index_key));
+            }
         }
         buf += index_len;
         left -= index_len;
@@ -1731,6 +1783,7 @@ bool TableImpl::TestIndexCondition(const std::vector<IndexConditionExtend>& inde
 
 Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* result,
                                int64_t start_timestamp, int64_t end_timestamp,
+                               bool need_index, bool need_data,
                                const std::vector<IndexConditionExtend>* index_cond_list,
                                GetSingleRowCallback user_callback, void* user_param,
                                GetSingleRowBreak user_break_func) {
@@ -1742,10 +1795,11 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
     // init RowReader callback param
     ReadPrimaryTableContext* param = new ReadPrimaryTableContext;
     param->table = this;
-    param->result = result;
     if (index_cond_list) {
         param->index_cond_list = *index_cond_list;
     }
+    param->need_index = need_index;
+    param->need_data = need_data;
     param->user_callback = (void*)user_callback;
     param->user_break_func = (void*)user_break_func;
     param->user_param = user_param;
@@ -1753,7 +1807,9 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         param->mutex = &mu;
         param->cond = &cond;
         param->finish = &finish;
+        param->s = &s;
     }
+    param->result = result;
 
     tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
     tera::RowReader* reader = primary_table->NewRowReader(primary_key);
@@ -1773,9 +1829,7 @@ Status TableImpl::GetSingleRow(const std::string& primary_key, ResultStream* res
         while (!finish) {
             cond.Wait();
         }
-        if (result->result_data_list.size() == 0) {
-            return Status::NotFound("row not found");
-        }
+        return s;
     }
     return Status::OK();
 }
@@ -2075,7 +2129,7 @@ DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
         fs_.env_->NewWritableFile(fname, &file);
         write_handle->writer_ = new DataWriter(fname, file);
         write_handle->writer_->SetFileTime(filetime);
-	LOG(INFO) << "nowts " << timer::get_micros() << ", filetime " << write_handle->writer_->GetFileTime();
+        LOG(INFO) << "nowts " << timer::get_micros() << ", filetime " << write_handle->writer_->GetFileTime();
     }
     writer = write_handle->writer_;
     return writer;
@@ -2132,7 +2186,7 @@ bool DataWriter::SwitchDataFile() {
         int64_t nowts = timer::get_micros();
         int64_t filets = filetime_.tv_sec * 1000000 + filetime_.tv_usec;
         if (nowts > filets + 3600000000) {
-	    VLOG(30) << "time switch file, nowts " << nowts << ", filetime " << filets;
+            VLOG(30) << "time switch file, nowts " << nowts << ", filetime " << filets;
             shouldswitch = true;
         }
     }

@@ -121,6 +121,8 @@ typedef struct mdt_search_request_t {
     int64_t start_timestamp;
     int64_t end_timestamp;
     int32_t limit;
+    int need_index;
+    int need_data;
 } mdt_search_request_t;
 
 // 查询结果
@@ -128,6 +130,8 @@ typedef struct mdt_search_result_t {
     mdt_slice_t primary_key;
     mdt_slice_t* data_list;
     size_t data_list_len;
+    mdt_index_t* index_list;
+    size_t index_list_len;
 } mdt_search_result_t;
 
 typedef struct mdt_search_response_t {
