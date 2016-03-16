@@ -50,9 +50,9 @@ typedef struct mdt_store_request_t {
     int64_t timestamp;
     mdt_index_t* index_list;
     size_t index_list_len;
-    mdt_slice_t data;
-    // mdt_slice_t* data_list;
-    // size_t data_list_len;
+    //mdt_slice_t data;
+    mdt_slice_t* data_list;
+    size_t data_list_len;
 } mdt_store_request_t;
 
 // 写入结果

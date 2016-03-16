@@ -186,7 +186,7 @@ func Store(table *Table,
            primary_key string,  // key after encode
            timestamp int64,
            index_list []Index,
-           data string) error {
+           data_list []string) error {
     var c_request C.mdt_store_request_t
     var c_response C.mdt_store_response_t
 
@@ -194,6 +194,7 @@ func Store(table *Table,
     c_request.primary_key.data = C.CString(primary_key)
     c_request.primary_key.size = C.size_t(len(primary_key))
     c_request.timestamp = C.int64_t(timestamp)
+    
     c_request.index_list = nil
     c_request.index_list_len = C.size_t(len(index_list))
     c_request.index_list = (*C.mdt_index_t)(C.malloc(32 * c_request.index_list_len))
@@ -204,8 +205,19 @@ func Store(table *Table,
         c_index_list[i].index_key.data = C.CString(index_list[i].IndexKey)
         c_index_list[i].index_key.size = C.size_t(len(index_list[i].IndexKey))
     }
-    c_request.data.data = C.CString(data)
-    c_request.data.size = C.size_t(len(data))
+   
+    // new vector write interface
+    c_request.data_list = nil
+    c_request.data_list_len = C.size_t(data_list)
+    c_request.data_list = (*C.mdt_slice_t)(C.malloc(16 * c_request.data_list_len))
+    c_data_list := (*[1 << 30]C.mdt_slice_t)(unsafe.Pointer(c_request.data_list))
+    for i := C.size_t(0); i < c_request.data_list_len; data_i++ {
+        c_data_list[i].data = C.CString(data_list[i])
+        c_data_list[i].size = C.size_t(len(data_list[i]))
+    }
+    // old write interface
+    //c_request.data.data = C.CString(data)
+    //c_request.data.size = C.size_t(len(data))
 
     // invoke C API
     C.mdt_store(table.rep, &c_request, &c_response, nil, nil)
@@ -215,12 +227,18 @@ func Store(table *Table,
 
     // free request memory
     C.free(unsafe.Pointer(c_request.primary_key.data))
+    
     for i := C.size_t(0); i < c_request.index_list_len; i++ {
         C.free(unsafe.Pointer(c_index_list[i].index_name.data))
         C.free(unsafe.Pointer(c_index_list[i].index_key.data))
     }
     C.free(unsafe.Pointer(c_request.index_list))
-    C.free(unsafe.Pointer(c_request.data.data))
+    
+    for i := C.size_t(0); i < c_request.data_list_len; i++ {
+        C.free(unsafe.Pointer(c_data_list[i].data))
+    }
+    C.free(unsafe.Pointer(c_request.data_list))
+    //C.free(unsafe.Pointer(c_request.data.data))
 
     return GetError(err)
 }

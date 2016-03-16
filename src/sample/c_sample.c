@@ -75,8 +75,10 @@ int main(int ac, char* av[]) {
     service_index->index_key.data = "bs module";
     service_index->index_key.size = strlen(service_index->index_key.data);
 
-    store_req->data.data = "this s a test, Query: beauty girl, Costtime: 5ms, Service: bs module";
-    store_req->data.size = strlen(store_req->data.data);
+    store_req->data_list_len = 1;
+    store_req->data_list = malloc(sizeof(mdt_slice_t) * 1);
+    store_req->data_list[0].data = "this s a test, Query: beauty girl, Costtime: 5ms, Service: bs module";
+    store_req->data_list[0].size = strlen(store_req->data_list[0].data);
 
     mdt_store_response_t* store_resp = malloc(sizeof(mdt_store_response_t));
     mdt_store_callback callback = &store_callback_test;

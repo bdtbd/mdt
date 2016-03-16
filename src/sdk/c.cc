@@ -92,7 +92,12 @@ void mdt_convert_write_request(mdt_store_request_t* c_req, mdt::StoreRequest* cp
         mdt_slice_to_string(c_index.index_name, &cpp_index.index_name);
         mdt_slice_to_string(c_index.index_key, &cpp_index.index_key);
     }
-    mdt_slice_to_string(c_req->data, &cpp_req->data);
+    for (size_t i = 0; i < c_req->data_list_len; i++) {
+        mdt_slice_t& c_data = c_req->data_list[i];
+        std::string& cpp_data = cpp_req->vec_data[i];
+        mdt_slice_to_string(c_data, &cpp_data);
+    }
+    //mdt_slice_to_string(c_req->data, &cpp_req->data);
     return;
 }
 
@@ -213,7 +218,12 @@ void mdt_store(mdt_table_t* table,
         mdt_slice_to_string(index.index_name, &internal_index.index_name);
         mdt_slice_to_string(index.index_key, &internal_index.index_key);
     }
-    mdt_slice_to_string(request->data, &internal_request->data);
+    for (size_t i = 0; i < request->data_list_len; i++) {
+        mdt_slice_t& data = request->data_list[i];
+        std::string& internal_data = internal_request->vec_data[i];
+        mdt_slice_to_string(data, &internal_data);
+    }
+    //mdt_slice_to_string(request->data, &internal_request->data);
 
     // build internal response
     mdt::StoreResponse* internal_response = new mdt::StoreResponse;
