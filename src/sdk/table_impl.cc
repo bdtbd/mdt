@@ -50,6 +50,12 @@ std::ostream& operator << (std::ostream& o, const FileLocation& location) {
 Status TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                          Table** table_ptr) {
+    VLOG(10) << "open table: " << table_desc.table_name << " ttl: " << table_desc.table_ttl
+             << " pri type: " << table_desc.primary_key_type;
+    for (size_t i = 0; i < table_desc.index_descriptor_list.size(); i++) {
+        const IndexDescription& index_desc = table_desc.index_descriptor_list[i];
+        VLOG(10) << "index: " << index_desc.index_name << " type: " << index_desc.index_key_type;
+    }
     const std::string& table_name = table_desc.table_name;
     // init fs adapter
     FilesystemAdapter fs_adapter;
@@ -720,15 +726,17 @@ Status TableImpl::TypeStringToString(const std::string& index_table,
 // search interface
 Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
                       void* callback_param) {
-    struct timeval now_tv;
-    gettimeofday(&now_tv, NULL);
-    int64_t start_timestamp = req->start_timestamp;
-    if (start_timestamp < (int64_t)(now_tv.tv_sec - ttl_) * 1000000) {
-        start_timestamp = (int64_t)(now_tv.tv_sec - ttl_) * 1000000;
-        VLOG(10) << "start timestamp adjust to " << start_timestamp;
-    }
-    if (start_timestamp > req->end_timestamp) {
-        return Status::NotFound("data expired");
+    if (!req->primary_key.empty() && ttl_ > 0) {
+        struct timeval now_tv;
+        gettimeofday(&now_tv, NULL);
+        int64_t start_timestamp = req->start_timestamp;
+        if (start_timestamp < (int64_t)(now_tv.tv_sec - ttl_) * 1000000) {
+            start_timestamp = (int64_t)(now_tv.tv_sec - ttl_) * 1000000;
+            VLOG(10) << "start timestamp adjust to " << start_timestamp;
+        }
+        if (start_timestamp > req->end_timestamp) {
+            return Status::NotFound("data expired");
+        }
     }
 
     Status s;
@@ -1535,8 +1543,12 @@ void TableImpl::ReadData(tera::RowReader* reader) {
             VLOG(12) << "read index of primary key: " << primary_key;
             std::multimap<std::string, std::string>::const_iterator it = indexes.begin();
             for (; it != indexes.end(); ++it) {
-                struct Index index = {it->first, it->second};
+                std::string index_key;
+                TypeStringToString(it->first, it->second, &index_key);
+                struct Index index = {it->first, index_key};
                 param->result->result_index_list.push_back(index);
+                VLOG(14) << "index: " << it->first << " " << index_key
+                         << " " << DebugString(it->second);
             }
         }
 
