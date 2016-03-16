@@ -247,9 +247,13 @@ private:
     bool TestIndexCondition(const std::vector<IndexConditionExtend>& index_cond_list,
                             const std::multimap<std::string, std::string>& index_list);
 
+    void StringToTypeString(enum TYPE key_type, const std::string& key, std::string* type_key);
+
     Status StringToTypeString(const std::string& index_table,
                               const std::string& key,
                               std::string* type_key);
+
+    void TypeStringToString(enum TYPE key_type, const std::string& type_key, std::string* key);
 
     Status TypeStringToString(const std::string& index_table,
                               const std::string& type_key,

@@ -630,50 +630,43 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     return 0;
 }
 
+void TableImpl::StringToTypeString(enum TYPE key_type,
+                                   const std::string& key,
+                                   std::string* type_key) {
+    if (key_type == ::mdt::kBytes) {
+        *type_key = key;
+    } else if (key_type == ::mdt::kUInt32 || key_type == ::mdt::kUInt64) {
+        uint64_t ikey = (uint64_t)atol(key.c_str());
+        char buf[8];
+        EncodeBigEndian(buf, ikey);
+        std::string ikey_str(buf, sizeof(buf));
+        *type_key = ikey_str;
+    } else if (key_type == ::mdt::kInt32 || key_type == ::mdt::kInt64) {
+        uint64_t ikey = (uint64_t)atol(key.c_str());
+        ikey ^= (1ULL << 63);
+        char buf[8];
+        EncodeBigEndian(buf, ikey);
+        std::string ikey_str(buf, sizeof(buf));
+        *type_key = ikey_str;
+    } else {
+        *type_key = key;
+    }
+}
+
 Status TableImpl::StringToTypeString(const std::string& index_table,
                                      const std::string& key,
                                      std::string* type_key) {
     // primary key
     if (index_table == "pri") {
-        if (table_desc_.primary_key_type == ::mdt::kBytes) {
-            *type_key = key;
-            return Status::OK();
-        } else if (table_desc_.primary_key_type == ::mdt::kUInt32 ||
-                   table_desc_.primary_key_type == ::mdt::kUInt64 ||
-                   table_desc_.primary_key_type == ::mdt::kInt32 ||
-                   table_desc_.primary_key_type == ::mdt::kInt64) {
-            uint64_t ikey = (uint64_t)atol(key.c_str());
-            char buf[8];
-            EncodeBigEndian(buf, ikey);
-            std::string ikey_str(buf, sizeof(buf));
-            *type_key = ikey_str;
-            return Status::OK();
-        } else {
-            *type_key = key;
-            return Status::OK();
-        }
+        StringToTypeString(table_desc_.primary_key_type, key, type_key);
+        return Status::OK();
     } else {
         std::vector<IndexDescription>::iterator it = table_desc_.index_descriptor_list.begin();
         for (; it != table_desc_.index_descriptor_list.end(); ++it) {
             IndexDescription& desc = *it;
             if (desc.index_name == index_table) {
-                if (desc.index_key_type == ::mdt::kBytes) {
-                    *type_key = key;
-                    return Status::OK();
-                } else if (desc.index_key_type == ::mdt::kUInt32 ||
-                           desc.index_key_type == ::mdt::kUInt64 ||
-                           desc.index_key_type == ::mdt::kInt32 ||
-                           desc.index_key_type == ::mdt::kInt64) {
-                    uint64_t ikey = (uint64_t)atol(key.c_str());
-                    char buf[8];
-                    EncodeBigEndian(buf, ikey);
-                    std::string ikey_str(buf, sizeof(buf));
-                    *type_key = ikey_str;
-                    return Status::OK();
-                } else {
-                    *type_key = key;
-                    return Status::OK();
-                }
+                StringToTypeString(desc.index_key_type, key, type_key);
+                return Status::OK();
             }
         }
     }
@@ -681,44 +674,42 @@ Status TableImpl::StringToTypeString(const std::string& index_table,
     return Status::OK();
 }
 
+void TableImpl::TypeStringToString(enum TYPE key_type,
+                                   const std::string& type_key,
+                                   std::string* key) {
+    if (key_type == ::mdt::kBytes) {
+        *key = type_key;
+    } else if (key_type == ::mdt::kUInt32 ||
+               key_type == ::mdt::kUInt64) {
+        uint64_t ikey = DecodeBigEndain(type_key.c_str());
+        std::ostringstream convert;
+        convert << ikey;
+        *key = convert.str();
+    } else if (key_type == ::mdt::kInt32 ||
+               key_type == ::mdt::kInt64) {
+        uint64_t ikey = DecodeBigEndain(type_key.c_str());
+        ikey ^= (1ULL << 63);
+        std::ostringstream convert;
+        convert << (int64_t)ikey;
+        *key = convert.str();
+    } else {
+        *key = type_key;
+    }
+}
+
 Status TableImpl::TypeStringToString(const std::string& index_table,
                                      const std::string& type_key,
                                      std::string* key) {
     if (index_table == "pri") {
-        if (table_desc_.primary_key_type == ::mdt::kBytes) {
-            *key = type_key;
-            return Status::OK();
-        } else if (table_desc_.primary_key_type == ::mdt::kUInt32 ||
-                   table_desc_.primary_key_type == ::mdt::kUInt64 ||
-                   table_desc_.primary_key_type == ::mdt::kInt32 ||
-                   table_desc_.primary_key_type == ::mdt::kInt64) {
-            uint64_t ikey = DecodeBigEndain(type_key.c_str());
-            std::ostringstream convert;
-            convert << ikey;
-            *key = convert.str();
-            return Status::OK();
-        }
+        TypeStringToString(table_desc_.primary_key_type, type_key, key);
+        return Status::OK();
     } else {
         std::vector<IndexDescription>::iterator it = table_desc_.index_descriptor_list.begin();
         for (; it != table_desc_.index_descriptor_list.end(); ++it) {
             IndexDescription& desc = *it;
             if (desc.index_name == index_table) {
-                if (desc.index_key_type == ::mdt::kBytes) {
-                    *key = type_key;
-                    return Status::OK();
-                } else if (desc.index_key_type == ::mdt::kUInt32 ||
-                           desc.index_key_type == ::mdt::kUInt64 ||
-                           desc.index_key_type == ::mdt::kInt32 ||
-                           desc.index_key_type == ::mdt::kInt64) {
-                    uint64_t ikey = DecodeBigEndain(type_key.c_str());
-                    std::ostringstream convert;
-                    convert << ikey;
-                    *key = convert.str();
-                    return Status::OK();
-                } else {
-                    *key = type_key;
-                    return Status::OK();
-                }
+                TypeStringToString(desc.index_key_type, type_key, key);
+                return Status::OK();
             }
         }
     }
