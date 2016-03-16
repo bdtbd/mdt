@@ -486,7 +486,13 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
         WriteContext* last_writer = *iter;
         std::string type_primary_key;
         StringToTypeString("pri", last_writer->req_->primary_key, &type_primary_key);
-        sort_block->Add(type_primary_key, last_writer->req_->data);
+        if (last_writer->req_->data.size()) {
+            sort_block->Add(type_primary_key, last_writer->req_->data);
+        }
+        // support data vec write
+        for (uint32_t nr_data = 0; nr_data < last_writer->req_->vec_data.size(); nr_data++) {
+            sort_block->Add(type_primary_key, last_writer->req_->vec_data[nr_data]);
+        }
 
         // aggre primary key
         std::vector<WriteContext*>& write_vec = primary_key_map[last_writer->req_->primary_key];
