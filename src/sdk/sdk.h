@@ -38,10 +38,11 @@ struct Index {
 
 // 写入请求
 struct StoreRequest {
-    std::string primary_key; // key after encode
+    std::string primary_key;
     int64_t timestamp;
     std::vector<struct Index> index_list;
     std::string data;
+    std::vector<std::string> vec_data;
 };
 
 // 写入结果

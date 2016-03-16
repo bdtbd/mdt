@@ -10,8 +10,8 @@
 #include "sdk/db.h"
 #include "sdk/table.h"
 
-#include "util/env.h"
-#include "util/coding.h"
+#include "utils/env.h"
+#include "utils/coding.h"
 
 DECLARE_string(flagfile);
 DECLARE_string(log_file);

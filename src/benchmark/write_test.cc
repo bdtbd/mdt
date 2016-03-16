@@ -9,9 +9,9 @@
 #include "sdk/sdk.h"
 #include "sdk/db.h"
 #include "sdk/table.h"
-#include "util/env.h"
-#include "util/counter.h"
-#include "util/mutex.h"
+#include "utils/env.h"
+#include "utils/counter.h"
+#include "utils/mutex.h"
 
 DEFINE_string(dbname, "z012", "production name");
 DEFINE_string(tablename, "kepler001", "table name");

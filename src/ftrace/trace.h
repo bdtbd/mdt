@@ -3,8 +3,8 @@
 
 #include <stack>
 
-#include "util/counter.h"
-#include "util/mutex.h"
+#include "utils/counter.h"
+#include "utils/mutex.h"
 #include "proto/agent.pb.h"
 #include <sofa/pbrpc/pbrpc.h>
 #include <google/protobuf/message.h>

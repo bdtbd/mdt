@@ -12,7 +12,7 @@
 #include "proto/kv.pb.h"
 #include "sdk/sdk.h"
 #include "sdk/table_impl.h"
-#include "util/string_util.h"
+#include "utils/string_util.h"
 
 DECLARE_int64(concurrent_write_handle_num);
 DECLARE_int64(max_write_handle_seq);
@@ -37,6 +37,7 @@ DECLARE_int64(tera_table_ttl);
 DECLARE_int64(gc_interval);
 DECLARE_int64(tera_span_size);
 DECLARE_bool(delete_unknow_file);
+DECLARE_bool(enable_data_compress);
 
 namespace mdt {
 
@@ -365,6 +366,11 @@ void TableImpl::QueueTimerFunc() {
 
 // timer context
 int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue) {
+    // new feature, data compress
+    if (FLAGS_enable_data_compress) {
+        return InternalCompressBatchWrite(context, ctx_queue);
+    }
+
     // Get write handle
     WriteHandle* write_handle = GetWriteHandle();
 
@@ -447,6 +453,129 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     return 0;
 }
 
+int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue) {
+    // Get write handle
+    WriteHandle* write_handle = GetWriteHandle();
+
+    VLOG(20) << ">>>>> begin put, ctx " << (uint64_t)(context);
+    write_mutex_.Lock();
+    write_handle->write_queue_.push_back(context);
+    std::vector<WriteContext*>::iterator wc_it = ctx_queue.begin();
+    for (; wc_it != ctx_queue.end(); ++wc_it) {
+        write_handle->write_queue_.push_back(*wc_it);
+    }
+    while (!context->done_ && (context != write_handle->write_queue_.front())) {
+        VLOG(20) << "===== waitlock put, ctx " << (uint64_t)(context);
+        context->is_wait_ = true;
+        context->cv_.Wait();
+    }
+    if (context->done_) {
+        write_mutex_.Unlock();
+        //delete context;
+        return 0;
+    }
+
+    // merge WriteContext
+    BlockBuilder* sort_block = new BlockBuilder(&leveldb_options_);
+    std::map<std::string, BlockBuilder*> index_block;
+    std::map<std::string, std::vector<WriteContext*> > primary_key_map;
+    std::map<std::string, int64_t> timestamp_map;
+    WriteContext* last_writer = NULL;
+    std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
+    for (; iter != write_handle->write_queue_.end(); ++iter) {
+        WriteContext* last_writer = *iter;
+        std::string type_primary_key;
+        StringToTypeString("pri", last_writer->req_->primary_key, &type_primary_key);
+        if (last_writer->req_->data.size()) {
+            sort_block->Add(type_primary_key, last_writer->req_->data);
+        }
+        // support data vec write
+        for (uint32_t nr_data = 0; nr_data < last_writer->req_->vec_data.size(); nr_data++) {
+            sort_block->Add(type_primary_key, last_writer->req_->vec_data[nr_data]);
+        }
+
+        // aggre primary key
+        std::vector<WriteContext*>& write_vec = primary_key_map[last_writer->req_->primary_key];
+        write_vec.push_back(last_writer);
+
+        BlockBuilder* iblock = NULL;
+        if (index_block.find(last_writer->req_->primary_key) == index_block.end()) {
+            iblock = new BlockBuilder(&leveldb_options_);
+            index_block[last_writer->req_->primary_key] = iblock;
+        } else {
+            iblock = index_block[last_writer->req_->primary_key];
+        }
+
+        std::vector<Index>::const_iterator tmp_it;
+        for (tmp_it = last_writer->req_->index_list.begin(); tmp_it != last_writer->req_->index_list.end(); ++tmp_it) {
+            const std::string& index_name = tmp_it->index_name;
+            const std::string& index_key = tmp_it->index_key;
+            // convert string into type string
+            std::string type_index_key;
+            StringToTypeString(index_name, index_key, &type_index_key);
+            if (index_name == "" || index_key == "") {
+                LOG(WARNING) << "invalid index : " << index_name << " : " << index_key;
+                continue;
+            }
+            iblock->Add(index_name, type_index_key);
+        }
+
+        if ((timestamp_map.find(last_writer->req_->primary_key) == timestamp_map.end()) ||
+            (timestamp_map[last_writer->req_->primary_key] < last_writer->req_->timestamp)) {
+            timestamp_map[last_writer->req_->primary_key] = last_writer->req_->timestamp;
+        }
+    }
+    // unlock do io
+    write_mutex_.Unlock();
+    VLOG(20) << ">>>>> lock put, ctx " << (uint64_t)(context);
+
+    // construct sorted block, and write into fs
+    sort_block->Finish();
+    FileLocation location;
+    DataWriter* writer = GetDataWriter(write_handle);
+    writer->AddCompressRecord(sort_block->GetCompressionBlock(), &location);
+    delete sort_block;
+
+    // batch write index table
+    std::map<std::string, std::vector<WriteContext*> >::iterator it = primary_key_map.begin();
+    for (; it != primary_key_map.end(); ++it) {
+        (index_block[it->first])->Finish();
+        WriteBatchIndexTable(it->first, timestamp_map[it->first], it->second, index_block[it->first], location);
+        delete (index_block[it->first]);
+    }
+
+    // lock, resched other WriteContext
+    VLOG(30) << "<<<<< unlock put";
+    write_mutex_.Lock();
+    //WriteContext* last_writer = wb.context_list_.back();
+    while (true) {
+        WriteContext* ready = write_handle->write_queue_.front();
+        write_handle->write_queue_.pop_front();
+        if (ready != context) {
+            ready->done_ = true;
+            if (ready->is_wait_) {
+                // wait up suspend thread, so that it can do something cleanup
+                ready->cv_.Signal();
+            } else {
+                // this write context has no context, help it free memory
+                VLOG(25) << "no write context " << (uint64_t)ready;
+                delete ready;
+            }
+        }
+        // cannot access ready any more
+        if (ready == last_writer) {
+            break;
+        }
+    }
+    if (!write_handle->write_queue_.empty()) {
+        write_handle->write_queue_.front()->cv_.Signal();
+    }
+
+    write_mutex_.Unlock();
+    VLOG(20) << "<<<<< finish put, ctx " << (uint64_t)(context);
+    //delete context;
+    return 0;
+}
 struct SyncWriteCallbackParam {
     CondVar* cond_;
 };
@@ -502,6 +631,7 @@ int TableImpl::Put(const StoreRequest* req, StoreResponse* resp,
     if (SubmitRequest(context, &local_queue)) {
         return 0;
     }
+
     InternalBatchWrite(context, local_queue);
     // write finish, if sync write, just wait callback
     if (callback == SyncWriteCallback) {
@@ -625,6 +755,113 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     ts_row->Put(kIndexTableColumnFamily, primary_key, req->timestamp, null_value);
     ts_row->SetContext(context);
     ts_row->SetCallBack(PutCallback);
+    ts_table->ApplyMutation(ts_row);
+
+    return 0;
+}
+
+void BatchIndexContext::PushBack(const StoreRequest* req, StoreResponse* resp,
+                            StoreCallback callback, void* callback_param) {
+    req_vec.push_back(req);
+    resp_vec.push_back(resp);
+    callback_vec.push_back(callback);
+    param_vec.push_back(callback_param);
+}
+
+void BatchIndexContext::Release() {
+    if (DecReference() == 0) {
+        for (uint32_t i = 0; i < req_vec.size(); i++) {
+            StoreCallback callback = callback_vec[i];
+            if (callback) {
+                callback(table, (StoreRequest*)req_vec[i], resp_vec[i], param_vec[i]);
+            } else {
+                // callback is null, free req and resp
+                delete req_vec[i];
+                delete resp_vec[i];
+            }
+        }
+        delete this;
+    }
+}
+
+void BatchIndexCallback(tera::RowMutation* row) {
+    BatchIndexContext* context = (BatchIndexContext*)row->GetContext();
+    context->Release();
+    delete row;
+}
+int TableImpl::WriteBatchIndexTable(const std::string& primary_key, uint64_t timestamp,
+                                    std::vector<WriteContext*>& vec_ctx,
+                                    BlockBuilder* index_builder,
+                                    FileLocation& location) {
+    std::string null_value;
+    null_value.clear();
+    // construct batch write context
+    BatchIndexContext* context = new BatchIndexContext();
+    uint64_t ref = 2 + index_builder->NumEntries();
+    context->SetReference(ref);
+    context->SetTable(this);
+    std::vector<WriteContext*>::iterator ctx_it = vec_ctx.begin();
+    for (; ctx_it != vec_ctx.end(); ++ctx_it) {
+        WriteContext* wc = *ctx_it;
+        context->PushBack(wc->req_, wc->resp_, wc->callback_, wc->callback_param_);
+    }
+    ::leveldb::Slice index_block = index_builder->GetCompressionBlock();
+
+    // update primary table
+    std::string type_primary_key;
+    StringToTypeString("pri", primary_key, &type_primary_key);
+    tera::Table* primary_table = GetPrimaryTable(table_desc_.table_name);
+    VLOG(12) << " write pri table, primary key: " << primary_key
+        << ", typed_primary_key " << DebugString(type_primary_key);
+    tera::RowMutation* primary_row = primary_table->NewRowMutation(type_primary_key);
+    primary_row->Put(kPrimaryTableColumnFamily, location.SerializeToString(), timestamp, index_block.ToString());
+    primary_row->SetContext(context);
+    primary_row->SetCallBack(BatchIndexCallback);
+    primary_table->ApplyMutation(primary_row);
+
+    // write index tables
+    char buf[8];
+    EncodeBigEndian(buf, timestamp);
+    std::string ts_key(buf, sizeof(buf));
+    std::string time_primay_key = ts_key + type_primary_key;
+    ::leveldb::BlockContents block_contents;
+    ::leveldb::ReadOptions read_options;
+    read_options.verify_checksums = true;
+    IndexBlock::ConstructBlockContents(index_block, &block_contents, read_options);
+    IndexBlock iblock(block_contents, leveldb_options_);
+
+    ::leveldb::Iterator* iter = iblock.NewIterator();
+    iter->SeekToFirst();
+    while (iter->Valid()) {
+        // get user's index table(key, value)
+        ::leveldb::Slice key = iter->key();
+        ::leveldb::Slice value = iter->value();
+        tera::Table* index_table = GetIndexTable(key.ToString());
+        if (index_table == NULL) {
+            context->Release();
+            continue;
+        }
+
+        VLOG(12) << " write index table: " << key.ToString()
+            << ", typed_index_key " << DebugString(value.ToString());
+        tera::RowMutation* index_row = index_table->NewRowMutation(value.ToString());
+        index_row->Put(kIndexTableColumnFamily, time_primay_key, timestamp, null_value);
+        index_row->SetContext(context);
+        index_row->SetCallBack(BatchIndexCallback);
+        index_table->ApplyMutation(index_row);
+
+        iter->Next();
+    }
+    delete iter;
+
+    // write timestamp table
+    tera::Table* ts_table = GetTimestampTable();
+    VLOG(12) << " write ts table: " << std::hex << ts_table << ", timestamp: "<< timestamp
+             << ", ts string: " << DebugString(ts_key);
+    tera::RowMutation* ts_row = ts_table->NewRowMutation(ts_key);
+    ts_row->Put(kIndexTableColumnFamily, type_primary_key, timestamp, null_value);
+    ts_row->SetContext(context);
+    ts_row->SetCallBack(BatchIndexCallback);
     ts_table->ApplyMutation(ts_row);
 
     return 0;
@@ -1479,6 +1716,7 @@ struct AsyncReadParam {
     CondVar* cond;
     int* nr_record;
     Counter* nr_reader;
+    std::string primary_key;
 };
 void TableImpl::ReadData(tera::RowReader* reader) {
     ReadPrimaryTableContext* param = (ReadPrimaryTableContext*)reader->GetContext();
@@ -1535,9 +1773,29 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                 if (s.ok()) {
                     VLOG(12) << "finish read data from " << location;
                     // check break
-                    should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
-                    if (should_break) { break; }
-                    nr_record++;
+                    ::leveldb::BlockContents block_contents;
+                    ::leveldb::ReadOptions options;
+                    options.verify_checksums = true;
+                    ::leveldb::Status b_status = IndexBlock::ConstructBlockContents(::leveldb::Slice(data), &block_contents, options);
+                    if (b_status.ok()) {
+                        // parse compress index from primary table's value
+                        IndexBlock data_block(block_contents, leveldb_options_);
+                        ::leveldb::Iterator* iter = data_block.NewIterator();
+                        iter->Seek(primary_key);
+                        while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), primary_key) == 0)) {
+                            ::leveldb::Slice value = iter->value();
+                            should_break = BreakOrPushData(param, param->result, Status::OK(), value.ToString(), "");
+                            if (should_break) break;
+                            nr_record++;
+                            iter->Next();
+                        }
+                        delete iter;
+                        if (should_break) break;
+                    } else {
+                        should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
+                        if (should_break) { break; }
+                        nr_record++;
+                    }
                 } else {
                     LOG(WARNING) << "fail to read data from " << location << " error: " << s.ToString();
                 }
@@ -1572,6 +1830,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                 async_read_param->nr_record = &nr_record;
                 async_read_param->nr_reader = &nr_reader;
                 async_read_param->location = &location;
+                async_read_param->primary_key = primary_key;
                 async_read_thread_.AddTask(boost::bind(&TableImpl::AsyncRead, this, async_read_param));
             }
             {
@@ -1589,7 +1848,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
     if (should_break) {
         s = Status::NotFound("break from read data");
     } else if (reader->GetError().GetType() != tera::ErrorCode::kOK) {
-	LOG(WARNING) << "tera row reader error, primary key " << primary_key;
+	VLOG(30) << "tera row reader error, primary key " << primary_key;
         s = Status::IOError("tera error");
     } else if (nr_record > 0) {
         BreakOrPushData(param, param->result, Status::OK(), "", primary_key);
@@ -1612,6 +1871,7 @@ void TableImpl::AsyncRead(void* read_param) {
     CondVar* cond = async_read_param->cond;
     int* nr_record = async_read_param->nr_record;
     Counter* nr_reader = async_read_param->nr_reader;
+    std::string primary_key = async_read_param->primary_key;
     delete async_read_param;
 
     // read from file system
@@ -1620,11 +1880,34 @@ void TableImpl::AsyncRead(void* read_param) {
     Status s = param->table->ReadDataFromFile(*location, &data);
     if (s.ok()) {
         VLOG(12) << "finish async read data from " << *location;
-        // check break
-        MutexLock l(lock);
-        bool should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
-        if (!should_break) {
-            (*nr_record)++;
+
+        ::leveldb::BlockContents block_contents;
+        ::leveldb::ReadOptions options;
+        options.verify_checksums = true;
+        ::leveldb::Status b_status = IndexBlock::ConstructBlockContents(::leveldb::Slice(data), &block_contents, options);
+        bool should_break = false;
+        if (b_status.ok()) {
+            // parse compress index from primary table's value
+            IndexBlock data_block(block_contents, leveldb_options_);
+            ::leveldb::Iterator* iter = data_block.NewIterator();
+            iter->Seek(primary_key);
+            while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), primary_key) == 0)) {
+                ::leveldb::Slice value = iter->value();
+                // check break
+                MutexLock l(lock);
+                should_break = BreakOrPushData(param, param->result, Status::OK(), value.ToString(), "");
+                if (should_break) break;
+
+                (*nr_record)++;
+                iter->Next();
+            }
+            delete iter;
+        } else {
+            MutexLock l(lock);
+            should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
+            if (!should_break) {
+                (*nr_record)++;
+            }
         }
     } else {
         LOG(WARNING) << "fail to async read data from " << *location << " error: " << s.ToString();
@@ -1640,6 +1923,25 @@ void TableImpl::AsyncRead(void* read_param) {
 void TableImpl::ParseIndexesFromString(const std::string& index_buffer,
                                        std::multimap<std::string, std::string>* indexes,
                                        std::string* value) {
+    ::leveldb::BlockContents block_contents;
+    ::leveldb::ReadOptions options;
+    options.verify_checksums = true;
+    ::leveldb::Status s = IndexBlock::ConstructBlockContents(::leveldb::Slice(index_buffer), &block_contents, options);
+    if (s.ok()) {
+        // parse compress index from primary table's value
+        IndexBlock iblock(block_contents, leveldb_options_);
+        ::leveldb::Iterator* iter = iblock.NewIterator();
+        iter->SeekToFirst();
+        while (iter->Valid()) {
+            ::leveldb::Slice key = iter->key();
+            ::leveldb::Slice value = iter->value();
+            indexes->insert(std::pair<std::string, std::string>(key.ToString(), value.ToString()));
+            iter->Next();
+        }
+        delete iter;
+        return;
+    }
+
     const char* buf = index_buffer.data();
     uint32_t left = index_buffer.size();
     while (left > sizeof(uint32_t)) {
@@ -2134,6 +2436,32 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     return 0;
 }
 
+// version 2, write with compression
+int DataWriter::AddCompressRecord(::leveldb::Slice data, FileLocation* location) {
+    std::string data_batch;
+    data_batch.append(data.ToString());
+    data_batch.append(kVersion2);
+
+    Status s;
+    s = file_->Append(data_batch);
+    if (!s.ok()) {
+        return -1;
+    }
+    location->offset_ = offset_;
+    location->size_ = data.size();
+    offset_ += data_batch.size();
+    location->fname_ = fname_;
+    // per 256KB, trigger sync
+    assert(offset_ >= cur_sync_offset_);
+    if ((offset_ - cur_sync_offset_) > (int32_t)FLAGS_data_size_per_sync) {
+        file_->Sync();
+        cur_sync_offset_ = offset_;
+    }
+    LOG(INFO) << "add record, offset " << location->offset_
+        << ", size " << location->size_;
+    return 0;
+}
+
 // file > 1G or has been create 1 hour, create an new file
 bool DataWriter::SwitchDataFile() {
     bool shouldswitch = offset_ > 1000000000;
@@ -2154,7 +2482,7 @@ bool DataWriter::SwitchDataFile() {
 int WriteBatch::Append(WriteContext* context) {
     context->offset_ = rep_.size();
     rep_.append(context->req_->data);
-    rep_.append("aaccbbdd");
+    rep_.append(kVersion1);
 
     context_list_.push_back(context);
     return 0;

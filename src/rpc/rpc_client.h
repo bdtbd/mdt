@@ -1,13 +1,13 @@
 #ifndef RPC_RPC_CLIENT_H_
 #define RPC_RPC_CLIENT_H_
 
-#include "util/status.h"
 #include <sofa/pbrpc/pbrpc.h>
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
 #include <pthread.h>
 #include <gflags/gflags.h>
-#include "util/mutex.h"
+#include "utils/status.h"
+#include "utils/mutex.h"
 #include <map>
 
 namespace mdt {

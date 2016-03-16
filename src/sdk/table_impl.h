@@ -10,21 +10,27 @@
 #include <boost/asio.hpp>
 
 #include "proto/kv.pb.h"
-#include "util/coding.h"
-#include "util/counter.h"
-#include "util/env.h"
-#include "util/mutex.h"
-#include "util/thread_pool.h"
+#include "utils/coding.h"
+#include "utils/counter.h"
+#include "utils/env.h"
+#include "utils/mutex.h"
+#include "utils/thread_pool.h"
+#include "utils/sort_block.h"
 #include "sdk/option.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
 #include <tera.h>
+
+
+#include "leveldb/slice.h"
 
 namespace mdt {
 
 const std::string kPrimaryTableColumnFamily = "Location";
 const std::string kIndexTableColumnFamily = "PrimaryKey";
 const std::string kTeraValue = "kTeraValue";
+const std::string kVersion1 = "aaccbbdd";
+const std::string kVersion2 = "zzxxyyaa";
 
 ///////////////////////////////
 //      TableImpl class      //
@@ -102,6 +108,7 @@ public:
     int64_t GetFileTime() { return (int64_t)(filetime_.tv_sec * 1000000 + filetime_.tv_usec);}
     bool SwitchDataFile();
     int AddRecord(const std::string& data, FileLocation* location);
+    int AddCompressRecord(::leveldb::Slice data, FileLocation* location);
 
 private:
     // write data to filesystem
@@ -173,6 +180,12 @@ private:
     void AsyncRead(void* async_read_param);
 
     // write op
+    int InternalCompressBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
+    int WriteBatchIndexTable(const std::string& primary_key, uint64_t timestamp,
+                             std::vector<WriteContext*>& vec_ctx,
+                             BlockBuilder* index_builder,
+                             FileLocation& location);
+
     int InternalBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
     static void* TimerThreadWrapper(void* arg);
     void QueueTimerFunc();
@@ -291,6 +304,7 @@ private:
     std::map<uint64_t, std::string> file_lru_; // cache file handle for read. <seq_, filename>
     uint64_t seq_cnt_; // seq number generator
 
+    ::leveldb::Options leveldb_options_;
 
     // use for put
     mutable Mutex write_mutex_;
@@ -313,6 +327,34 @@ private:
     pthread_t gc_tid_;
     volatile bool gc_stop_;
     uint64_t ttl_;
+};
+
+class BatchIndexContext {
+public:
+    BatchIndexContext() {}
+    ~BatchIndexContext() {}
+    int64_t SetReference(uint64_t ref) {
+        return ref_.Set(ref);
+    }
+    void SetTable(TableImpl* table_impl) {
+        table = table_impl;
+    }
+    void PushBack(const StoreRequest* req, StoreResponse* resp,
+                  StoreCallback callback, void* callback_param);
+    void Release();
+
+private:
+    int64_t DecReference() {
+        return ref_.Dec();
+    }
+
+private:
+    Counter ref_;
+    std::vector<const StoreRequest*> req_vec;
+    std::vector<StoreResponse*> resp_vec;
+    std::vector<StoreCallback> callback_vec;
+    std::vector<void*> param_vec;
+    TableImpl* table;
 };
 
 struct PutContext {

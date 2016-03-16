@@ -6,7 +6,7 @@
 #include "agent/options.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
-#include "util/coding.h"
+#include "utils/coding.h"
 #include <sys/time.h>
 
 #include "leveldb/slice.h"
