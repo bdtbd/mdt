@@ -814,9 +814,9 @@ Status TableImpl::GetByTimestamp(int64_t start_timestamp, int64_t end_timestamp,
         tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
         scan_desc->SetEnd(end_ts_key + '\0');
         scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-	if (FLAGS_enable_number_limit) {
-	    scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
-	}
+        if (FLAGS_enable_number_limit) {
+            scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
+        }
 
         VLOG(10) << "scan timestamp table: " << i;
         tera::ErrorCode err;
@@ -989,9 +989,9 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
             std::string end_qu(ebuf, sizeof(ebuf));
             scan_desc->AddQualifierRange(kIndexTableColumnFamily, start_qu, end_qu);
         }
-	if (FLAGS_enable_number_limit) {
-	    scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
-	}
+        if (FLAGS_enable_number_limit) {
+            scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
+        }
         scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
         scan_desc->SetPackInterval(FLAGS_tera_scan_pack_interval);
 
