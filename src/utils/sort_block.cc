@@ -74,6 +74,7 @@ void BlockBuilder::Finish() {
     // data compress and crc
     ::leveldb::Slice raw = data_block_.Finish();
 
+    std::string tmp_compressed_output_;
     ::leveldb::Slice block_contents;
     ::leveldb::CompressionType type = options_->compression;
     // TODO(postrelease): Support more compression options: zlib?
@@ -83,7 +84,7 @@ void BlockBuilder::Finish() {
             break;
 
         case ::leveldb::kSnappyCompression: {
-            std::string* compressed = &compressed_output_;
+            std::string* compressed = &tmp_compressed_output_;
             if (::leveldb::port::Snappy_Compress(raw.data(), raw.size(), compressed) &&
                 compressed->size() < raw.size() - (raw.size() / 8u)) {
                 block_contents = *compressed;
@@ -193,11 +194,11 @@ const ::leveldb::Comparator* IndexBlock::UserComparator() {
         break;
     case ::leveldb::kSnappyCompression: {
         size_t ulength = 0;
-        if (::leveldb::port::Snappy_GetUncompressedLength(data, raw.size() - ::leveldb::kBlockTrailerSize, &ulength)) {
+        if (!::leveldb::port::Snappy_GetUncompressedLength(data, raw.size() - ::leveldb::kBlockTrailerSize, &ulength)) {
             return ::leveldb::Status::Corruption("corrupted block compressed");
         }
         char* ubuf = new char[ulength];
-        if (::leveldb::port::Snappy_Uncompress(data, raw.size() - ::leveldb::kBlockTrailerSize, ubuf)) {
+        if (!::leveldb::port::Snappy_Uncompress(data, raw.size() - ::leveldb::kBlockTrailerSize, ubuf)) {
             delete ubuf;
             return ::leveldb::Status::Corruption("corrupted block compressed");
         }

@@ -12,6 +12,7 @@
 #include "utils/env.h"
 #include "utils/counter.h"
 #include "utils/mutex.h"
+#include "utils/timer.h"
 
 DEFINE_string(dbname, "z012", "production name");
 DEFINE_string(tablename, "kepler001", "table name");
@@ -74,7 +75,7 @@ void* write_task(void* arg) {
         req->index_list.push_back(costtime);
         req->index_list.push_back(service);
         req->data = value_str;
-        req->timestamp = time(NULL);
+        req->timestamp = ::mdt::timer::get_micros();
 
         mdt::StoreResponse* resp = new mdt::StoreResponse();
         mdt::StoreCallback TestCallback = StoreCallback_Test;
@@ -120,7 +121,7 @@ int main(int ac, char* av[]) {
     mdt::Mutex mu;
     mdt::CondVar cond(&mu);
     mdt::Counter counter;
-    uint64_t num_task = 50;
+    uint64_t num_task = 1;
     std::vector<WriteTask*> tasks;
     for (uint64_t i = 0; i < num_task; i++) {
         WriteTask* task = new WriteTask;
