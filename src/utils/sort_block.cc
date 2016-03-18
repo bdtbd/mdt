@@ -27,13 +27,14 @@ namespace mdt {
 ////////////////////////////////////////////////
 // sort block builder
 ////////////////////////////////////////////////
-BlockBuilder::BlockBuilder(::leveldb::Options* options)
-    : options_(options),
-    internal_comparator_(options_->comparator),
+
+BlockBuilder::BlockBuilder(const ::leveldb::InternalKeyComparator* icmp, ::leveldb::Options* options)
+    : internal_comparator_(icmp),
+    options_(options),
     data_block_(options_) {
 
     sequence_num_ = 0;
-    memtable_ = new ::leveldb::MemTable(internal_comparator_);
+    memtable_ = new ::leveldb::MemTable(*internal_comparator_);
     memtable_->Ref();
 }
 
@@ -46,7 +47,7 @@ void BlockBuilder::Reset() {
     compressed_output_.clear();
 
     sequence_num_ = 0;
-    memtable_ = new ::leveldb::MemTable(internal_comparator_);
+    memtable_ = new ::leveldb::MemTable(*internal_comparator_);
     memtable_->Ref();
 }
 
@@ -103,6 +104,7 @@ void BlockBuilder::Finish() {
     uint32_t crc = ::leveldb::crc32c::Value(block_contents.data(), block_contents.size());
     crc = ::leveldb::crc32c::Extend(crc, trailer, 1);
     ::leveldb::EncodeFixed32(trailer + 1, ::leveldb::crc32c::Mask(crc));
+    compressed_output_.append(block_contents.data(), block_contents.size());
     compressed_output_.append(trailer, ::leveldb::kBlockTrailerSize);
 
     // do some cleanup
@@ -158,6 +160,16 @@ class KeyConvertingIterator: public ::leveldb::Iterator {
   KeyConvertingIterator(const KeyConvertingIterator&);
   void operator=(const KeyConvertingIterator&);
 };
+
+void IndexBlock::EncodeInternalKey(::leveldb::Slice target, std::string* encoded) {
+    ::leveldb::ParsedInternalKey ikey(target, 0, ::leveldb::kTypeValue);
+    ::leveldb::AppendInternalKey(encoded, ikey);
+    return;
+}
+
+const ::leveldb::Comparator* IndexBlock::UserComparator() {
+    return ::leveldb::BytewiseComparator();
+}
 
 ::leveldb::Status IndexBlock::ConstructBlockContents(const ::leveldb::Slice& raw, ::leveldb::BlockContents* contents,
                                                      const ::leveldb::ReadOptions& options) {

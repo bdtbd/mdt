@@ -76,6 +76,8 @@ void HelpManue() {
             "[<index_name> cmp[==, >=, >, <=, <] <index_key>]\n\n");
     printf("cmd: Put <dbname> <tablename> <value> <primary_key> "
             "[<index_table> <key>]\n\n");
+    printf("cmd: VPut <dbname> <tablename> <val1,val2> <primary_key> "
+            "[<index_table> <key>]\n\n");
     printf("cmd: Get <dbname> <tablename> <start_ts> <end_ts> <limit> "
             "[<index_name> cmp[==, >=, >, <=, <] <index_key>]\n\n");
     printf("cmd: GetPri <dbname> <tablename> <start_ts> <end_ts> <limit> <primary_key>\n\n");
@@ -603,6 +605,60 @@ int PutOp(std::vector<std::string>& cmd_vec) {
     return 0;
 }
 
+//VPut <dbname> <tablename> <value> <primary_key> [<index_table> <key>]
+int VPutOp(std::vector<std::string>& cmd_vec) {
+    // parse param
+    const std::string& db_name = cmd_vec[1];
+    const std::string& table_name = cmd_vec[2];
+    const std::string& value = cmd_vec[3];
+    std::vector<std::string> value_vec;
+    boost::split(value_vec, value, boost::is_any_of(","), boost::token_compress_on);
+    const std::string& primary_key = cmd_vec[4];
+
+    // create db
+    std::cout << "open db ..." << std::endl;
+    mdt::Database* db;
+    db = mdt::OpenDatabase(db_name);
+    if (db == NULL) {
+        std::cout << "open db " << db_name << " fail...\n";
+        return -1;
+    }
+
+    std::cout << "open table ..." << std::endl;
+    mdt::Table* table;
+    table = OpenTable(db, table_name);
+    if (table == NULL) {
+        std::cout << "open table " << table_name << " fail...\n";
+        return -1;
+    }
+
+    // insert data
+    mdt::StoreRequest* store_req = new mdt::StoreRequest();
+    store_req->primary_key = primary_key;
+    store_req->timestamp = get_micros();
+    store_req->vec_data = value_vec;
+
+    int num_index = cmd_vec.size() - 5;
+    if (num_index % 2 != 0) {
+        std::cout << "put fail, [index_table key] not match!\n";
+        return -1;
+    }
+    for (int i = 0; i < num_index; i += 2) {
+        mdt::Index index;
+        index.index_name = cmd_vec[i + 5];
+        index.index_key = cmd_vec[i + 6];
+        store_req->index_list.push_back(index);
+    }
+
+    mdt::StoreResponse* store_resp = new mdt::StoreResponse();
+    mdt::StoreCallback callback = StoreCallback_Test;
+
+    bool store_finish = false;
+    std::cout << "put ..." << std::endl;
+    table->Put(store_req, store_resp, callback, &store_finish);
+    while (!store_finish) sleep(1);
+    return 0;
+}
 // cmd: CreateTable dbname tablename primary_key_type ttl [index_name index_type]...
 int CreateTableOp(std::vector<std::string>& cmd_vec) {
     // create db
@@ -1285,9 +1341,15 @@ int main(int ac, char* av[]) {
             add_history(line);
             free(line);
             continue;
-        } else if (cmd_vec[0].compare("Put") == 0 && cmd_vec.size() >= 6) {
+        } else if (cmd_vec[0].compare("Put") == 0 && cmd_vec.size() >= 5) {
             // cmd: Put dbname tablename value primary_key timestamp [index_name index_key]
             PutOp(cmd_vec);
+            add_history(line);
+            free(line);
+            continue;
+        } else if (cmd_vec[0].compare("VPut") == 0 && cmd_vec.size() >= 5) {
+            // cmd: VPut dbname tablename value,val1,val2 primary_key timestamp [index_name index_key]
+            VPutOp(cmd_vec);
             add_history(line);
             free(line);
             continue;

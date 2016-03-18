@@ -290,6 +290,9 @@ private:
     void ReleaseDataReader(const std::string& filename);
 
 private:
+    const ::leveldb::InternalKeyComparator internal_comparator_;
+    ::leveldb::Options leveldb_options_;
+
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
@@ -304,7 +307,6 @@ private:
     std::map<uint64_t, std::string> file_lru_; // cache file handle for read. <seq_, filename>
     uint64_t seq_cnt_; // seq number generator
 
-    ::leveldb::Options leveldb_options_;
 
     // use for put
     mutable Mutex write_mutex_;

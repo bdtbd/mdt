@@ -151,10 +151,18 @@ void TableImpl::FreeTeraTable() {
 }
 
 // TableImpl ops
+::leveldb::Options SanitizeOptions(const ::leveldb::InternalKeyComparator* icmp,
+                                   const ::leveldb::Options& src) {
+  ::leveldb::Options result = src;
+  result.comparator = icmp;
+  return result;
+}
 TableImpl::TableImpl(const TableDescription& table_desc,
                      const TeraAdapter& tera_adapter,
                      const FilesystemAdapter& fs_adapter)
-    : table_desc_(table_desc),
+    : internal_comparator_(::leveldb::Options().comparator),
+    leveldb_options_(SanitizeOptions(&internal_comparator_, ::leveldb::Options())),
+    table_desc_(table_desc),
     tera_(tera_adapter),
     fs_(fs_adapter),
     thread_pool_(FLAGS_read_file_thread_num),
@@ -476,14 +484,14 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
     }
 
     // merge WriteContext
-    BlockBuilder* sort_block = new BlockBuilder(&leveldb_options_);
+    BlockBuilder* sort_block = new BlockBuilder(&internal_comparator_, &leveldb_options_);
     std::map<std::string, BlockBuilder*> index_block;
     std::map<std::string, std::vector<WriteContext*> > primary_key_map;
     std::map<std::string, int64_t> timestamp_map;
     WriteContext* last_writer = NULL;
     std::deque<WriteContext*>::iterator iter = write_handle->write_queue_.begin();
     for (; iter != write_handle->write_queue_.end(); ++iter) {
-        WriteContext* last_writer = *iter;
+        last_writer = *iter;
         std::string type_primary_key;
         StringToTypeString("pri", last_writer->req_->primary_key, &type_primary_key);
         if (last_writer->req_->data.size()) {
@@ -500,7 +508,7 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
 
         BlockBuilder* iblock = NULL;
         if (index_block.find(last_writer->req_->primary_key) == index_block.end()) {
-            iblock = new BlockBuilder(&leveldb_options_);
+            iblock = new BlockBuilder(&internal_comparator_, &leveldb_options_);
             index_block[last_writer->req_->primary_key] = iblock;
         } else {
             iblock = index_block[last_writer->req_->primary_key];
@@ -1782,7 +1790,10 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                         IndexBlock data_block(block_contents, leveldb_options_);
                         ::leveldb::Iterator* iter = data_block.NewIterator();
                         iter->Seek(primary_key);
-                        while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), primary_key) == 0)) {
+                        //std::string encoded_key;
+                        //IndexBlock::EncodeInternalKey(primary_key, &encoded_key);
+                        //while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), encoded_key) == 0)) {
+                        while (iter->Valid() && (IndexBlock::UserComparator()->Compare(iter->key(), primary_key) == 0)) {
                             ::leveldb::Slice value = iter->value();
                             should_break = BreakOrPushData(param, param->result, Status::OK(), value.ToString(), "");
                             if (should_break) break;
@@ -1891,7 +1902,10 @@ void TableImpl::AsyncRead(void* read_param) {
             IndexBlock data_block(block_contents, leveldb_options_);
             ::leveldb::Iterator* iter = data_block.NewIterator();
             iter->Seek(primary_key);
-            while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), primary_key) == 0)) {
+            //std::string encoded_key;
+            //IndexBlock::EncodeInternalKey(primary_key, &encoded_key);
+            //while (iter->Valid() && (leveldb_options_.comparator->Compare(iter->key(), encoded_key) == 0)) {
+            while (iter->Valid() && (IndexBlock::UserComparator()->Compare(iter->key(), primary_key) == 0)) {
                 ::leveldb::Slice value = iter->value();
                 // check break
                 MutexLock l(lock);
