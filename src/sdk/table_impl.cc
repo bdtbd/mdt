@@ -668,6 +668,10 @@ void ReleasePutContext(PutContext* context) {
 }
 
 void PutCallback(tera::RowMutation* row) {
+    ::tera::ErrorCode error = row->GetError();
+    if (error.GetType() != ::tera::ErrorCode::kOK) {
+        LOG(WARNING) << "write index error " << error.GetReason() << ", rowkey " << row->RowKey();
+    }
     PutContext* context = (PutContext*)row->GetContext();
     ReleasePutContext(context);
     delete row;
@@ -689,7 +693,8 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         const std::string& index_name = it->index_name;
         const std::string& index_key = it->index_key;
         if (index_name == "" || index_key == "") {
-            LOG(WARNING) << "invalid index : " << index_name << " : " << index_key;
+            VLOG(30) << "invalid index : " << index_name << " : " << index_key;
+            ReleasePutContext(context);
             continue;
         }
         index_map[index_name] = index_key;
@@ -740,7 +745,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         const std::string& index_key = map_it->second;
         tera::Table* index_table = GetIndexTable(index_name);
         if (index_table == NULL) {
-            VLOG(12) << "write index table: " << index_name << ", no such table";
+            VLOG(30) << "write index table: " << index_name << ", no such table";
             ReleasePutContext(context);
             continue;
         }
@@ -2433,6 +2438,7 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     Status s;
     s = file_->Append(data);
     if (!s.ok()) {
+        LOG(WARNING) << "fs not available, file " << fname_ << ", offset " << offset_;
         return -1;
     }
     location->size_ = data.size();

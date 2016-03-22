@@ -3,6 +3,7 @@
 #include <boost/bind.hpp>
 #include <glog/logging.h>
 #include "proto/scheduler.pb.h"
+#include <iostream>
 
 DECLARE_int32(se_num_threads);
 DECLARE_bool(mdt_flagfile_set);
@@ -71,11 +72,10 @@ void SearchEngineImpl::ReportMessageCallback(const mdt::LogSchedulerService::Reg
                                              mdt::LogSchedulerService::RegisterNodeResponse* resp,
                                              bool failed, int error,
                                              mdt::LogSchedulerService::LogSchedulerService_Stub* service) {
-        VLOG(50) << "report message, addr " << req->server_addr();
-        delete req;
-        delete resp;
-        delete service;
-        report_event_.Set();
+    delete req;
+    delete resp;
+    delete service;
+    report_event_.Set();
 }
 
 // init mdt.flag
@@ -193,7 +193,6 @@ void SearchEngineImpl::Search(::google::protobuf::RpcController* ctrl,
                                 const ::mdt::SearchEngine::RpcSearchRequest* req,
                                 ::mdt::SearchEngine::RpcSearchResponse* resp,
                                 ::google::protobuf::Closure* done) {
-    VLOG(50) << "begin to search>>>";
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();
@@ -242,6 +241,7 @@ struct StoreCallback_param {
 void StoreCallback_dump(mdt::Table* table, mdt::StoreRequest* request,
                         mdt::StoreResponse* response,
                         void* callback_param) {
+    //VLOG(30) << "store callback, pkey " << request->primary_key;
     StoreCallback_param* param = (StoreCallback_param*)callback_param;
     MdtResponseToRpcStoreResponse(response, param->resp);
     param->done->Run();
@@ -253,7 +253,6 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
-    VLOG(30) << "begin store, db " << req->db_name() << ", table " << req->table_name() << ", req " << req->DebugString();
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         done->Run();
@@ -264,6 +263,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
         done->Run();
         return;
     }
+    //VLOG(30) << "store, pkey " << req->primary_key();
     ::mdt::Table* table = GetTable(req->db_name(), req->table_name());
 
     ::mdt::StoreRequest* request = new ::mdt::StoreRequest();
@@ -283,19 +283,33 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
 SearchEngineServiceImpl::SearchEngineServiceImpl(SearchEngineImpl* se)
     : se_(se),
       se_thread_pool_(new ThreadPool(FLAGS_se_num_threads)),
-      se_read_thread_pool_(new ThreadPool(FLAGS_se_num_threads)) {
+      se_read_thread_pool_(new ThreadPool(FLAGS_se_num_threads)),
+      se_info_thread_pool_(new ThreadPool(2)) {
+
+    ThreadPool::Task task = boost::bind(&SearchEngineServiceImpl::BGInfoCollector, this);
+    se_info_thread_pool_->DelayTask(5000, task);
 }
 
 SearchEngineServiceImpl::~SearchEngineServiceImpl() {
     delete se_thread_pool_;
     delete se_read_thread_pool_;
+    delete se_info_thread_pool_;
+}
+
+void SearchEngineServiceImpl::BGInfoCollector() {
+    LOG(INFO) << ", Thread pool[Store] " << se_thread_pool_->ProfilingLog()
+        << ", pending req(store) " << se_thread_pool_->PendingNum()
+        << ", [Search] " << se_read_thread_pool_->ProfilingLog()
+        << ", pending req(search) " << se_read_thread_pool_->PendingNum();
+
+    ThreadPool::Task task = boost::bind(&SearchEngineServiceImpl::BGInfoCollector, this);
+    se_info_thread_pool_->DelayTask(5000, task);
 }
 
 void SearchEngineServiceImpl::Search(::google::protobuf::RpcController* ctrl,
                                      const ::mdt::SearchEngine::RpcSearchRequest* req,
                                      ::mdt::SearchEngine::RpcSearchResponse* resp,
                                      ::google::protobuf::Closure* done) {
-    VLOG(50) << "begin to search, enqueue task >>";
     ThreadPool::Task task = boost::bind(&SearchEngineImpl::Search, se_, ctrl, req, resp, done);
     se_read_thread_pool_->AddTask(task);
 }
@@ -304,6 +318,7 @@ void SearchEngineServiceImpl::Store(::google::protobuf::RpcController* ctrl,
                                     const ::mdt::SearchEngine::RpcStoreRequest* req,
                                     ::mdt::SearchEngine::RpcStoreResponse* resp,
                                     ::google::protobuf::Closure* done) {
+    //VLOG(30) << "store, pkey " << req->primary_key();
     ThreadPool::Task task = boost::bind(&SearchEngineImpl::Store, se_, ctrl, req, resp, done);
     se_thread_pool_->AddTask(task);
 }

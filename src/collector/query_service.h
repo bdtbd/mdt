@@ -72,11 +72,14 @@ public:
                    const SearchEngine::RpcOpenDatabaseRequest* req,
                    SearchEngine::RpcOpenDatabaseResponse* resp,
                    ::google::protobuf::Closure* done);
+private:
+    void BGInfoCollector();
 
 private:
     SearchEngineImpl* se_;
     ThreadPool* se_thread_pool_; // operate on se's method
     ThreadPool* se_read_thread_pool_; // operate on se's method
+    ThreadPool* se_info_thread_pool_;
 };
 
 }
