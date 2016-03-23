@@ -411,21 +411,40 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     write_mutex_.Unlock();
     VLOG(20) << ">>>>> lock put, ctx " << (uint64_t)(context);
 
-    // batch write file system
-    FileLocation location;
-    DataWriter* writer = GetDataWriter(write_handle);
-    writer->AddRecord(wb.rep_, &location);
-
-    // write index table
-    std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
-    for (; it != wb.context_list_.end(); ++it) {
-        WriteContext* ctx = *it;
-        FileLocation data_location = location;
-        data_location.size_ = ctx->req_->data.size();
-        data_location.offset_ += ctx->offset_;
-        VLOG(20) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
-                << ", pri key " << ctx->req_->primary_key;
-        WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
+    int32_t write_retry = 3;
+    bool is_success = false;
+    while (write_retry > 0) {
+        // batch write file system
+        FileLocation location;
+        DataWriter* writer = GetDataWriter(write_handle);
+        if (writer->AddRecord(wb.rep_, &location) == 0) {
+            // write index table
+            std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
+            for (; it != wb.context_list_.end(); ++it) {
+                WriteContext* ctx = *it;
+                FileLocation data_location = location;
+                data_location.size_ = ctx->req_->data.size();
+                data_location.offset_ += ctx->offset_;
+                VLOG(20) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
+                    << ", pri key " << ctx->req_->primary_key;
+                WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
+            }
+            is_success = true;
+            break;
+        } else {
+            // file system error
+            ReleaseDataWriter(write_handle);
+        }
+        write_retry--;
+    }
+    if (!is_success) {
+        LOG(WARNING) << "retry 3 times, but fail";
+        std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
+        for (; it != wb.context_list_.end(); ++it) {
+            WriteContext* ctx = *it;
+            ctx->callback_(this, (StoreRequest*)ctx->req_, ctx->resp_,
+                            ctx->callback_param_);
+        }
     }
 
     // lock, resched other WriteContext
