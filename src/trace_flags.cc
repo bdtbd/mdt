@@ -35,7 +35,7 @@ DEFINE_int64(delay_retry_time, 1000000, "in second, time period after async push
 ///////////////////////////////////////////
 DEFINE_string(scheduler_service_port, "11111", "scheduler service port");
 DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler service addr");
-DEFINE_int32(agent_timeout, 60, "agent info will be delete after x second");
+DEFINE_int32(agent_timeout, 60000000, "agent info will be delete after x second");
 DEFINE_int32(agent_qps_quota, 10000, "max qps agent can be use per second");
 DEFINE_int32(agent_bandwidth_quota, 20000000, "max bandwidth agent can be use per second");
 

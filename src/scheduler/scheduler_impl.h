@@ -16,7 +16,7 @@ namespace scheduler {
 
 enum AgentState {
     AGENT_ACTIVE = 1,
-    AGENT_INACTIVE = 1,
+    AGENT_INACTIVE = 2,
 };
 
 struct AgentInfo {
@@ -42,7 +42,7 @@ struct AgentInfo {
 
 enum CollectorState {
     COLLECTOR_ACTIVE = 1,
-    COLLECTOR_INACTIVE = 1,
+    COLLECTOR_INACTIVE = 2,
 };
 
 struct CollectorInfo {

@@ -395,6 +395,9 @@ void SchedulerImpl::DoRpcShowAgentInfo(::google::protobuf::RpcController* contro
     std::map<std::string, AgentInfo>::iterator it = agent_map_.begin();
     for (; it != agent_map_.end(); ++it) {
         AgentInfo& info = it->second;
+        if (info.state != AGENT_ACTIVE) {
+            continue;
+        }
 
         mdt::LogSchedulerService::AgentInformation* agent_info = response->add_info();
         agent_info->set_agent_addr(it->first);
@@ -439,6 +442,9 @@ void SchedulerImpl::DoRpcShowCollectorInfo(::google::protobuf::RpcController* co
     std::map<std::string, CollectorInfo>::iterator it = collector_map_.begin();
     for (; it != collector_map_.end(); ++it) {
         CollectorInfo& info = it->second;
+        if (info.state != COLLECTOR_ACTIVE) {
+            continue;
+        }
         mdt::LogSchedulerService::CollectorInformation* collector_info = response->add_info();
         collector_info->set_collector_addr(it->first);
         collector_info->set_nr_agents(info.nr_agents);
