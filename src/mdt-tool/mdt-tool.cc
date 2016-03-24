@@ -26,6 +26,7 @@
 #include "rpc/rpc_client.h"
 #include "proto/kv.pb.h"
 #include "proto/scheduler.pb.h"
+#include "proto/galaxy_log.pb.h"
 
 DEFINE_string(tool_mode, "", "mdt-tool cmd mode, --tool_mode=i for interactive");
 DEFINE_string(cmd, "", "non interactive mode's cmd");
@@ -92,6 +93,7 @@ void HelpManue() {
     printf("cmd: AddWatchModuleStream agent_addr[hostname:port or self] module_name file_name\n\n");
     printf("cmd: ShowAgent\n\n");
     printf("cmd: ShowCollector\n\n");
+    printf("cmd: GalaxyShow <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> [index cmp value]\n\n");
     printf("===========================\n");
 }
 
@@ -381,6 +383,117 @@ uint64_t TranslateTime(std::string ts_str) {
     //    << ", hour " << ts_hour << ", min " << ts_min << ", sec " << ts_sec
     //    << ", convert to sec " << (uint64_t)now_ts << ", tv.sec " << tv.tv_sec << std::endl;
     return (uint64_t)(now_ts) * 1000000;
+}
+
+//  GalaxyShow <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> [index cmp value]
+int GalaxyShowOp(std::vector<std::string>& cmd_vec) {
+    // parse param
+    std::string db_name = cmd_vec[1];
+    std::string table_name = cmd_vec[2];
+    uint64_t start_timestamp = TranslateTime(cmd_vec[3]);
+    uint64_t end_timestamp = TranslateTime(cmd_vec[4]);
+    int32_t limit = boost::lexical_cast<int32_t>(cmd_vec[5]);
+
+    // create db
+    std::cout << "open db ..." << std::endl;
+    mdt::Database* db;
+    db = mdt::OpenDatabase(db_name);
+    if (db == NULL) {
+        std::cout << "open db " << db_name << " fail...\n";
+        return -1;
+    }
+
+    std::cout << "open table ..." << std::endl;
+    mdt::Table* table;
+    table = OpenTable(db, table_name);
+    if (table == NULL) {
+        std::cout << "open table " << table_name << " fail...\n";
+        return -1;
+    }
+
+    // search test
+    mdt::SearchRequest* search_req = new mdt::SearchRequest;
+    //search_req->primary_key = cmd_vec[];
+    search_req->limit = limit;
+    search_req->start_timestamp = start_timestamp;
+    if (end_timestamp == 0) {
+        search_req->end_timestamp = get_micros();
+    } else {
+        search_req->end_timestamp = end_timestamp;
+    }
+    int num_index = cmd_vec.size() - 6;
+    if (num_index % 3 != 0) {
+        std::cout << "num of condition index not match\n";
+        return 0;
+    }
+    for (int i = 0; i < num_index; i += 3) {
+        mdt::IndexCondition index;
+        int cmp;
+        index.index_name = cmd_vec[i + 6];
+        cmp = GetCmp(cmd_vec[i + 7]);
+        if (cmp == -1) {
+            std::cout << "cmp " << cmd_vec[i + 7] << " not support\n";
+            return -1;
+        }
+        index.comparator = (mdt::COMPARATOR)cmp;
+        index.compare_value = cmd_vec[i + 8];
+        search_req->index_condition_list.push_back(index);
+    }
+
+    mdt::SearchResponse* search_resp = new mdt::SearchResponse;
+
+    std::cout << "=============================================\n";
+    std::cout << "              Galaxy Show                    \n";
+    std::cout << "=============================================\n";
+    // calulate time
+    struct timeval now_ts, finish_ts;
+    gettimeofday(&now_ts, NULL);
+    table->Get(search_req, search_resp);
+    gettimeofday(&finish_ts, NULL);
+
+    for (uint32_t i = 0; i < search_resp->result_stream.size(); i++) {
+        const mdt::ResultStream& result = search_resp->result_stream[i];
+        for (uint32_t j = 0; j < result.result_data_list.size(); j++) {
+            const std::string& pb_data = result.result_data_list[j];
+            if (table_name == "TaskEvent") {
+                ::baidu::galaxy::TaskEvent task_event;
+                task_event.ParseFromString(pb_data);
+                std::cout << task_event.DebugString()  << std::endl;
+            } else if (table_name == "JobStat") {
+                ::baidu::galaxy::JobStat job_stat;
+                job_stat.ParseFromString(pb_data);
+                std::cout << job_stat.DebugString()  << std::endl;
+            } else if (table_name == "JobEvent") {
+                ::baidu::galaxy::JobEvent job_event;
+                job_event.ParseFromString(pb_data);
+                std::cout << job_event.DebugString()  << std::endl;
+            } else if (table_name == "PodStat") {
+                ::baidu::galaxy::PodStat pod_stat;
+                pod_stat.ParseFromString(pb_data);
+                std::cout << pod_stat.DebugString()  << std::endl;
+            } else if (table_name == "PodEvent") {
+                ::baidu::galaxy::PodEvent pod_event;
+                pod_event.ParseFromString(pb_data);
+                std::cout << pod_event.DebugString()  << std::endl;
+            } else if (table_name == "AgentStat") {
+                ::baidu::galaxy::AgentStat agent_stat;
+                agent_stat.ParseFromString(pb_data);
+                std::cout << agent_stat.DebugString()  << std::endl;
+            } else if (table_name == "AgentEvent") {
+                ::baidu::galaxy::AgentEvent agent_event;
+                agent_event.ParseFromString(pb_data);
+                std::cout << agent_event.DebugString()  << std::endl;
+            } else if (table_name == "ClusterStat") {
+                ::baidu::galaxy::ClusterStat cluster_stat;
+                cluster_stat.ParseFromString(pb_data);
+                std::cout << cluster_stat.DebugString()  << std::endl;
+            }
+        }
+    }
+    std::cout << "\n=============================================\n";
+    std::cout << "cost time(sec): " << finish_ts.tv_sec - now_ts.tv_sec;
+    std::cout << "\n=============================================\n";
+    return 0;
 }
 
 // GetByTime dbname tablename start(year-month-day-hour:min:sec)  end(year-month-day-hour:min:sec) limit [index_table [>,>=,==,<,<=] key]
@@ -1356,6 +1469,11 @@ int main(int ac, char* av[]) {
         } else if (cmd_vec[0].compare("GetByTime") == 0 && cmd_vec.size() >= 6) {
             // GetByTime dbname tablename start(year-month-day-hour:min:sec)  end(year-month-day-hour:min:sec) limit [index_table [>,>=,==,<,<=] key]
             GetByTimeOp(cmd_vec);
+            add_history(line);
+            continue;
+        } else if (cmd_vec[0].compare("GalaxyShow") == 0 && cmd_vec.size() >= 6) {
+            //  GalaxyShow <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> [index cmp value]
+            GalaxyShowOp(cmd_vec);
             add_history(line);
             continue;
         } else if (cmd_vec[0].compare("Get") == 0 && cmd_vec.size() >= 6) {
