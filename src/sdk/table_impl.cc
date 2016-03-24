@@ -726,7 +726,7 @@ Status TableImpl::TypeStringToString(const std::string& index_table,
 // search interface
 Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCallback callback,
                       void* callback_param) {
-    if (!req->primary_key.empty() && ttl_ > 0) {
+    if (req->primary_key.empty() && ttl_ > 0) {
         struct timeval now_tv;
         gettimeofday(&now_tv, NULL);
         int64_t start_timestamp = req->start_timestamp;
@@ -793,6 +793,8 @@ Status TableImpl::GetByPrimaryKey(const std::string& primary_key,
                             NULL, NULL, NULL, NULL);
     if (s.ok()) {
         result_list->push_back(result);
+    } else {
+        VLOG(10) << "get by primary key " << DebugString(primary_key) << " fail: " << s.ToString();
     }
     return s;
 }
@@ -1500,6 +1502,7 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
 
 struct AsyncReadParam {
     ReadPrimaryTableContext* param;
+    tera::RowReader* reader;
     FileLocation* location;
     Mutex* lock;
     CondVar* cond;
@@ -1608,6 +1611,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                     // get data from filesystem
                     AsyncReadParam* async_read_param = new AsyncReadParam;
                     async_read_param->param = param;
+                    async_read_param->reader = reader;
                     async_read_param->lock = &lock;
                     async_read_param->cond = &cond;
                     async_read_param->nr_record = &nr_record;
@@ -1624,6 +1628,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                     }
                 }
             }
+            VLOG(12) << "finish read data of primary key: " << primary_key;
         }
     }
 
@@ -1651,6 +1656,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
 void TableImpl::AsyncRead(void* read_param) {
     AsyncReadParam* async_read_param = (AsyncReadParam*)read_param;
     ReadPrimaryTableContext* param = async_read_param->param;
+    tera::RowReader* reader = async_read_param->reader;
     FileLocation* location = async_read_param->location;
     Mutex* lock = async_read_param->lock;
     CondVar* cond = async_read_param->cond;
@@ -1659,11 +1665,11 @@ void TableImpl::AsyncRead(void* read_param) {
     delete async_read_param;
 
     // read from file system
-    VLOG(12) << "begin to async read data from " << *location;
+    VLOG(12) << "begin to async read data of " << reader->RowName() << " from " << *location;
     std::string data;
     Status s = param->table->ReadDataFromFile(*location, &data);
     if (s.ok()) {
-        VLOG(12) << "finish async read data from " << *location;
+        VLOG(12) << "finish async read data of " << reader->RowName() << " from " << *location;
         // check break
         MutexLock l(lock);
         bool should_break = BreakOrPushData(param, param->result, Status::OK(), data, "");
@@ -1671,7 +1677,8 @@ void TableImpl::AsyncRead(void* read_param) {
             (*nr_record)++;
         }
     } else {
-        LOG(WARNING) << "fail to async read data from " << *location << " error: " << s.ToString();
+        LOG(WARNING) << "fail to async read data of " << reader->RowName() << " from "
+                     << *location << " error: " << s.ToString();
     }
     {
         MutexLock l(lock);
