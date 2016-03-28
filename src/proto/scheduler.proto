@@ -72,6 +72,30 @@ message RpcAddWatchModuleStreamResponse {
     optional RpcResponseStatus status = 1; 
 }
 
+///////////////////////////////////
+//  galaxy app trace
+///////////////////////////////////
+message RpcTraceGalaxyAppRequest {
+    optional string job_name = 1;
+    optional string work_dir = 3; // /home/galaxy/agent/work_dir; full path = /home/galaxy/agent/work_dir/podid/podid+taskid/userlog dir 
+    optional string user_log_dir = 4;
+    optional string db_name = 5; // module name
+    optional string table_name = 6; // log file name prefix
+    
+    // galaxy sdk relatively
+    optional string nexus_root_path = 7; 
+    optional string master_path = 8;
+    optional string nexus_servers = 9;
+
+    optional int64 parse_path_fn = 10; // fn = 1; fn = 2;
+}
+message RpcTraceGalaxyAppResponse {
+    optional RpcResponseStatus status = 1; 
+}
+
+////////////////////////////////////
+// agent & collector info show
+////////////////////////////////////
 message RpcShowAgentInfoRequest {
     optional int64 id = 1;
 }
@@ -114,6 +138,7 @@ service LogSchedulerService {
     rpc RpcAddWatchModuleStream(RpcAddWatchModuleStreamRequest) returns(RpcAddWatchModuleStreamResponse);
     rpc RpcShowAgentInfo(RpcShowAgentInfoRequest) returns(RpcShowAgentInfoResponse);
     rpc RpcShowCollectorInfo(RpcShowCollectorInfoRequest) returns(RpcShowCollectorInfoResponse);
+    rpc RpcTraceGalaxyApp(RpcTraceGalaxyAppRequest) returns(RpcTraceGalaxyAppResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;

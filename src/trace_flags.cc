@@ -28,7 +28,7 @@ DEFINE_string(alias_index_list, "", "alias index table name list");
 DEFINE_bool(use_fixed_index_list, true, "use fixed index list");
 DEFINE_string(fixed_index_list, "url:5,time:2", "use for fix index list match");
 
-DEFINE_int64(delay_retry_time, 1000000, "in second, time period after async push fail to retry");
+DEFINE_int64(delay_retry_time, 10000, "in ms, time period after async push fail to retry");
 
 ///////////////////////////////////////////
 // scheduler flags
@@ -41,6 +41,8 @@ DEFINE_int32(agent_bandwidth_quota, 20000000, "max bandwidth agent can be use pe
 
 DEFINE_int32(collector_timeout, 60000000, "collector info will be delete after x us");
 DEFINE_int32(collector_max_error, 1, "max error can occur in collector");
+
+DEFINE_int64(scheduler_galaxy_app_trace_period, 300000, "in (ms) update task trace path info");
 
 ///////////////////////////////////////////
 // scheduler flags

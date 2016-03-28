@@ -4,6 +4,7 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <tera.h>
+#include <galaxy.h>
 
 DECLARE_string(scheduler_service_port);
 DECLARE_string(log_dir);

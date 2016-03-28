@@ -7,12 +7,27 @@
 #include <boost/bind.hpp>
 #include "proto/agent.pb.h"
 
+#include <boost/shared_ptr.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
+#include <galaxy.h>
+#include "proto/galaxy_galaxy.pb.h"
+#include <netdb.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+
 DECLARE_string(scheduler_service_port);
 DECLARE_int32(agent_timeout);
 DECLARE_int32(agent_qps_quota);
 DECLARE_int32(agent_bandwidth_quota);
 DECLARE_int32(collector_timeout);
 DECLARE_int32(collector_max_error);
+DECLARE_int64(scheduler_galaxy_app_trace_period);
 
 namespace mdt {
 namespace scheduler {
@@ -30,15 +45,17 @@ void* BgHandleAgentInfoWrapper(void* arg) {
 }
 
 SchedulerImpl::SchedulerImpl()
-    : agent_thread_(40),
+    : agent_thread_(50),
     collector_thread_(4),
-    ctrl_thread_(10) {
+    ctrl_thread_(10),
+    galaxy_trace_pool_(30) {
 
     rpc_client_ = new RpcClient();
 
     //pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&agent_lock_, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&collector_lock_, PTHREAD_PROCESS_PRIVATE);
+    pthread_spin_init(&galaxy_trace_lock_, PTHREAD_PROCESS_PRIVATE);
 
     agent_thread_stop_ = false;
     pthread_create(&collector_tid_, NULL, BgHandleAgentInfoWrapper, this);
@@ -54,8 +71,7 @@ void SchedulerImpl::Echo(::google::protobuf::RpcController* controller,
                          mdt::LogSchedulerService::EchoResponse* response,
                          ::google::protobuf::Closure* done) {
     LOG(INFO) << "Echo: " << request->message();
-    done->Run();
-}
+    done->Run(); }
 
 // new node's score = 0
 void SchedulerImpl::RegisterNode(::google::protobuf::RpcController* controller,
@@ -371,6 +387,164 @@ void SchedulerImpl::RpcAddWatchModuleStream(::google::protobuf::RpcController* c
                  ::google::protobuf::Closure* done) {
     ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcAddWatchModuleStream, this, controller, request, response, done);
     agent_thread_.AddTask(task);
+    return;
+}
+
+/////////////////////////////////////
+//  galaxy app trace
+/////////////////////////////////////
+void SchedulerImpl::AsyncTraceGalaxyAppCallback(const mdt::LogAgentService::RpcTraceGalaxyAppRequest* req,
+                mdt::LogAgentService::RpcTraceGalaxyAppResponse* resp,
+                bool failed, int error,
+                mdt::LogAgentService::LogAgentService_Stub* service,
+                boost::shared_ptr<TraceInfo> trace_info) {
+    // last one reschedule trace push
+    if (trace_info->ref.Dec() == 0) {
+        if (trace_info->flag == ENABLE_TRACE) {
+            ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcTraceGalaxyApp, this, trace_info);
+            galaxy_trace_pool_.DelayTask(FLAGS_scheduler_galaxy_app_trace_period, task);
+        } else {
+            pthread_spin_lock(&galaxy_trace_lock_);
+            galaxy_trace_rule_.erase(trace_info->job_name);
+            pthread_spin_unlock(&galaxy_trace_lock_);
+        }
+    }
+
+    delete req;
+    delete resp;
+    delete service;
+}
+
+void SchedulerImpl::DoRpcTraceGalaxyApp(boost::shared_ptr<TraceInfo> trace_info) {
+    LOG(INFO) << ", Thread pool[PushTrace] " << galaxy_trace_pool_.ProfilingLog()
+        << ", pending req(PushTrace) " << galaxy_trace_pool_.PendingNum();
+
+    // connect galaxy master
+    if (trace_info->galaxy == NULL) {
+        std::string master_key = trace_info->configure.nexus_root_path() + trace_info->configure.master_path();
+        ::baidu::galaxy::Galaxy* galaxy = ::baidu::galaxy::Galaxy::ConnectGalaxy(trace_info->configure.nexus_servers(), master_key);
+        if (galaxy == NULL) {
+            LOG(WARNING) << "galaxy connnect error, " << master_key << ", nexus servers " << trace_info->configure.nexus_servers();
+            if (trace_info->flag == ENABLE_TRACE) {
+                ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcTraceGalaxyApp, this, trace_info);
+                galaxy_trace_pool_.DelayTask(FLAGS_scheduler_galaxy_app_trace_period, task);
+            } else {
+                pthread_spin_lock(&galaxy_trace_lock_);
+                galaxy_trace_rule_.erase(trace_info->job_name);
+                pthread_spin_unlock(&galaxy_trace_lock_);
+            }
+            return;
+        }
+        trace_info->galaxy = galaxy;
+    }
+
+    std::vector<::baidu::galaxy::PodInformation> pods;
+    if (!trace_info->galaxy->GetPodsByName(trace_info->job_name, &pods)) {
+        LOG(WARNING) << "galaxy get Pods error, " << trace_info->job_name;
+        if (trace_info->flag == ENABLE_TRACE) {
+            ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcTraceGalaxyApp, this, trace_info);
+            galaxy_trace_pool_.DelayTask(FLAGS_scheduler_galaxy_app_trace_period, task);
+        } else {
+            pthread_spin_lock(&galaxy_trace_lock_);
+            galaxy_trace_rule_.erase(trace_info->job_name);
+            pthread_spin_unlock(&galaxy_trace_lock_);
+        }
+        return;
+    }
+
+    trace_info->ref.Inc();
+    for (uint32_t i = 0; i < pods.size(); i++) {
+        ::baidu::galaxy::PodInformation& pod = pods[i];
+        VLOG(30) << "podid " << pod.podid << ", endpoint " << pod.endpoint << ", jobid " << pod.jobid;
+
+        // translate ip to hostname
+        std::vector<std::string> addr_vec;
+        boost::split(addr_vec, pod.endpoint, boost::is_any_of(":"));
+        struct in_addr net_addr;
+        inet_aton(addr_vec[0].c_str(), &net_addr);
+        struct hostent* ent = gethostbyaddr(&net_addr, sizeof(net_addr), AF_INET);
+        if (ent == NULL) {
+            continue;
+        }
+        std::string hostname(ent->h_name);
+        hostname.append(":");
+        VLOG(30) << " endpoint hostname " << hostname;
+
+        // match agent addr
+        std::string hname;
+        pthread_spin_lock(&agent_lock_);
+        std::map<std::string, AgentInfo>::iterator uper = agent_map_.upper_bound(hostname);
+        for (; uper != agent_map_.end(); ++uper) {
+            hname = uper->first;
+            if (hname.find(hostname) != std::string::npos) {
+                break;
+            }
+            hname.clear();
+        }
+        pthread_spin_unlock(&agent_lock_);
+        if (hname.size() == 0) {
+            continue;
+        }
+
+
+        trace_info->ref.Inc();
+        mdt::LogAgentService::LogAgentService_Stub* service;
+        rpc_client_->GetMethodList(hname, &service);
+        mdt::LogAgentService::RpcTraceGalaxyAppRequest* req = new mdt::LogAgentService::RpcTraceGalaxyAppRequest();
+        mdt::LogAgentService::RpcTraceGalaxyAppResponse* resp = new mdt::LogAgentService::RpcTraceGalaxyAppResponse();
+        req->set_pod_id(pod.podid);
+        req->set_work_dir(trace_info->configure.work_dir());
+        req->set_user_log_dir(trace_info->configure.user_log_dir());
+        req->set_db_name(trace_info->configure.db_name());
+        req->set_table_name(trace_info->configure.table_name());
+        req->set_parse_path_fn(trace_info->configure.parse_path_fn());
+        VLOG(30) << "begin push trace info: " << hname << ", req " << req->DebugString();
+
+        boost::function<void (const mdt::LogAgentService::RpcTraceGalaxyAppRequest*,
+                              mdt::LogAgentService::RpcTraceGalaxyAppResponse*,
+                              bool, int)> callback =
+            boost::bind(&SchedulerImpl::AsyncTraceGalaxyAppCallback,
+                        this, _1, _2, _3, _4, service, trace_info);
+        rpc_client_->AsyncCall(service,
+                              &mdt::LogAgentService::LogAgentService_Stub::RpcTraceGalaxyApp,
+                              req, resp, callback);
+    }
+
+    // last one reschedule trace push
+    if (trace_info->ref.Dec() == 0) {
+        if (trace_info->flag == ENABLE_TRACE) {
+            ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcTraceGalaxyApp, this, trace_info);
+            galaxy_trace_pool_.DelayTask(FLAGS_scheduler_galaxy_app_trace_period, task);
+        } else {
+            pthread_spin_lock(&galaxy_trace_lock_);
+            galaxy_trace_rule_.erase(trace_info->job_name);
+            pthread_spin_unlock(&galaxy_trace_lock_);
+        }
+    }
+}
+
+void SchedulerImpl::RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
+                 const mdt::LogSchedulerService::RpcTraceGalaxyAppRequest* request,
+                 mdt::LogSchedulerService::RpcTraceGalaxyAppResponse* response,
+                 ::google::protobuf::Closure* done) {
+    boost::shared_ptr<TraceInfo> trace_info(new TraceInfo());
+    bool need_queue_task = false;
+    pthread_spin_lock(&galaxy_trace_lock_);
+    if (galaxy_trace_rule_.find(request->job_name()) == galaxy_trace_rule_.end()) {
+        trace_info->configure.CopyFrom(*request);
+        trace_info->flag = ENABLE_TRACE;
+        trace_info->job_name = request->job_name();
+        galaxy_trace_rule_[request->job_name()] = trace_info;
+        need_queue_task = true;
+    }
+    pthread_spin_unlock(&galaxy_trace_lock_);
+
+    if (need_queue_task) {
+        VLOG(50) << "queue trace app request: " << trace_info->job_name << ", configure: " << trace_info->configure.DebugString();
+        ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcTraceGalaxyApp, this, trace_info);
+        galaxy_trace_pool_.AddTask(task);
+    }
+    done->Run();
     return;
 }
 

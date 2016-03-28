@@ -94,6 +94,7 @@ void HelpManue() {
     printf("cmd: ShowAgent\n\n");
     printf("cmd: ShowCollector\n\n");
     printf("cmd: GalaxyShow <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> [index cmp value]\n\n");
+    printf("cmd: PushTraceLog <job_name> <work_dir> <user_log_dir> <db_name> <table_name> <parse_path_fn> <nexus_root_path> <master_path> <nexus_servers> \n\n");
     printf("===========================\n");
 }
 
@@ -1375,6 +1376,42 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
     return 0;
 }
 
+// cmd: PushTraceLog <job_name> <work_dir> <user_log_dir> <db_name> <table_name> <parse_path_fn> <nexus_root_path> <master_path> <nexus_servers>
+int PushTraceLog(std::vector<std::string>& cmd_vec) {
+    std::string job_name = cmd_vec[1];
+    std::string work_dir = cmd_vec[2];
+    std::string user_log_dir = cmd_vec[3];
+    std::string db_name = cmd_vec[4];
+    std::string table_name = cmd_vec[5];
+    int64_t parse_path_fn = atol(cmd_vec[6].c_str());
+    std::string nexus_root_path = cmd_vec[7];
+    std::string master_path = cmd_vec[8];
+    std::string nexus_servers = cmd_vec[9];
+
+    std::string scheduler_addr = FLAGS_scheduler_addr;
+    mdt::RpcClient* rpc_client = new mdt::RpcClient;
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client->GetMethodList(scheduler_addr, &service);
+
+    mdt::LogSchedulerService::RpcTraceGalaxyAppRequest* req = new mdt::LogSchedulerService::RpcTraceGalaxyAppRequest();
+    mdt::LogSchedulerService::RpcTraceGalaxyAppResponse* resp = new mdt::LogSchedulerService::RpcTraceGalaxyAppResponse();
+    req->set_job_name(job_name);
+    req->set_work_dir(work_dir);
+    req->set_user_log_dir(user_log_dir);
+    req->set_db_name(db_name);
+    req->set_table_name(table_name);
+    req->set_nexus_root_path(nexus_root_path);
+    req->set_master_path(master_path);
+    req->set_nexus_servers(nexus_servers);
+    req->set_parse_path_fn(parse_path_fn);
+
+    rpc_client->SyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcTraceGalaxyApp, req, resp);
+    delete req;
+    delete resp;
+    delete service;
+    return 0;
+}
+
 int main(int ac, char* av[]) {
     /*
     if (DupNfsSterr() < 0) {
@@ -1528,6 +1565,11 @@ int main(int ac, char* av[]) {
             continue;
         } else if (cmd_vec[0].compare("ShowCollector") == 0 && cmd_vec.size() == 1) {
             ShowCollector(cmd_vec);
+            add_history(line);
+            free(line);
+            continue;
+        } else if ((cmd_vec[0].compare("PushTraceLog") == 0) && (cmd_vec.size() == 10)) {
+            PushTraceLog(cmd_vec);
             add_history(line);
             free(line);
             continue;

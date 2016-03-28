@@ -65,6 +65,11 @@ public:
                       mdt::LogAgentService::RpcStoreSpanResponse* response,
                       ::google::protobuf::Closure* done);
 
+    void RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
+                           const mdt::LogAgentService::RpcTraceGalaxyAppRequest* request,
+                           mdt::LogAgentService::RpcTraceGalaxyAppResponse* response,
+                           ::google::protobuf::Closure* done);
+
 private:
     void ParseLogDir(std::vector<std::string>& log_vec);
     void ParseModuleName(const std::string& filename, std::string* module_name);

@@ -14,6 +14,8 @@
 #include <errno.h>
 #include <sys/select.h>
 #include "proto/scheduler.pb.h"
+#include <dirent.h>
+#include <sys/types.h>
 
 DECLARE_string(scheduler_addr);
 DECLARE_string(db_dir);
@@ -467,6 +469,81 @@ void AgentImpl::RpcStoreSpan(::google::protobuf::RpcController* controller,
                              const mdt::LogAgentService::RpcStoreSpanRequest* request,
                              mdt::LogAgentService::RpcStoreSpanResponse* response,
                              ::google::protobuf::Closure* done) {
+    done->Run();
+}
+
+void AgentImpl::RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
+                                  const mdt::LogAgentService::RpcTraceGalaxyAppRequest* request,
+                                  mdt::LogAgentService::RpcTraceGalaxyAppResponse* response,
+                                  ::google::protobuf::Closure* done) {
+    if (request->parse_path_fn() == 2) {
+        std::string full_path;
+        full_path.append("/");
+        full_path.append(request->user_log_dir());
+
+        bool is_success = true;
+        // add watch path
+        if (AddWatchPath(full_path) < 0) {
+            is_success = false;
+            LOG(WARNING) << "add watch event in dir " << full_path << " failed";
+        }
+        if (AddWatchModuleStream(request->db_name(), request->table_name()) < 0) {
+            is_success = false;
+            VLOG(35) << "add watch module " << request->db_name() << " failed, log file " << request->table_name();
+        }
+
+        if (is_success) {
+            response->set_status(mdt::LogAgentService::kRpcOk);
+        } else {
+            response->set_status(mdt::LogAgentService::kRpcError);
+        }
+        done->Run();
+        return;
+    }
+
+    // get task work path
+    std::string path;
+    path.append("/");
+    path.append(request->work_dir());
+    path.append("/");
+    path.append(request->pod_id());
+
+    DIR* dir_ptr = opendir(path.c_str());
+    if (dir_ptr == NULL) {
+        response->set_status(mdt::LogAgentService::kRpcError);
+        done->Run();
+        return;
+    }
+
+    bool is_success = true;
+    struct dirent* dir_entry = NULL;
+    while ((dir_entry = readdir(dir_ptr)) != NULL) {
+        std::string task_id_half(dir_entry->d_name, strlen(dir_entry->d_name));
+        if (task_id_half.find(request->pod_id()) == std::string::npos) {
+            continue;
+        }
+        std::string task_path(path);
+        task_path.append("/");
+        task_path.append(task_id_half);
+        task_path.append("/");
+        task_path.append(request->user_log_dir());
+        // add watch path
+        if (AddWatchPath(task_path) < 0) {
+            is_success = false;
+            LOG(WARNING) << "add watch event in dir " << task_path << " failed";
+        }
+        if (AddWatchModuleStream(request->db_name(), request->table_name()) < 0) {
+            is_success = false;
+            VLOG(35) << "add watch module " << request->db_name() << " failed, log file " << request->table_name();
+        }
+    }
+    closedir(dir_ptr);
+
+    if (is_success) {
+        response->set_status(mdt::LogAgentService::kRpcOk);
+    } else {
+        response->set_status(mdt::LogAgentService::kRpcError);
+    }
     done->Run();
 }
 

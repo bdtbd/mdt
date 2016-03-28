@@ -10,6 +10,8 @@
 #include "utils/counter.h"
 #include "rpc/rpc_client.h"
 #include "proto/agent.pb.h"
+#include <boost/shared_ptr.hpp>
+#include <galaxy.h>
 
 namespace mdt {
 namespace scheduler {
@@ -60,6 +62,22 @@ struct CollectorInfo {
     CollectorState state; // 1 = active, 2 = inactive
 };
 
+enum TraceState {
+    ENABLE_TRACE = 1,
+    DISABLE_TRACE = 2,
+};
+
+struct TraceInfo {
+    std::string job_name;
+    ::baidu::galaxy::Galaxy* galaxy;
+    uint64_t flag;
+    Counter ref;
+    mdt::LogSchedulerService::RpcTraceGalaxyAppRequest configure;
+
+    TraceInfo() : galaxy(NULL) {}
+    ~TraceInfo() { }
+};
+
 class SchedulerImpl : public mdt::LogSchedulerService::LogSchedulerService {
 public:
     SchedulerImpl();
@@ -101,8 +119,19 @@ public:
                           const mdt::LogSchedulerService::RpcShowCollectorInfoRequest* request,
                           mdt::LogSchedulerService::RpcShowCollectorInfoResponse* response,
                           ::google::protobuf::Closure* done);
+    void RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcTraceGalaxyAppRequest* request,
+                          mdt::LogSchedulerService::RpcTraceGalaxyAppResponse* response,
+                          ::google::protobuf::Closure* done);
 
 private:
+    void AsyncTraceGalaxyAppCallback(const mdt::LogAgentService::RpcTraceGalaxyAppRequest* req,
+                mdt::LogAgentService::RpcTraceGalaxyAppResponse* resp,
+                bool failed, int error,
+                mdt::LogAgentService::LogAgentService_Stub* service,
+                boost::shared_ptr<TraceInfo> trace_info);
+    void DoRpcTraceGalaxyApp(boost::shared_ptr<TraceInfo> trace_info);
+
     void DoRegisterNode(::google::protobuf::RpcController* controller,
                                        const mdt::LogSchedulerService::RegisterNodeRequest* request,
                                        mdt::LogSchedulerService::RegisterNodeResponse* response,
@@ -152,6 +181,11 @@ private:
 
     pthread_t agent_tid_;
     volatile bool agent_thread_stop_;
+
+    // use for galaxy configure app trace path
+    ThreadPool galaxy_trace_pool_;
+    pthread_spinlock_t galaxy_trace_lock_;
+    std::map<std::string, boost::shared_ptr<TraceInfo> > galaxy_trace_rule_;
 };
 
 }
