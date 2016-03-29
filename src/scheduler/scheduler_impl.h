@@ -55,6 +55,11 @@ struct CollectorInfo {
     int64_t min_packet_size;
     int64_t average_packet_size;
 
+    int64_t store_pending;
+    int64_t store_sched_ts;
+    int64_t store_task_ts;
+    int64_t store_task_num;
+
     // state info manage by scheduler
     int64_t nr_agents;
     int64_t ctime;

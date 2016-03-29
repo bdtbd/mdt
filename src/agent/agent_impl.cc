@@ -394,7 +394,7 @@ int AgentImpl::AddWatchPath(const std::string& dir) {
         pthread_spin_unlock(&lock_);
 
         DestroyWatchPath(fs_inotify);
-        LOG(WARNING) << "dir " << dir << ", has been watch";
+        VLOG(30) << "dir " << dir << ", has been watch";
         return -1;
     } else {
         inotify_[dir] = fs_inotify;
@@ -485,9 +485,9 @@ void AgentImpl::RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
         // add watch path
         if (AddWatchPath(full_path) < 0) {
             is_success = false;
-            LOG(WARNING) << "add watch event in dir " << full_path << " failed";
+            VLOG(30) << "add watch event in dir " << full_path << " failed";
         }
-        if (AddWatchModuleStream(request->db_name(), request->table_name()) < 0) {
+        if (is_success && AddWatchModuleStream(request->db_name(), request->table_name()) < 0) {
             is_success = false;
             VLOG(35) << "add watch module " << request->db_name() << " failed, log file " << request->table_name();
         }
@@ -530,9 +530,9 @@ void AgentImpl::RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
         // add watch path
         if (AddWatchPath(task_path) < 0) {
             is_success = false;
-            LOG(WARNING) << "add watch event in dir " << task_path << " failed";
+            VLOG(30) << "add watch event in dir " << task_path << " failed";
         }
-        if (AddWatchModuleStream(request->db_name(), request->table_name()) < 0) {
+        if (is_success && AddWatchModuleStream(request->db_name(), request->table_name()) < 0) {
             is_success = false;
             VLOG(35) << "add watch module " << request->db_name() << " failed, log file " << request->table_name();
         }

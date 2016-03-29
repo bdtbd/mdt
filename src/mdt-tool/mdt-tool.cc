@@ -1336,7 +1336,7 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
 
     char headers[2048] = {'\0'};
     snprintf(headers, sizeof(headers),
-            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
+            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
             35, "collector_addr",
             10, "nr_agent",
             10, "ctime",
@@ -1345,7 +1345,11 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
             10, "max_packet_size",
             10, "min_packet_size",
             10, "average_packet_size",
-            10, "error_nr");
+            10, "error_nr",
+            10, "store_pedning",
+            10, "store_sched_ts",
+            10, "store_task_ts",
+            10, "store_task_num");
     std::string header_line;
     header_line.resize(strlen(headers) + 8);
     std::fill(header_line.begin(), header_line.end(), '-');
@@ -1357,7 +1361,7 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
         const mdt::LogSchedulerService::CollectorInfo& collector_info = info.collector_info();
         char line_str[1024] = {'\0'};
         snprintf(line_str, sizeof(line_str),
-                "%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t",
+                "%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t",
                 35, info.collector_addr().c_str(),
                 10, info.nr_agents(),
                 10, info.ctime(),
@@ -1366,7 +1370,11 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
                 10, collector_info.max_packet_size(),
                 10, collector_info.min_packet_size(),
                 10, collector_info.average_packet_size(),
-                10, info.error_nr());
+                10, info.error_nr(),
+                10, collector_info.store_pending(),
+                10, collector_info.store_sched_ts(),
+                10, collector_info.store_task_ts(),
+                10, collector_info.store_task_num());
         std::cout << line_str << std::endl;
     }
 

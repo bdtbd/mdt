@@ -64,8 +64,11 @@ Status TableImpl::OpenTable(const std::string& db_name, const TeraOptions& tera_
     tera_adapter.table_prefix_ = db_name;
 
     TableImpl* table = new TableImpl(table_desc, tera_adapter, fs_adapter);
-    *table_ptr = table;
-    return table->Init();
+    Status s = table->Init();
+    if (s.ok()) {
+        *table_ptr = table;
+    }
+    return s;
 }
 
 Status TableImpl::Init() {
@@ -146,6 +149,7 @@ void TableImpl::FreeTeraTable() {
         tera::Table* table_ptr = it->second;
         if (table_ptr != NULL) {
             delete table_ptr;
+            it->second = NULL;
         }
     }
 }
@@ -436,6 +440,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
             ReleaseDataWriter(write_handle);
         }
         write_retry--;
+        LOG(INFO) << "fs retry " << write_retry;
     }
     if (!is_success) {
         LOG(WARNING) << "retry 3 times, but fail";
@@ -734,7 +739,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         index_pack.append(typed_index_key);
     }
     // write small span into tera, tera value MUST in the last
-    if (req->data.size() <= (uint32_t)FLAGS_tera_span_size) {
+    if (req->data.size() < (uint32_t)FLAGS_tera_span_size) {
         uint32_t value_len = kTeraValue.size() + 1 + req->data.size();
         index_pack.append((char*)&value_len, sizeof(value_len));
         index_pack.append(kTeraValue);

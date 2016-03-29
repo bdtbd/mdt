@@ -98,6 +98,11 @@ void SchedulerImpl::DoRegisterNode(::google::protobuf::RpcController* controller
         info.min_packet_size = request->info().min_packet_size();
         info.average_packet_size = request->info().average_packet_size();
 
+        info.store_pending = request->info().store_pending();
+        info.store_sched_ts = request->info().store_sched_ts();
+        info.store_task_ts = request->info().store_task_ts();
+        info.store_task_num = request->info().store_task_num();
+
         info.nr_agents = 0;
         info.error_nr = 0;
         info.state = COLLECTOR_ACTIVE;
@@ -112,6 +117,11 @@ void SchedulerImpl::DoRegisterNode(::google::protobuf::RpcController* controller
         info.max_packet_size = request->info().max_packet_size();
         info.min_packet_size = request->info().min_packet_size();
         info.average_packet_size = request->info().average_packet_size();
+
+        info.store_pending = request->info().store_pending();
+        info.store_sched_ts = request->info().store_sched_ts();
+        info.store_task_ts = request->info().store_task_ts();
+        info.store_task_num = request->info().store_task_num();
 
         info.error_nr = 0;
         info.state = COLLECTOR_ACTIVE;
@@ -631,6 +641,11 @@ void SchedulerImpl::DoRpcShowCollectorInfo(::google::protobuf::RpcController* co
         information->set_max_packet_size(info.max_packet_size);
         information->set_min_packet_size(info.min_packet_size);
         information->set_average_packet_size(info.average_packet_size);
+
+        information->set_store_pending(info.store_pending);
+        information->set_store_sched_ts(info.store_sched_ts);
+        information->set_store_task_ts(info.store_task_ts);
+        information->set_store_task_num(info.store_task_num);
     }
     pthread_spin_unlock(&collector_lock_);
     done->Run();

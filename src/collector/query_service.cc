@@ -4,6 +4,10 @@
 #include <glog/logging.h>
 #include "proto/scheduler.pb.h"
 #include <iostream>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
+#include "utils/counter.h"
+#include "utils/timer.h"
 
 DECLARE_int32(se_num_threads);
 DECLARE_bool(mdt_flagfile_set);
@@ -13,6 +17,17 @@ DECLARE_string(scheduler_addr);
 DECLARE_string(se_service_port);
 
 namespace mdt {
+
+int64_t last_time_collect_info;
+::mdt::Counter store_qps;
+::mdt::Counter store_max_packet_size;
+::mdt::Counter store_min_packet_size;
+::mdt::Counter store_average_packet_size;
+
+::mdt::Counter store_thread_pool_pending;
+::mdt::Counter store_thread_pool_sched_ts;
+::mdt::Counter store_thread_pool_task_ts;
+::mdt::Counter store_thread_pool_task_num;
 
 void* ReportThread(void* arg) {
     SearchEngineImpl* se = (SearchEngineImpl*)arg;
@@ -34,6 +49,7 @@ void SearchEngineImpl::ReportMessage() {
         LOG(FATAL) << "fail to report message";
     }
     std::string hostname_str = hostname;
+    last_time_collect_info = timer::get_micros();
     while (1) {
         if (stop_report_message_) {
             return;
@@ -48,10 +64,24 @@ void SearchEngineImpl::ReportMessage() {
         mdt::LogSchedulerService::RegisterNodeRequest* req = new mdt::LogSchedulerService::RegisterNodeRequest();
         req->set_server_addr(local_addr);
         mdt::LogSchedulerService::CollectorInfo* info = req->mutable_info();
-        info->set_qps(5000);
-        info->set_min_packet_size(500);
-        info->set_max_packet_size(500);
-        info->set_average_packet_size(500);
+
+        int64_t nr_sec = (timer::get_micros() - last_time_collect_info) / 1000000;
+        nr_sec = nr_sec > 0 ? nr_sec : 1;
+        info->set_qps(store_qps.Get() / nr_sec);
+        info->set_min_packet_size(store_min_packet_size.Get());
+        info->set_max_packet_size(store_max_packet_size.Get());
+        info->set_average_packet_size(store_average_packet_size.Get() / (store_qps.Get() + 1));
+
+        info->set_store_pending(store_thread_pool_pending.Get());
+        info->set_store_sched_ts(store_thread_pool_sched_ts.Get());
+        info->set_store_task_ts(store_thread_pool_task_ts.Get());
+        info->set_store_task_num(store_thread_pool_task_num.Get());
+
+        last_time_collect_info = timer::get_micros();
+        store_qps.Set(0);
+        store_min_packet_size.Set(1000000000);
+        store_max_packet_size.Set(0);
+        store_average_packet_size.Set(0);
 
         mdt::LogSchedulerService::RegisterNodeResponse* resp = new mdt::LogSchedulerService::RegisterNodeResponse();
 
@@ -117,6 +147,7 @@ Status SearchEngineImpl::OpenTable(const std::string& db_name, const std::string
     ::mdt::Database* db_ptr = NULL;
     std::map<std::string, ::mdt::Database*>::iterator it = db_map_.find(db_name);
     if (it == db_map_.end()) {
+        LOG(WARNING) << "open db error, db " << db_name << ", table " << table_name;
         return Status::NotFound("db not found");
     }
     db_ptr = it->second;
@@ -127,6 +158,7 @@ Status SearchEngineImpl::OpenTable(const std::string& db_name, const std::string
     if (table_it == table_map_.end()) {
         table_ptr = ::mdt::OpenTable(db_ptr, table_name);
         if (table_ptr == NULL) {
+            LOG(WARNING) << "open table error, db " << db_name << ", table " << table_name;
             return Status::NotFound("table cannot open");
         }
         table_map_.insert(std::pair<std::string, ::mdt::Table*>(internal_tablename, table_ptr));
@@ -241,7 +273,7 @@ struct StoreCallback_param {
 void StoreCallback_dump(mdt::Table* table, mdt::StoreRequest* request,
                         mdt::StoreResponse* response,
                         void* callback_param) {
-    //VLOG(30) << "store callback, pkey " << request->primary_key;
+    VLOG(30) << "store callback, pkey " << request->primary_key;
     StoreCallback_param* param = (StoreCallback_param*)callback_param;
     MdtResponseToRpcStoreResponse(response, param->resp);
     param->done->Run();
@@ -255,15 +287,27 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              ::google::protobuf::Closure* done) {
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
+        VLOG(30) << "open db error, db " << req->db_name() << ", table " << req->table_name();
         done->Run();
         return;
     }
     s = OpenTable(req->db_name(), req->table_name());
     if (!s.ok()) {
+        VLOG(30) << "open table error, db " << req->db_name() << ", table " << req->table_name();
         done->Run();
         return;
     }
-    //VLOG(30) << "store, pkey " << req->primary_key();
+
+    store_qps.Inc();
+    store_average_packet_size.Add((int64_t)(req->data().size()));
+    if (store_max_packet_size.Get() < (int64_t)(req->data().size())) {
+        store_max_packet_size.Set((int64_t)(req->data().size()));
+    }
+    if (store_min_packet_size.Get() > (int64_t)(req->data().size())) {
+        store_min_packet_size.Set((int64_t)(req->data().size()));
+    }
+
+    VLOG(30) << "store, pkey " << req->primary_key();
     ::mdt::Table* table = GetTable(req->db_name(), req->table_name());
 
     ::mdt::StoreRequest* request = new ::mdt::StoreRequest();
@@ -301,6 +345,17 @@ void SearchEngineServiceImpl::BGInfoCollector() {
         << ", pending req(store) " << se_thread_pool_->PendingNum()
         << ", [Search] " << se_read_thread_pool_->ProfilingLog()
         << ", pending req(search) " << se_read_thread_pool_->PendingNum();
+
+    store_thread_pool_pending.Set(se_thread_pool_->PendingNum());
+    std::vector<std::string> profile;
+    std::string profile_str = se_thread_pool_->ProfilingLog();
+    boost::split(profile, profile_str, boost::is_any_of(" "));
+    int64_t sched_ts = atol(profile[0].c_str());
+    int64_t task_ts = atol(profile[1].c_str());
+    int64_t task_num = atol(profile[2].c_str());
+    store_thread_pool_sched_ts.Set(sched_ts);
+    store_thread_pool_task_ts.Set(task_ts);
+    store_thread_pool_task_num.Set(task_num);
 
     ThreadPool::Task task = boost::bind(&SearchEngineServiceImpl::BGInfoCollector, this);
     se_info_thread_pool_->DelayTask(5000, task);
