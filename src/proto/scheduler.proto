@@ -18,6 +18,11 @@ message CollectorInfo {
     optional int64 max_packet_size = 2;
     optional int64 min_packet_size = 3;
     optional int64 average_packet_size = 4;
+
+    optional int64 store_pending = 5; 
+    optional int64 store_sched_ts = 6; 
+    optional int64 store_task_ts = 7; 
+    optional int64 store_task_num = 8; 
 }
 
 message RegisterNodeRequest {
