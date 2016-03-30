@@ -13,6 +13,9 @@ DEFINE_string(primary_key, "", "primary key name");
 DEFINE_string(user_time, "", "user point out which field use as timestamp");
 DEFINE_int32(time_type, 1, "use for parse user time from log");
 
+// support line filter
+DEFINE_string(string_line_filter_list, "", "support line filter, like: cn_garbage_main,diff_garbage_main");
+
 // split string by substring
 //DEFINE_string(string_delims, "||", "split string by substring");
 DEFINE_string(string_delims, "", "split string by substring");
@@ -28,7 +31,7 @@ DEFINE_string(alias_index_list, "", "alias index table name list");
 DEFINE_bool(use_fixed_index_list, true, "use fixed index list");
 DEFINE_string(fixed_index_list, "url:5,time:2", "use for fix index list match");
 
-DEFINE_int64(delay_retry_time, 10000, "in ms, time period after async push fail to retry");
+DEFINE_int64(delay_retry_time, 2000, "in ms, time period after async push fail to retry");
 
 ///////////////////////////////////////////
 // scheduler flags

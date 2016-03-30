@@ -317,7 +317,11 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
     param->done = done;
     ::mdt::StoreCallback callback = StoreCallback_dump;
     RpcStoreRequestToMdtRequest(req, request);
+
+    int64_t cost_ts = timer::get_micros();
+    std::string pkey = req->primary_key();
     table->Put(request, response, callback, param);
+    VLOG(5) << "store, pkey " << pkey << ", cost time " << timer::get_micros() - cost_ts;
     return;
 }
 
@@ -331,7 +335,7 @@ SearchEngineServiceImpl::SearchEngineServiceImpl(SearchEngineImpl* se)
       se_info_thread_pool_(new ThreadPool(2)) {
 
     ThreadPool::Task task = boost::bind(&SearchEngineServiceImpl::BGInfoCollector, this);
-    se_info_thread_pool_->DelayTask(5000, task);
+    se_info_thread_pool_->DelayTask(1000, task);
 }
 
 SearchEngineServiceImpl::~SearchEngineServiceImpl() {
@@ -341,7 +345,7 @@ SearchEngineServiceImpl::~SearchEngineServiceImpl() {
 }
 
 void SearchEngineServiceImpl::BGInfoCollector() {
-    LOG(INFO) << ", Thread pool[Store] " << se_thread_pool_->ProfilingLog()
+    LOG(INFO) << "Thread pool[Store] " << se_thread_pool_->ProfilingLog()
         << ", pending req(store) " << se_thread_pool_->PendingNum()
         << ", [Search] " << se_read_thread_pool_->ProfilingLog()
         << ", pending req(search) " << se_read_thread_pool_->PendingNum();
@@ -358,7 +362,7 @@ void SearchEngineServiceImpl::BGInfoCollector() {
     store_thread_pool_task_num.Set(task_num);
 
     ThreadPool::Task task = boost::bind(&SearchEngineServiceImpl::BGInfoCollector, this);
-    se_info_thread_pool_->DelayTask(5000, task);
+    se_info_thread_pool_->DelayTask(1000, task);
 }
 
 void SearchEngineServiceImpl::Search(::google::protobuf::RpcController* ctrl,

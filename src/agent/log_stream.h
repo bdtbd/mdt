@@ -26,6 +26,13 @@ struct DBKey {
     Counter ref;
 };
 
+struct FileStreamProfile {
+    uint64_t ino;
+    std::string filename;
+    uint64_t nr_pending;
+    uint64_t current_offset;
+};
+
 class FileStream {
 public:
     explicit FileStream(std::string module_name, LogOptions log_options,
@@ -52,6 +59,7 @@ public:
     int HanleFailKey(DBKey* key);
     int MarkDelete();
     int OpenFile();
+    void Profile(FileStreamProfile* profile);
 
 private:
     void EncodeUint64BigEndian(uint64_t value, std::string* str);
@@ -123,6 +131,9 @@ private:
     std::string db_name_; // DISCARD: useless
     std::string table_name_; // DISCARD: useless
 
+    // line filter
+    std::vector<std::string> string_filter_;
+
     // log line parse relatively
     std::vector<std::string> string_delims_; // special split line use string
     std::string line_delims_; // general split line into items list
@@ -157,6 +168,9 @@ private:
     std::queue<DBKey*> key_queue_;
     std::queue<DBKey*> failed_key_queue_;
     ThreadPool fail_delay_thread_;
+
+    // collector info
+    int64_t last_update_time_;
 };
 
 }

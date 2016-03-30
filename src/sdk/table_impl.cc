@@ -38,6 +38,8 @@ DECLARE_int64(gc_interval);
 DECLARE_int64(tera_span_size);
 DECLARE_bool(delete_unknow_file);
 DECLARE_bool(enable_data_compress);
+DECLARE_bool(enable_async_index_write);
+DECLARE_int64(async_tera_writer_num);
 
 namespace mdt {
 
@@ -173,7 +175,9 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     cleaner_thread_(FLAGS_cleaner_thread_num),
     async_read_thread_(FLAGS_async_read_thread_num),
     queue_timer_stop_(false),
-    queue_timer_cv_(&queue_timer_mu_) {
+    queue_timer_cv_(&queue_timer_mu_),
+    async_tera_writer_(FLAGS_async_tera_writer_num),
+    info_collector_thread_(1) {
     // create timer
     pthread_create(&timer_tid_, NULL, &TableImpl::TimerThreadWrapper, this);
 
@@ -182,6 +186,10 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     ttl_ = table_desc.table_ttl;
     gc_stop_ = false;
     pthread_create(&gc_tid_, NULL, &TableImpl::GarbageCleanThreadWrapper, this);
+
+    // background info collector
+    ThreadPool::Task task = boost::bind(&TableImpl::BGInfoCollector, this);
+    info_collector_thread_.DelayTask(1000, task);
 }
 
 TableImpl::~TableImpl() {
@@ -213,6 +221,14 @@ TableImpl::~TableImpl() {
     gc_stop_ = true;
     //pthread_join(gc_tid_, NULL);
     return;
+}
+
+void TableImpl::BGInfoCollector() {
+    LOG(INFO) << "Thread pool[async write] " << async_tera_writer_.ProfilingLog()
+        << ", pending req(async write) " << async_tera_writer_.PendingNum();
+
+    ThreadPool::Task task = boost::bind(&TableImpl::BGInfoCollector, this);
+    info_collector_thread_.DelayTask(1000, task);
 }
 
 void TableImpl::CleanerThread(tera::ResultStream* stream) {
@@ -562,19 +578,43 @@ int TableImpl::InternalCompressBatchWrite(WriteContext* context, std::vector<Wri
     VLOG(20) << ">>>>> lock put, ctx " << (uint64_t)(context);
 
     // construct sorted block, and write into fs
+    int64_t cost_ts;
+    cost_ts = timer::get_micros();
     sort_block->Finish();
     FileLocation location;
     DataWriter* writer = GetDataWriter(write_handle);
     writer->AddCompressRecord(sort_block->GetCompressionBlock(), &location);
     delete sort_block;
+    VLOG(30) << "write fs cost time " << timer::get_micros() - cost_ts;
 
     // batch write index table
+    cost_ts = timer::get_micros();
     std::map<std::string, std::vector<WriteContext*> >::iterator it = primary_key_map.begin();
     for (; it != primary_key_map.end(); ++it) {
         (index_block[it->first])->Finish();
-        WriteBatchIndexTable(it->first, timestamp_map[it->first], it->second, index_block[it->first], location);
-        delete (index_block[it->first]);
+        std::vector<WriteContext*>& vec_ctx = it->second;
+
+        // construct batch write b_context
+        BatchIndexContext* b_context = new BatchIndexContext();
+        uint64_t ref = 2 + ((index_block[it->first])->NumEntries());
+        b_context->SetReference(ref);
+        b_context->SetTable(this);
+        std::vector<WriteContext*>::iterator ctx_it = vec_ctx.begin();
+        for (; ctx_it != vec_ctx.end(); ++ctx_it) {
+            WriteContext* wc = *ctx_it;
+            b_context->PushBack(wc->req_, wc->resp_, wc->callback_, wc->callback_param_);
+        }
+
+        if (FLAGS_enable_async_index_write) {
+            ThreadPool::Task task = boost::bind(&TableImpl::AsyncWriteBatchIndexTable, this,
+                    it->first, timestamp_map[it->first], b_context, index_block[it->first], location);
+            async_tera_writer_.AddTask(task);
+        } else {
+            WriteBatchIndexTable(it->first, timestamp_map[it->first], b_context, index_block[it->first], location);
+            delete (index_block[it->first]);
+        }
     }
+    VLOG(30) << "write tera cost time " << timer::get_micros() - cost_ts;
 
     // lock, resched other WriteContext
     VLOG(30) << "<<<<< unlock put";
@@ -797,6 +837,14 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
     return 0;
 }
 
+void TableImpl::AsyncWriteBatchIndexTable(std::string primary_key, uint64_t timestamp,
+                                          BatchIndexContext* context,
+                                          BlockBuilder* index_builder,
+                                          FileLocation location) {
+    WriteBatchIndexTable(primary_key, timestamp, context, index_builder, location);
+    delete index_builder;
+}
+
 void BatchIndexContext::PushBack(const StoreRequest* req, StoreResponse* resp,
                             StoreCallback callback, void* callback_param) {
     req_vec.push_back(req);
@@ -827,21 +875,11 @@ void BatchIndexCallback(tera::RowMutation* row) {
     delete row;
 }
 int TableImpl::WriteBatchIndexTable(const std::string& primary_key, uint64_t timestamp,
-                                    std::vector<WriteContext*>& vec_ctx,
+                                    BatchIndexContext* context,
                                     BlockBuilder* index_builder,
                                     FileLocation& location) {
     std::string null_value;
     null_value.clear();
-    // construct batch write context
-    BatchIndexContext* context = new BatchIndexContext();
-    uint64_t ref = 2 + index_builder->NumEntries();
-    context->SetReference(ref);
-    context->SetTable(this);
-    std::vector<WriteContext*>::iterator ctx_it = vec_ctx.begin();
-    for (; ctx_it != vec_ctx.end(); ++ctx_it) {
-        WriteContext* wc = *ctx_it;
-        context->PushBack(wc->req_, wc->resp_, wc->callback_, wc->callback_param_);
-    }
     ::leveldb::Slice index_block = index_builder->GetCompressionBlock();
 
     // update primary table
@@ -861,6 +899,7 @@ int TableImpl::WriteBatchIndexTable(const std::string& primary_key, uint64_t tim
     EncodeBigEndian(buf, timestamp);
     std::string ts_key(buf, sizeof(buf));
     std::string time_primay_key = ts_key + type_primary_key;
+
     ::leveldb::BlockContents block_contents;
     ::leveldb::ReadOptions read_options;
     read_options.verify_checksums = true;
@@ -902,6 +941,7 @@ int TableImpl::WriteBatchIndexTable(const std::string& primary_key, uint64_t tim
     ts_table->ApplyMutation(ts_row);
 
     return 0;
+
 }
 
 Status TableImpl::StringToTypeString(const std::string& index_table,

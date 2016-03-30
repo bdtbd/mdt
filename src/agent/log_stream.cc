@@ -20,6 +20,8 @@ DECLARE_string(table_name);
 DECLARE_string(primary_key);
 DECLARE_string(user_time);
 DECLARE_int32(time_type);
+// support line filter
+DECLARE_string(string_line_filter_list);
 // split string by substring
 DECLARE_string(string_delims);
 // split string by char
@@ -57,6 +59,11 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
     pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
     db_name_ = FLAGS_db_name;
     table_name_ = FLAGS_table_name;
+
+    // support line filter
+    if (FLAGS_string_line_filter_list.size() > 0) {
+        boost::split(string_filter_, FLAGS_string_line_filter_list, boost::is_any_of(","));
+    }
 
     // split alias index
     //std::map<std::string, std::string> alias_index_map;
@@ -127,6 +134,7 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
     user_time_ = FLAGS_user_time;
     time_type_ = FLAGS_time_type;
 
+    last_update_time_ = mdt::timer::get_micros();
     pthread_create(&tid_, NULL, LogStreamWrapper, this);
 }
 
@@ -309,7 +317,19 @@ void LogStream::Run() {
         }
 
         int64_t end_ts = mdt::timer::get_micros();
-        VLOG(30) << "logstream run duration, " << end_ts - start_ts;
+        VLOG(30) << "logstream run duration, " << end_ts - start_ts << ", end ts " << end_ts << ", start ts " << last_update_time_;
+        if (end_ts - last_update_time_ > 1000000) {
+            last_update_time_ = end_ts;
+            std::map<uint64_t, FileStream*>::iterator file_it = file_streams_.begin();
+            while (file_it != file_streams_.end()) {
+                FileStream* file_stream = file_it->second;
+                FileStreamProfile profile;
+                file_stream->Profile(&profile);
+                VLOG(30) << "ino " << profile.ino << ", filename " << profile.filename
+                    << ", nr_pending " << profile.nr_pending << ", current_offset " << profile.current_offset;
+                ++file_it;
+            }
+        }
     }
 }
 
@@ -499,6 +519,21 @@ int LogStream::ParseMdtRequest(const std::string table_name,
     for (uint32_t i = 0; i < line_vec.size(); i++) {
         int res = 0;
         std::string& line  = line_vec[i];
+
+        // support line filter
+        if (string_filter_.size() > 0) {
+            bool found = false;
+            for (uint32_t filter_idx = 0; filter_idx < string_filter_.size(); filter_idx++) {
+                if (line.find(string_filter_[filter_idx]) != std::string::npos) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                continue;
+            }
+        }
+
         mdt::SearchEngine::RpcStoreRequest* req = NULL;
 
         LogRecord log;
@@ -507,12 +542,12 @@ int LogStream::ParseMdtRequest(const std::string table_name,
             LOG(WARNING) << "parse mdt request split by string fail: " << line;
         } else {
             LogTailerSpan kv;
-            for (int i = 0; i < (int)log.columns.size(); i++) {
+            for (int col_idx = 0; col_idx < (int)log.columns.size(); col_idx++) {
                 if (use_fixed_index_list_) {
-                    kv.ParseFixedKvPairs(log.columns[i], line_delims_, fixed_index_list_);
+                    kv.ParseFixedKvPairs(log.columns[col_idx], line_delims_, fixed_index_list_);
                 } else {
-                    //kv.ParseKVpairs(log.columns[i], line_delims_, kv_delims_, index_list_);
-                    kv.ParseKVpairs(log.columns[i], line_delims_, kv_delims_, alias_index_map_);
+                    //kv.ParseKVpairs(log.columns[col_idx], line_delims_, kv_delims_, index_list_);
+                    kv.ParseKVpairs(log.columns[col_idx], line_delims_, kv_delims_, alias_index_map_);
                 }
             }
 
@@ -663,7 +698,9 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
 
 int LogStream::AddWriteEvent(std::string filename) {
     struct stat stat_buf;
-    lstat(filename.c_str(), &stat_buf);
+    if (lstat(filename.c_str(), &stat_buf) == -1) {
+        return 0;
+    }
     uint64_t ino = (uint64_t)stat_buf.st_ino;
     VLOG(35) << "ino " << ino << ", file " << filename << " add to write event queue";
 
@@ -676,7 +713,9 @@ int LogStream::AddWriteEvent(std::string filename) {
 
 int LogStream::DeleteWatchEvent(std::string filename, bool need_wakeup) {
     struct stat stat_buf;
-    lstat(filename.c_str(), &stat_buf);
+    if (lstat(filename.c_str(), &stat_buf) == -1) {
+        return 0;
+    }
     uint64_t ino = (uint64_t)stat_buf.st_ino;
     VLOG(30) << "file " << filename << " add to delete event queue, wakup " << need_wakeup;
 
@@ -775,10 +814,13 @@ void FileStream::ParseKeyValue(const leveldb::Slice& key,
 int FileStream::RecoveryCheckPoint() {
     int64_t begin_ts = timer::get_micros();
     int64_t end_ts;
-    leveldb::Iterator* db_it = log_options_.db->NewIterator(leveldb::ReadOptions());
 
     struct stat stat_buf;
-    lstat(filename_.c_str(), &stat_buf);
+    if (lstat(filename_.c_str(), &stat_buf) == -1) {
+        return -1;
+    }
+
+    leveldb::Iterator* db_it = log_options_.db->NewIterator(leveldb::ReadOptions());
     uint64_t file_size = stat_buf.st_size;
     bool file_rename = false;
 
@@ -1072,6 +1114,15 @@ int FileStream::OpenFile() {
         }
     }
     return 0;
+}
+
+void FileStream::Profile(FileStreamProfile* profile) {
+    profile->ino = ino_;
+    profile->filename = filename_;
+    pthread_spin_lock(&lock_);
+    profile->nr_pending = mem_checkpoint_list_.size();
+    pthread_spin_unlock(&lock_);
+    profile->current_offset = current_offset_;
 }
 
 }

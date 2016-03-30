@@ -149,6 +149,7 @@ struct MultiIndexParam {
     int32_t ref;
 };
 
+class BatchIndexContext;
 class TableImpl : public Table {
 public:
     TableImpl(const TableDescription& table_desc,
@@ -172,6 +173,7 @@ public:
                          Table** table_ptr);
 
 private:
+    void BGInfoCollector();
     void FreeTeraTable();
     Status Init();
     void CleanerThread(tera::ResultStream* stream);
@@ -180,9 +182,19 @@ private:
     void AsyncRead(void* async_read_param);
 
     // write op
+    void AsyncWriteBatchIndexTable(std::string primary_key, uint64_t timestamp,
+                                   BatchIndexContext* context,
+                                   BlockBuilder* index_builder,
+                                   FileLocation location);
     int InternalCompressBatchWrite(WriteContext* context, std::vector<WriteContext*>& ctx_queue);
+    /*
     int WriteBatchIndexTable(const std::string& primary_key, uint64_t timestamp,
                              std::vector<WriteContext*>& vec_ctx,
+                             BlockBuilder* index_builder,
+                             FileLocation& location);
+    */
+    int WriteBatchIndexTable(const std::string& primary_key, uint64_t timestamp,
+                             BatchIndexContext* context,
                              BlockBuilder* index_builder,
                              FileLocation& location);
 
@@ -325,10 +337,17 @@ private:
     mutable Mutex queue_timer_mu_; // mutex must declare before cv
     CondVar queue_timer_cv_;
 
+
     // garbage clean, delete nfs file with ttl
     pthread_t gc_tid_;
     volatile bool gc_stop_;
     uint64_t ttl_;
+
+    // async tera write
+    ThreadPool async_tera_writer_;
+
+    // statictis info dump
+    ThreadPool info_collector_thread_;
 };
 
 class BatchIndexContext {

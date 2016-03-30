@@ -19,9 +19,11 @@ DEFINE_int64(max_write_handle_seq, 10, "max num of req can schedule to current w
 DEFINE_int64(data_size_per_sync, 0, "num of data per Sync()");
 DEFINE_bool(use_tera_async_write, true, "if true, use tera async write");
 DEFINE_int64(write_batch_queue_size, 0, "the num of write request can batch in single thread");
-DEFINE_int64(request_queue_flush_internal, 10, "the number of ms wait before flush request");
+DEFINE_int64(request_queue_flush_internal, 500000, "the number of us wait before flush request");
 DEFINE_int64(max_timestamp_table_num, 10,  "num of timestamp index table");
 DEFINE_bool(enable_data_compress, true, "use snappy to compress data in filesystme");
+DEFINE_bool(enable_async_index_write, true, "write data and async write index");
+DEFINE_int64(async_tera_writer_num, 20, "num of async index writer");
 
 // read ops param
 DEFINE_int64(read_file_thread_num, 50,  "num of read file threads");

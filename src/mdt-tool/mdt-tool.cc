@@ -47,6 +47,13 @@ DECLARE_string(flagfile);
 DECLARE_string(scheduler_addr);
 DECLARE_string(agent_service_port);
 
+DEFINE_string(cmd_db_name, "", "db name");
+DEFINE_string(cmd_table_name, "", "table name");
+DEFINE_string(cmd_start_ts, "2016-04-06-16:10:00", "start timestamp");
+DEFINE_string(cmd_end_ts, "2016-04-06-16:15:00", "end timestamp");
+DEFINE_string(cmd_limit, "0", "number of result");
+DEFINE_string(cmd_index_list, "", "key1,==,val1,key2,>=,val2");
+
 char* StripWhite(char* line) {
     char *s, *t;
     for (s = line; whitespace(*s); s++);
@@ -1454,6 +1461,26 @@ int main(int ac, char* av[]) {
         } else if (FLAGS_cmd == "ShowCollector") {
             non_interactive_cmd_vec.push_back(FLAGS_cmd);
             ShowCollector(non_interactive_cmd_vec);
+        } else if (FLAGS_cmd == "GetByTime") {
+            // cmd: GetByTime <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit>
+            // key1,>=,value1,key2,==,value2
+            non_interactive_cmd_vec.push_back(FLAGS_cmd);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_db_name);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_table_name);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_start_ts);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_end_ts);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_limit);
+
+            std::vector<std::string> index_vec;
+            boost::split(index_vec, FLAGS_cmd_index_list, boost::is_any_of(","));
+            if ((index_vec.size() % 3) == 0) {
+                for (uint32_t idx = 0; idx < index_vec.size(); idx += 3) {
+                    non_interactive_cmd_vec.push_back(index_vec[idx + 0]);
+                    non_interactive_cmd_vec.push_back(index_vec[idx + 1]);
+                    non_interactive_cmd_vec.push_back(index_vec[idx + 2]);
+                }
+            }
+            GetByTimeOp(non_interactive_cmd_vec);
         } else {
             std::cout << "interactive mode, cmd " << FLAGS_cmd << " not know\n";
             exit(-1);
