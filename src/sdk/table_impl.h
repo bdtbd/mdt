@@ -200,7 +200,7 @@ private:
                             int32_t limit, bool need_index, bool need_data,
                             std::vector<ResultStream>* result_list);
 
-    void GetByFilterIndex(tera::Table* index_table,
+    void GetByFilterIndex(tera::Table* index_table, bool is_ts_table,
                           tera::ScanDescriptor* scan_desc,
                           MultiIndexParam* multi_param,
                           const std::vector<IndexConditionExtend>* index_cond_list,
@@ -291,10 +291,10 @@ private:
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
-    ThreadPool thread_pool_;
+    ThreadPool read_row_data_threads_;
     // async cleaner
     ThreadPool cleaner_thread_;
-    ThreadPool async_read_thread_;
+    ThreadPool read_cell_data_threads_;
 
     // file handle cache relative
     mutable Mutex file_mutex_;
