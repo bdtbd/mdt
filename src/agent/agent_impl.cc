@@ -28,6 +28,8 @@ extern mdt::agent::EventMask event_masks[21];
 namespace mdt {
 namespace agent {
 
+int64_t last_time_info_update;
+
 void* SchedulerThread(void* arg) {
     AgentImpl* agent = (AgentImpl*)arg;
     agent->GetServerAddr();
@@ -44,11 +46,15 @@ AgentImpl::AgentImpl() {
     info_.bandwidth_use= 0;
     info_.bandwidth_quota= 0;
     info_.max_packet_size= 0;
-    info_.min_packet_size= 0;
+    info_.min_packet_size= 1000000000;
     info_.average_packet_size= 0;
     info_.error_nr = 0;
     info_.collector_addr = "nil";
     //server_addr_ = "nil";
+
+    info_.nr_file_streams = 0;
+    info_.history_fd_overflow_count = 0;
+    info_.curr_pending_req = 0;
 
     stop_scheduler_thread_ = false;
     pthread_create(&scheduler_tid_, NULL, SchedulerThread, this);
@@ -72,9 +78,12 @@ void AgentImpl::GetServerAddrCallback(const mdt::LogSchedulerService::GetNodeLis
         info_.bandwidth_use= 0;
         info_.bandwidth_quota= 0;
         info_.max_packet_size= 0;
-        info_.min_packet_size= 0;
+        info_.min_packet_size= 1000000000;
         info_.average_packet_size= 0;
         info_.error_nr = 0;
+
+        info_.history_fd_overflow_count = 0;
+        info_.curr_pending_req = 0;
 
         pthread_spin_unlock(&server_lock_);
     }
@@ -91,6 +100,7 @@ void AgentImpl::GetServerAddr() {
     }
     std::string hostname_str = hostname;
 
+    last_time_info_update = timer::get_micros();
     while (1) {
         if (stop_scheduler_thread_) {
             return;
@@ -102,20 +112,30 @@ void AgentImpl::GetServerAddr() {
         rpc_client_->GetMethodList(scheduler_addr, &service);
         mdt::LogSchedulerService::GetNodeListRequest* req = new mdt::LogSchedulerService::GetNodeListRequest();
         mdt::LogSchedulerService::GetNodeListResponse* resp = new mdt::LogSchedulerService::GetNodeListResponse();
+
         // set up agent info request
+        int64_t nr_sec = (timer::get_micros() - last_time_info_update) / 1000000;
+        nr_sec = nr_sec > 0 ? nr_sec : 1;
         pthread_spin_lock(&server_lock_);
         req->set_agent_addr(agent_addr);
         req->set_current_server_addr(info_.collector_addr);
 
         mdt::LogSchedulerService::AgentInfo* info = req->mutable_info();
         info->set_qps_quota(info_.qps_quota);
-        info->set_qps_use(info_.qps_use);
-        info->set_bandwidth_use(info_.bandwidth_use);
-        info->set_bandwidth_quota(info_.bandwidth_quota);
+        info->set_qps_use(info_.qps_use / nr_sec);
+
         info->set_max_packet_size(info_.max_packet_size);
         info->set_min_packet_size(info_.min_packet_size);
-        info->set_average_packet_size(info_.average_packet_size);
+        info->set_average_packet_size(info_.average_packet_size / (info_.qps_use + 1));
+
+        info->set_bandwidth_use(info_.average_packet_size / nr_sec);
+        info->set_bandwidth_quota(info_.bandwidth_quota);
+
         info->set_error_nr(info_.error_nr);
+
+        info->set_nr_file_streams(info_.nr_file_streams);
+        info->set_history_fd_overflow_count(info_.history_fd_overflow_count);
+        info->set_curr_pending_req(info_.curr_pending_req);
 
         pthread_spin_unlock(&server_lock_);
 
@@ -127,7 +147,7 @@ void AgentImpl::GetServerAddr() {
         rpc_client_->AsyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::GetNodeList,
                                req, resp, callback);
         server_addr_event_.Wait();
-        sleep(10);
+        sleep(3);
     }
 }
 
