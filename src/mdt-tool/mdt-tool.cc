@@ -514,7 +514,6 @@ int GetByTimeOp(std::vector<std::string>& cmd_vec) {
     int32_t limit = boost::lexical_cast<int32_t>(cmd_vec[5]);
 
     // create db
-    std::cout << "open db ..." << std::endl;
     mdt::Database* db;
     db = mdt::OpenDatabase(db_name);
     if (db == NULL) {
@@ -522,7 +521,6 @@ int GetByTimeOp(std::vector<std::string>& cmd_vec) {
         return -1;
     }
 
-    std::cout << "open table ..." << std::endl;
     mdt::Table* table;
     table = OpenTable(db, table_name);
     if (table == NULL) {
@@ -561,8 +559,6 @@ int GetByTimeOp(std::vector<std::string>& cmd_vec) {
 
     mdt::SearchResponse* search_resp = new mdt::SearchResponse;
 
-    std::cout << "=============================================\n";
-    std::cout << "              Get by Index Key               \n";
     std::cout << "=============================================\n";
     // calulate time
     struct timeval now_ts, finish_ts;
@@ -1283,19 +1279,16 @@ int ShowAgent(std::vector<std::string>& cmd_vec) {
 
     char headers[2048] = {'\0'};
     snprintf(headers, sizeof(headers),
-            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
+            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
             35, "agent_addr",
             35, "collector_addr",
-            10, "agent_state",
-            10, "ctime",
-            10, "qps_quota",
             10, "qps_use",
-            10, "bandwidth_quota",
             10, "bandwidth_use",
-            10, "max_packet_size",
-            10, "min_packet_size",
             10, "average_packet_size",
-            10, "error_nr");
+            10, "error_nr",
+            10, "fd_using",
+            10, "fd_overflow",
+            10, "req_pending");
     std::string header_line;
     header_line.resize(strlen(headers) + 8);
     std::fill(header_line.begin(), header_line.end(), '-');
@@ -1307,19 +1300,16 @@ int ShowAgent(std::vector<std::string>& cmd_vec) {
         const mdt::LogSchedulerService::AgentInfo& agent_info = info.agent_info();
         char line_str[1024] = {'\0'};
         snprintf(line_str, sizeof(line_str),
-                "%-*s\t%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*d\t",
-                35, info.agent_addr().c_str(),
-                35, info.collector_addr().c_str(),
-                10, info.agent_state(),
-                10, info.ctime(),
-                10, agent_info.qps_quota(),
-                10, agent_info.qps_use(),
-                10, agent_info.bandwidth_quota(),
-                10, agent_info.bandwidth_use(),
-                10, agent_info.max_packet_size(),
-                10, agent_info.min_packet_size(),
-                10, agent_info.average_packet_size(),
-                10, agent_info.error_nr());
+                "%-*s\t%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*d\t%-*ld\t%-*ld\t%-*ld\t",
+                50, info.agent_addr().c_str(),
+                50, info.collector_addr().c_str(),
+                5, agent_info.qps_use(),
+                5, agent_info.bandwidth_use(),
+                5, agent_info.average_packet_size(),
+                5, agent_info.error_nr(),
+                5, agent_info.nr_file_streams(),
+                5, agent_info.history_fd_overflow_count(),
+                5, agent_info.curr_pending_req());
         std::cout << line_str << std::endl;
     }
 
@@ -1343,17 +1333,13 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
 
     char headers[2048] = {'\0'};
     snprintf(headers, sizeof(headers),
-            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
+            "%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t",
             35, "collector_addr",
             10, "nr_agent",
-            10, "ctime",
-            10, "collector_state",
             10, "qps",
-            10, "max_packet_size",
-            10, "min_packet_size",
             10, "average_packet_size",
             10, "error_nr",
-            10, "store_pedning",
+            10, "store_pending",
             10, "store_sched_ts",
             10, "store_task_ts",
             10, "store_task_num");
@@ -1368,20 +1354,16 @@ int ShowCollector(std::vector<std::string>& cmd_vec) {
         const mdt::LogSchedulerService::CollectorInfo& collector_info = info.collector_info();
         char line_str[1024] = {'\0'};
         snprintf(line_str, sizeof(line_str),
-                "%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t",
-                35, info.collector_addr().c_str(),
-                10, info.nr_agents(),
-                10, info.ctime(),
-                10, info.collector_state(),
-                10, collector_info.qps(),
-                10, collector_info.max_packet_size(),
-                10, collector_info.min_packet_size(),
-                10, collector_info.average_packet_size(),
-                10, info.error_nr(),
-                10, collector_info.store_pending(),
-                10, collector_info.store_sched_ts(),
-                10, collector_info.store_task_ts(),
-                10, collector_info.store_task_num());
+                "%-*s\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t%-*ld\t",
+                50, info.collector_addr().c_str(),
+                5, info.nr_agents(),
+                5, collector_info.qps(),
+                5, collector_info.average_packet_size(),
+                5, info.error_nr(),
+                5, collector_info.store_pending(),
+                5, collector_info.store_sched_ts(),
+                5, collector_info.store_task_ts(),
+                5, collector_info.store_task_num());
         std::cout << line_str << std::endl;
     }
 

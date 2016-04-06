@@ -35,6 +35,7 @@ DECLARE_bool(use_fixed_index_list);
 DECLARE_string(fixed_index_list);
 
 DECLARE_int64(delay_retry_time);
+DECLARE_int64(agent_max_fd_num);
 
 namespace mdt {
 namespace agent {
@@ -269,6 +270,17 @@ void LogStream::Run() {
                 }
                 file_stream->OpenFile();
             } else {
+                // first log file add, check max fd wether is overflow
+                pthread_spin_lock(server_addr_lock_);
+                if (info_->nr_file_streams > FLAGS_agent_max_fd_num) {
+                    // fd overflow, ignore write event
+                    info_->history_fd_overflow_count++;
+                    pthread_spin_unlock(server_addr_lock_);
+                    continue;
+                }
+                pthread_spin_unlock(server_addr_lock_);
+
+                // new file stream
                 int success;
                 file_stream = new FileStream(module_name_, log_options_, filename, ino, &success);
                 if (success < 0) {
@@ -289,7 +301,7 @@ void LogStream::Run() {
                 AsyncPush(req_vec, key);
 
                 // read next offset
-                AddWriteEvent(filename);
+                AddWriteEvent(filename, ino);
             } else {
                 VLOG(30) << "has write event, but read nothing";
             }
@@ -311,13 +323,14 @@ void LogStream::Run() {
                     delete file_stream;
                 } else {
                     // add into delete queue without wakeup thread
-                    DeleteWatchEvent(filename, false);
+                    DeleteWatchEvent(filename, ino, false);
                 }
             }
         }
 
         int64_t end_ts = mdt::timer::get_micros();
         VLOG(30) << "logstream run duration, " << end_ts - start_ts << ", end ts " << end_ts << ", start ts " << last_update_time_;
+        int64_t curr_pending_req = 0;
         if (end_ts - last_update_time_ > 1000000) {
             last_update_time_ = end_ts;
             std::map<uint64_t, FileStream*>::iterator file_it = file_streams_.begin();
@@ -325,11 +338,18 @@ void LogStream::Run() {
                 FileStream* file_stream = file_it->second;
                 FileStreamProfile profile;
                 file_stream->Profile(&profile);
+                curr_pending_req += profile.nr_pending;
                 VLOG(30) << "ino " << profile.ino << ", filename " << profile.filename
                     << ", nr_pending " << profile.nr_pending << ", current_offset " << profile.current_offset;
                 ++file_it;
             }
         }
+        pthread_spin_lock(server_addr_lock_);
+        info_->nr_file_streams = (int64_t)file_streams_.size();
+        if (curr_pending_req > 0) {
+            info_->curr_pending_req = curr_pending_req;
+        }
+        pthread_spin_unlock(server_addr_lock_);
     }
 }
 
@@ -622,12 +642,13 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
 }
 
 int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_vec, DBKey* key) {
-    mdt::SearchEngine::SearchEngineService_Stub* service;
     pthread_spin_lock(server_addr_lock_);
     std::string server_addr = info_->collector_addr;
+    info_->qps_use += req_vec.size();
     pthread_spin_unlock(server_addr_lock_);
     VLOG(30) << "async send data to " << server_addr << ", nr req " << req_vec.size() << ", offset " << key->offset;
 
+    mdt::SearchEngine::SearchEngineService_Stub* service;
     if (req_vec.size() == 0) {
         // assume async send success.
         key->ref.Set(1);
@@ -647,6 +668,16 @@ int LogStream::AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_v
         mdt::SearchEngine::RpcStoreResponse* resp = new mdt::SearchEngine::RpcStoreResponse;
         VLOG(40) << "\n =====> async send data to " << server_addr << ", req " << (uint64_t)req
             << ", resp " << (uint64_t)resp << ", key " << (uint64_t)key << "\n " << req->DebugString();
+
+        pthread_spin_lock(server_addr_lock_);
+        info_->average_packet_size += (int64_t)req->data().size();
+        if (info_->max_packet_size < (int64_t)(req->data().size())) {
+            info_->max_packet_size = req->data().size();
+        }
+        if (info_->min_packet_size > (int64_t)(req->data().size())) {
+            info_->min_packet_size = req->data().size();
+        }
+        pthread_spin_unlock(server_addr_lock_);
 
         boost::function<void (const mdt::SearchEngine::RpcStoreRequest*,
                               mdt::SearchEngine::RpcStoreResponse*,
@@ -711,12 +742,34 @@ int LogStream::AddWriteEvent(std::string filename) {
     return 0;
 }
 
+int LogStream::AddWriteEvent(std::string filename, uint64_t ino) {
+    VLOG(35) << "ino " << ino << ", file " << filename << " add to write event queue";
+
+    pthread_spin_lock(&lock_);
+    write_event_.insert(std::pair<uint64_t, std::string>(ino, filename));
+    pthread_spin_unlock(&lock_);
+    thread_event_.Set();
+    return 0;
+}
+
 int LogStream::DeleteWatchEvent(std::string filename, bool need_wakeup) {
     struct stat stat_buf;
     if (lstat(filename.c_str(), &stat_buf) == -1) {
         return 0;
     }
     uint64_t ino = (uint64_t)stat_buf.st_ino;
+    VLOG(30) << "file " << filename << " add to delete event queue, wakup " << need_wakeup;
+
+    pthread_spin_lock(&lock_);
+    delete_event_.insert(std::pair<uint64_t, std::string>(ino, filename));
+    pthread_spin_unlock(&lock_);
+    if (need_wakeup) {
+        thread_event_.Set();
+    }
+    return 0;
+}
+
+int LogStream::DeleteWatchEvent(std::string filename, uint64_t ino, bool need_wakeup) {
     VLOG(30) << "file " << filename << " add to delete event queue, wakup " << need_wakeup;
 
     pthread_spin_lock(&lock_);

@@ -97,7 +97,9 @@ public:
 
     int AddTableName(const std::string& log_name);
     int AddWriteEvent(std::string filename);
+    int AddWriteEvent(std::string filename, uint64_t ino);
     int DeleteWatchEvent(std::string filename, bool need_wakeup);
+    int DeleteWatchEvent(std::string filename, uint64_t ino, bool need_wakeup);
     void Run();
 
 private:

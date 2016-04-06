@@ -40,6 +40,11 @@ struct AgentInfo {
     std::string collector_addr;
     AgentState state;
     Counter counter;
+
+    // set by log agent
+    int64_t nr_file_streams;
+    int64_t history_fd_overflow_count;
+    int64_t curr_pending_req;
 };
 
 enum CollectorState {

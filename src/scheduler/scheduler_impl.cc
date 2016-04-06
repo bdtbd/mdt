@@ -222,14 +222,18 @@ void SchedulerImpl::DoUpdateAgentInfo(::google::protobuf::RpcController* control
     if (it == agent_map_.end()) {
         AgentInfo info;
         info.qps_quota = FLAGS_agent_qps_quota;
-        info.qps_use = 0;
+        info.qps_use = request->info().qps_use();
         info.bandwidth_quota = FLAGS_agent_bandwidth_quota;
-        info.bandwidth_use = 0;
+        info.bandwidth_use = request->info().bandwidth_use();
 
-        info.max_packet_size = 0;
-        info.min_packet_size = 0;
-        info.average_packet_size = 0;
-        info.error_nr = 0;
+        info.max_packet_size = request->info().max_packet_size();
+        info.min_packet_size = request->info().min_packet_size();
+        info.average_packet_size = request->info().average_packet_size();
+        info.error_nr = request->info().error_nr();
+
+        info.nr_file_streams = request->info().nr_file_streams();
+        info.history_fd_overflow_count = request->info().history_fd_overflow_count();
+        info.curr_pending_req = request->info().curr_pending_req();
 
         info.ctime = mdt::timer::get_micros();
         info.state = AGENT_ACTIVE;
@@ -255,6 +259,10 @@ void SchedulerImpl::DoUpdateAgentInfo(::google::protobuf::RpcController* control
         info.min_packet_size = request->info().min_packet_size();
         info.average_packet_size = request->info().average_packet_size();
         info.error_nr = request->info().error_nr();
+
+        info.nr_file_streams = request->info().nr_file_streams();
+        info.history_fd_overflow_count = request->info().history_fd_overflow_count();
+        info.curr_pending_req = request->info().curr_pending_req();
 
         info.ctime = mdt::timer::get_micros();
         info.state = AGENT_ACTIVE;
@@ -598,6 +606,10 @@ void SchedulerImpl::DoRpcShowAgentInfo(::google::protobuf::RpcController* contro
         information->set_min_packet_size(info.min_packet_size);
         information->set_average_packet_size(info.average_packet_size);
         information->set_error_nr(info.error_nr);
+
+        information->set_nr_file_streams(info.nr_file_streams);
+        information->set_history_fd_overflow_count(info.history_fd_overflow_count);
+        information->set_curr_pending_req(info.curr_pending_req);
     }
     pthread_spin_unlock(&agent_lock_);
     done->Run();

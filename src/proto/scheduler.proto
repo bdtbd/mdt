@@ -45,6 +45,10 @@ message AgentInfo {
     optional int64 average_packet_size = 7;
 
     optional int32 error_nr = 8;
+    
+    optional int64 nr_file_streams = 9;
+    optional int64 history_fd_overflow_count = 10;
+    optional int64 curr_pending_req = 11;
 }
 
 message GetNodeListRequest {
