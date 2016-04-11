@@ -6,6 +6,10 @@
 
 namespace mdt {
 
+struct TableProfile {
+    uint64_t tera_nr_pending;
+};
+
 class Table {
 public:
     Table() {}
@@ -17,6 +21,7 @@ public:
                        SearchCallback callback = NULL, void* callback_param = NULL) = 0;
 
     virtual const std::string& TableName() = 0;
+    virtual void Profile(TableProfile* profile) = 0;
 
 private:
     Table(const Table&);

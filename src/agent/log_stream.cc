@@ -704,7 +704,7 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
                                   mdt::SearchEngine::SearchEngineService_Stub* service,
                                   DBKey* key) {
     // handle data push error
-    if (failed) {
+    if (failed || (resp->status() != mdt::SearchEngine::RpcOK)) {
         LOG(WARNING) << "async write error " << error << ", key " << (uint64_t)key << ", file " << key->filename << " add to failed event queue"
             << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get() << ", offset " << key->offset;
         pthread_spin_lock(server_addr_lock_);

@@ -223,6 +223,11 @@ TableImpl::~TableImpl() {
     return;
 }
 
+void TableImpl::Profile(TableProfile* profile) {
+    profile->tera_nr_pending = async_tera_writer_.PendingNum();
+    return;
+}
+
 void TableImpl::BGInfoCollector() {
     LOG(INFO) << "Thread pool[async write] " << async_tera_writer_.ProfilingLog()
         << ", pending req(async write) " << async_tera_writer_.PendingNum();
@@ -2464,12 +2469,14 @@ DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
         write_handle->writer_ = NULL;
     }
     if (write_handle->writer_ == NULL) {
+        Status s;
         std::string fname = fs_.root_path_ + "/" + TimeToString(&filetime) + ".data";
         WritableFile* file;
-        fs_.env_->NewWritableFile(fname, &file);
+        s = fs_.env_->NewWritableFile(fname, &file);
         write_handle->writer_ = new DataWriter(fname, file);
         write_handle->writer_->SetFileTime(filetime);
-	LOG(INFO) << "nowts " << timer::get_micros() << ", filetime " << write_handle->writer_->GetFileTime();
+	LOG(INFO) << "nowts " << timer::get_micros() << ", filetime " << write_handle->writer_->GetFileTime()
+            << s.ToString() << "file null " << (file == NULL) << ", file " << fname;
     }
     writer = write_handle->writer_;
     return writer;

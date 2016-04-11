@@ -15,6 +15,8 @@ DECLARE_string(mdt_flagfile);
 DECLARE_string(flagfile);
 DECLARE_string(scheduler_addr);
 DECLARE_string(se_service_port);
+DECLARE_int64(collector_store_max_pending);
+DECLARE_int64(collector_tera_max_pending);
 
 namespace mdt {
 
@@ -28,6 +30,8 @@ int64_t last_time_collect_info;
 ::mdt::Counter store_thread_pool_sched_ts;
 ::mdt::Counter store_thread_pool_task_ts;
 ::mdt::Counter store_thread_pool_task_num;
+
+::mdt::Counter tera_thread_pool_pending;
 
 void* ReportThread(void* arg) {
     SearchEngineImpl* se = (SearchEngineImpl*)arg;
@@ -285,6 +289,7 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
                              const ::mdt::SearchEngine::RpcStoreRequest* req,
                              ::mdt::SearchEngine::RpcStoreResponse* resp,
                              ::google::protobuf::Closure* done) {
+    resp->set_status(mdt::SearchEngine::RpcOK);
     Status s = OpenDatabase(req->db_name());
     if (!s.ok()) {
         VLOG(30) << "open db error, db " << req->db_name() << ", table " << req->table_name();
@@ -309,6 +314,15 @@ void SearchEngineImpl::Store(::google::protobuf::RpcController* ctrl,
 
     VLOG(30) << "store, pkey " << req->primary_key();
     ::mdt::Table* table = GetTable(req->db_name(), req->table_name());
+    ::mdt::TableProfile profile;
+    table->Profile(&profile);
+    tera_thread_pool_pending.Set(profile.tera_nr_pending);
+    if (profile.tera_nr_pending > (uint64_t)FLAGS_collector_tera_max_pending) {
+        resp->set_status(mdt::SearchEngine::ServerBusy);
+        done->Run();
+        LOG(WARNING) << "server busy, nr_pending profile.tera_nr_pending " << profile.tera_nr_pending;
+        return;
+    }
 
     ::mdt::StoreRequest* request = new ::mdt::StoreRequest();
     ::mdt::StoreResponse* response = new ::mdt::StoreResponse();
@@ -377,7 +391,14 @@ void SearchEngineServiceImpl::Store(::google::protobuf::RpcController* ctrl,
                                     const ::mdt::SearchEngine::RpcStoreRequest* req,
                                     ::mdt::SearchEngine::RpcStoreResponse* resp,
                                     ::google::protobuf::Closure* done) {
+    resp->set_status(mdt::SearchEngine::RpcOK);
     //VLOG(30) << "store, pkey " << req->primary_key();
+    if (se_thread_pool_->PendingNum() > FLAGS_collector_store_max_pending) {
+        resp->set_status(mdt::SearchEngine::ServerBusy);
+        done->Run();
+        LOG(WARNING) << "server busy, store busy, nr_pending " << se_thread_pool_->PendingNum();
+        return;
+    }
     ThreadPool::Task task = boost::bind(&SearchEngineImpl::Store, se_, ctrl, req, resp, done);
     se_thread_pool_->AddTask(task);
 }
