@@ -1454,7 +1454,7 @@ int main(int ac, char* av[]) {
             non_interactive_cmd_vec.push_back(FLAGS_cmd_limit);
 
             std::vector<std::string> index_vec;
-            boost::split(index_vec, FLAGS_cmd_index_list, boost::is_any_of(","));
+            boost::split(index_vec, FLAGS_cmd_index_list, boost::is_any_of(" "));
             if ((index_vec.size() % 3) == 0) {
                 for (uint32_t idx = 0; idx < index_vec.size(); idx += 3) {
                     non_interactive_cmd_vec.push_back(index_vec[idx + 0]);

@@ -147,13 +147,16 @@ void SchedulerImpl::BgHandleCollectorInfo() {
         int64_t start_ts = mdt::timer::get_micros();
         pthread_spin_lock(&collector_lock_);
         std::map<std::string, CollectorInfo>::iterator collector_it = collector_map_.begin();
-        for (; collector_it != collector_map_.end(); ++collector_it) {
+        for (; collector_it != collector_map_.end();) {
             CollectorInfo& info = collector_it->second;
             int64_t ts = mdt::timer::get_micros();
             if ((info.state == COLLECTOR_ACTIVE) &&
                     ((info.ctime + FLAGS_collector_timeout < ts) ||
                      (info.error_nr > FLAGS_collector_max_error))) {
                 info.state = COLLECTOR_INACTIVE;
+                collector_it = collector_map_.erase(collector_it);
+            } else {
+                ++collector_it;
             }
         }
         pthread_spin_unlock(&collector_lock_);
@@ -173,7 +176,7 @@ void SchedulerImpl::BgHandleAgentInfo() {
         int64_t start_ts = mdt::timer::get_micros();
         pthread_spin_lock(&agent_lock_);
         std::map<std::string, AgentInfo>::iterator it = agent_map_.begin();
-        for (; it != agent_map_.end(); ++it) {
+        for (; it != agent_map_.end();) {
             AgentInfo& info = it->second;
             int64_t ts = mdt::timer::get_micros();
             if ((info.state == AGENT_ACTIVE) &&
@@ -184,6 +187,9 @@ void SchedulerImpl::BgHandleAgentInfo() {
                 } else {
                     (collector_set[info.collector_addr])++;
                 }
+                it = agent_map_.erase(it);
+            } else {
+                ++it;
             }
         }
         pthread_spin_unlock(&agent_lock_);

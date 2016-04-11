@@ -26,6 +26,7 @@ public:
     static Status OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                             const FilesystemOptions& fs_opt, const TableDescription& table_desc,
                             Table** table_ptr);
+    virtual void Profile(TableProfile* profile);
 
 private:
     uint32_t Shard(uint32_t i);

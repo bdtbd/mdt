@@ -16,7 +16,7 @@ class RpcClient {
 public:
     RpcClient() {
         ::sofa::pbrpc::RpcClientOptions options;
-        options.max_pending_buffer_size = 128;
+        options.max_pending_buffer_size = 20;
         _rpc_client = new sofa::pbrpc::RpcClient(options);
         //pthread_spinlock_init(&_server_map_lock, PTHREAD_PROCESS_SHARED);
     }

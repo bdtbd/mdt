@@ -9,6 +9,10 @@ DECLARE_string(se_service_port);
 DECLARE_string(flagfile);
 DECLARE_string(log_dir);
 
+DECLARE_int64(collector_rpc_work_thread);
+DECLARE_int64(collector_rpc_nr_io_server);
+DECLARE_int64(collector_rpc_max_pending_size);
+
 void SetupLog(const std::string& name) {
     std::string program_name = "mdt";
     if (!name.empty()) {
@@ -74,8 +78,11 @@ int QueryEntry::InitSearchEngine() {
     }
 
     sofa::pbrpc::RpcServerOptions rpc_options;
+    rpc_options.work_thread_num = FLAGS_collector_rpc_work_thread;
+    rpc_options.io_service_pool_size = FLAGS_collector_rpc_nr_io_server;
     rpc_options.max_throughput_in = -1;
     rpc_options.max_throughput_out = -1;
+    rpc_options.max_pending_buffer_size = FLAGS_collector_rpc_max_pending_size;
     rpc_server_ = new sofa::pbrpc::RpcServer(rpc_options);
 
     std::string server_addr = "0.0.0.0:" + FLAGS_se_service_port;

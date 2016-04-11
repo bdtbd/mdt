@@ -6,6 +6,7 @@ enum RpcResponseStatus {
     RpcOK = 1;
     RpcTableNotFound = 2;
     RpcNotSupport = 3;
+    ServerBusy = 4;
 }
 
 // search message

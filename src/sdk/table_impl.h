@@ -167,6 +167,7 @@ public:
                        SearchCallback callback = NULL, void* callback_param = NULL);
 
     virtual const std::string& TableName() {return table_desc_.table_name;}
+    virtual void Profile(TableProfile* profile);
 
     static Status OpenTable(const std::string& db_name, const TeraOptions& tera_opt,
                          const FilesystemOptions& fs_opt, const TableDescription& table_desc,

@@ -55,6 +55,23 @@ int MultiTableImpl::BatchWrite(BatchWriteContext* ctx) {
     return table->BatchWrite(ctx);
 }
 
+void MultiTableImpl::Profile(TableProfile* profile) {
+    if (table_array_.size() == 0) {
+        return;
+    }
+    profile->tera_nr_pending = 0;
+    for (uint32_t idx = 0; idx < (uint32_t)FLAGS_multi_table_nr; idx++) {
+        TableProfile pro;
+        Table* table = table_array_[idx];
+        if (table == NULL) {
+            continue;
+        }
+        table->Profile(&pro);
+        profile->tera_nr_pending += pro.tera_nr_pending;
+    }
+    return;
+}
+
 int MultiTableImpl::Put(const StoreRequest* request, StoreResponse* response,
                         StoreCallback callback, void* callback_param) {
     if (table_array_.size() == 0) {
