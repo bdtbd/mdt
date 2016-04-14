@@ -30,7 +30,7 @@ extern mdt_table_t* mdt_open_table(mdt_db_t* db, const char* table_name);
 extern void mdt_close_table(mdt_table_t* table);
 
 typedef struct mdt_slice_t {
-    const char* data;
+    char* data;
     size_t size;
 } mdt_slice_t;
 

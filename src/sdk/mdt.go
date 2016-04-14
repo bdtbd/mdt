@@ -347,7 +347,9 @@ func searchByIndexKey(table *Table,
     // convert request
     c_request.primary_key.size = 0
     c_request.index_condition_list_len = C.size_t(len(index_condition_list))
-    c_request.index_condition_list = (*C.mdt_index_condition_t)(C.malloc(36 * c_request.index_condition_list_len))
+    c_index_condition_size := C.size_t(unsafe.Sizeof(C.mdt_index_condition_t{}));
+    c_index_condition_list_size := c_index_condition_size * c_request.index_condition_list_len;
+    c_request.index_condition_list = (*C.mdt_index_condition_t)(C.malloc(c_index_condition_list_size))
     c_index_condition_list := (*[1<<30]C.mdt_index_condition_t)(unsafe.Pointer(c_request.index_condition_list))
     for i := C.size_t(0); i < c_request.index_condition_list_len; i++ {
         c_index_condition := &c_index_condition_list[i]

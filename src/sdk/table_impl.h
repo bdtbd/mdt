@@ -140,6 +140,7 @@ struct MultiIndexParam {
     int32_t counter;
     bool finish;
     int32_t ref;
+    int32_t ts_ref;
 };
 
 class TableImpl : public Table {
