@@ -754,6 +754,8 @@ Status TableImpl::Get(const SearchRequest* req, SearchResponse* resp, SearchCall
         std::vector<struct IndexCondition>::iterator it = index_condition_list.begin();
         for (; it != index_condition_list.end(); ++it) {
             IndexCondition& index = *it;
+            VLOG(10) << "index : " << index.index_name << " "
+                     << index.comparator << " " << index.compare_value;
             std::string type_index_key;
             StringToTypeString(index.index_name, index.compare_value, &type_index_key);
             index.compare_value = type_index_key;
@@ -1002,6 +1004,7 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
         multi_param->counter = 0;// num of primary data read totally
         multi_param->finish = false; // set true after any index table scanned done
         multi_param->ref = valid_nr_index_table;
+        multi_param->ts_ref = ts_table_list.size();
 
         std::map<std::string, ResultStream> result_map;
         ThreadPool scan_threads(valid_nr_index_table);
@@ -1108,6 +1111,9 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table, bool is_ts_table,
         LOG(ERROR) << "new scan stream of " << index_table->GetName() << " error: " << err.GetReason();
 
         multi_param->mutex.Lock();
+        if (is_ts_table) {
+            multi_param->ts_ref--;
+        }
         // last index searcher free multi_param
         multi_param->ref--;
         if (multi_param->ref == 0) {
@@ -1168,13 +1174,14 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table, bool is_ts_table,
     cleaner_thread_.AddTask(boost::bind(&TableImpl::CleanerThread, this, stream));
 
     {
-        MutexLock l(&multi_param->mutex);
+        multi_param->mutex.Lock();
 
         // wait for background read
         VLOG(10) << "finish scan index: " << index_table->GetName()
                  << ", wait for background read completion";
-        while (!((param->pending_count == 1) ||
-               (multi_param->counter >= multi_param->limit))) {
+        while (!(param->pending_count == 1 ||
+                 multi_param->finish ||
+                 multi_param->counter >= multi_param->limit)) {
             param->cond.Wait();
         }
         VLOG(10) << "finish scan index: " << index_table->GetName()
@@ -1182,8 +1189,12 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table, bool is_ts_table,
                 << ", get " << param->get_count
                 << ", total get " << multi_param->counter;
 
+        if (is_ts_table) {
+            multi_param->ts_ref--;
+        }
+
         // stop other index table scan streams
-        if (multi_param->finish == false) {
+        if (multi_param->finish == false && (!is_ts_table || multi_param->ts_ref == 0)) {
             VLOG(10) << "finish scan index: " << index_table->GetName()
                  << ", notify other index table scan streams to stop";
             multi_param->finish = true;
@@ -1203,6 +1214,8 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table, bool is_ts_table,
                 return;
             }
         }
+
+        multi_param->mutex.Unlock();
     }
 }
 
