@@ -31,6 +31,7 @@ INS_INCDIR = $(INS_PREFIX)/include
 TERA_INCDIR = $(TERA_PREFIX)/include
 GALAXY_INCDIR = $(GALAXY_PREFIX)/include
 
+BOOST_LIBDIR=$(BOOST_INCDIR)/stage/lib
 SOFA_PBRPC_LIBDIR = $(SOFA_PBRPC_PREFIX)/lib
 PROTOBUF_LIBDIR = $(PROTOBUF_PREFIX)/lib
 SNAPPY_LIBDIR = $(SNAPPY_PREFIX)/lib
@@ -59,12 +60,13 @@ DEPS_LDPATH = -L$(TERA_LIBDIR) -L$(SOFA_PBRPC_LIBDIR) -L$(PROTOBUF_LIBDIR) \
               -L$(SNAPPY_LIBDIR) -L$(ZOOKEEPER_LIBDIR) \
               -L$(GFLAGS_LIBDIR) -L$(GLOG_LIBDIR) -L$(GTEST_LIBDIR) \
               -L$(GPERFTOOLS_LIBDIR) -L$(INS_LIBDIR) \
-              -L$(TERA_LIBDIR) -L$(GALAXY_LIBDIR)
+              -L$(TERA_LIBDIR) -L$(GALAXY_LIBDIR) -L$(BOOST_LIBDIR)
 DEPS_LDFLAGS = -ltera -lins_sdk -lsofa-pbrpc -lprotobuf -lsnappy -lzookeeper_mt \
-               -lgtest_main -lgtest -lglog -lgflags -lgalaxy -lcommon -ltcmalloc_minimal
+               -lgtest_main -lgtest -lglog -lgflags -lgalaxy -lcommon -ltcmalloc_minimal -lboost_regex
 DEPS_LIBRARIES = $(COMMON_LIBDIR)/libcommon.a $(GALAXY_LIBDIR)/libgalaxy.a $(TERA_LIBDIR)/libtera.a $(INS_LIBDIR)/libins_sdk.a \
                  $(SOFA_PBRPC_LIBDIR)/libsofa-pbrpc.a $(PROTOBUF_LIBDIR)/libprotobuf.a \
                  $(SNAPPY_LIBDIR)/libsnappy.a $(ZOOKEEPER_LIBDIR)/libzookeeper_mt.a \
                  $(GTEST_LIBDIR)/libgtest_main.a $(GTEST_LIBDIR)/libgtest.a \
-                 $(GLOG_LIBDIR)/libglog.a $(GFLAGS_LIBDIR)/libgflags.a $(GPERFTOOLS_LIBDIR)/libtcmalloc_minimal.a 
+                 $(GLOG_LIBDIR)/libglog.a $(GFLAGS_LIBDIR)/libgflags.a $(GPERFTOOLS_LIBDIR)/libtcmalloc_minimal.a \
+		 $(BOOST_LIBDIR)/libboost_regex.a
 

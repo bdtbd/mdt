@@ -138,6 +138,60 @@ message RpcShowCollectorInfoResponse {
     repeated CollectorInformation info = 1;
 }
 
+////////////////////////////////////
+// log monitor stream
+////////////////////////////////////
+message Record {
+    optional string op = 1;
+    optional string type = 2;
+    optional string key = 3;
+    optional string key_name = 4; // use only for json
+}
+
+// only support regex or json type
+message Expression {
+    optional string type = 1; // regex, json,
+    
+    // regex type
+    optional string expr = 2; 
+
+    // json type
+    optional string column_delim = 3; // like || 
+    optional int32 column_idx = 4;
+}
+
+message Rule {
+    optional Expression expr = 1;
+    repeated Record record_vec = 2;
+}
+
+message RuleInfo {
+    repeated Rule rule_list = 2;
+    optional Rule result = 3;
+}
+
+message RpcMonitorRequest {
+    optional string db_name = 1;
+    optional string table_name = 3;
+    repeated string moduler_owner = 4;
+    optional RuleInfo rule_set = 5;
+}
+message RpcMonitorResponse {
+    optional RpcResponseStatus status = 1; 
+}
+
+message RpcMonitorStreamRequest {
+    optional string db_name = 1;
+    optional string table_name = 2;
+    
+    optional string hostname = 3;
+    repeated string log_record = 4;
+}
+
+message RpcMonitorStreamResponse {
+    optional RpcResponseStatus status = 1; 
+}
+
 // rpc service
 service LogSchedulerService {
     rpc Echo(EchoRequest) returns(EchoResponse);
@@ -148,6 +202,8 @@ service LogSchedulerService {
     rpc RpcShowAgentInfo(RpcShowAgentInfoRequest) returns(RpcShowAgentInfoResponse);
     rpc RpcShowCollectorInfo(RpcShowCollectorInfoRequest) returns(RpcShowCollectorInfoResponse);
     rpc RpcTraceGalaxyApp(RpcTraceGalaxyAppRequest) returns(RpcTraceGalaxyAppResponse);
+    rpc RpcMonitorStream(RpcMonitorStreamRequest) returns(RpcMonitorStreamResponse);
+    rpc RpcMonitor(RpcMonitorRequest) returns(RpcMonitorResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;

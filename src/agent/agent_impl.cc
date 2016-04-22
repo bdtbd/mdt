@@ -447,6 +447,23 @@ int AgentImpl::AddWatchModuleStream(const std::string& module_name, const std::s
     return 0;
 }
 
+int AgentImpl::AddMonitor(const mdt::LogAgentService::RpcMonitorRequest* request) {
+    int res = 0;
+    LogStream* stream = NULL;
+    pthread_spin_lock(&lock_);
+    std::map<std::string, LogStream*>::iterator it = log_streams_.find(request->db_name());
+    if (it != log_streams_.end()) {
+        stream = log_streams_[request->db_name()];
+        res = stream->AddMonitor(request);
+    } else {
+        //stream = new LogStream(request->db_name(), log_options_, rpc_client_, &server_lock_, &info_);
+        //log_streams_[request->db_name()] = stream;
+    }
+
+    pthread_spin_unlock(&lock_);
+    return res;
+}
+
 ///////////////////////////////////////////
 /////       rpc method                /////
 ///////////////////////////////////////////
@@ -562,6 +579,21 @@ void AgentImpl::RpcTraceGalaxyApp(::google::protobuf::RpcController* controller,
     closedir(dir_ptr);
 
     if (is_success) {
+        response->set_status(mdt::LogAgentService::kRpcOk);
+    } else {
+        response->set_status(mdt::LogAgentService::kRpcError);
+    }
+    done->Run();
+}
+
+////////////////////////////
+// monitor
+////////////////////////////
+void AgentImpl::RpcMonitor(::google::protobuf::RpcController* controller,
+                           const mdt::LogAgentService::RpcMonitorRequest* request,
+                           mdt::LogAgentService::RpcMonitorResponse* response,
+                           ::google::protobuf::Closure* done) {
+    if (AddMonitor(request) == 0) {
         response->set_status(mdt::LogAgentService::kRpcOk);
     } else {
         response->set_status(mdt::LogAgentService::kRpcError);

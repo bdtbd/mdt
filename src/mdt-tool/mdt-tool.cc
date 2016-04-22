@@ -1,10 +1,14 @@
+#include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/foreach.hpp>
+#include <boost/regex.hpp>
+#include <boost/lexical_cast.hpp>
 #include <stdio.h>
 #include <stdlib.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/lexical_cast.hpp>
 #include <iostream>
 #include <vector>
 #include <sys/types.h>
@@ -54,6 +58,8 @@ DEFINE_string(cmd_end_ts, "2016-04-06-16:15:00", "end timestamp");
 DEFINE_string(cmd_limit, "0", "number of result");
 DEFINE_string(cmd_index_list, "", "key1,==,val1,key2,>=,val2");
 
+DEFINE_string(cmd_monitor_flagfile, "../conf/monitor.conf", "json configure file");
+
 char* StripWhite(char* line) {
     char *s, *t;
     for (s = line; whitespace(*s); s++);
@@ -102,6 +108,7 @@ void HelpManue() {
     printf("cmd: ShowCollector\n\n");
     printf("cmd: GalaxyShow <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit> [index cmp value]\n\n");
     printf("cmd: PushTraceLog <job_name> <work_dir> <user_log_dir> <db_name> <table_name> <parse_path_fn> <nexus_root_path> <master_path> <nexus_servers> \n\n");
+    printf("cmd: SetMonitor <conf>\n\n");
     printf("===========================\n");
 }
 
@@ -1409,6 +1416,79 @@ int PushTraceLog(std::vector<std::string>& cmd_vec) {
     return 0;
 }
 
+void ParseJsonRule(boost::property_tree::ptree& ptree, mdt::LogSchedulerService::Rule* rule) {
+    try {
+        // parse expression
+        boost::property_tree::ptree expr_ptree = ptree.get_child("expression");
+        mdt::LogSchedulerService::Expression* expr = rule->mutable_expr();
+        expr->set_type(expr_ptree.get<std::string>("type"));
+        expr->set_expr(expr_ptree.get<std::string>("expr"));
+        expr->set_column_delim(expr_ptree.get<std::string>("col_delim"));
+        expr->set_column_idx(expr_ptree.get<std::int64_t>("col_idx"));
+
+        // parse record
+        BOOST_FOREACH(boost::property_tree::ptree::value_type &v, ptree.get_child("record")) {
+            mdt::LogSchedulerService::Record* record = rule->add_record_vec();
+            record->set_op(v.second.get<std::string>("op"));
+            record->set_type(v.second.get<std::string>("type"));
+            record->set_key(v.second.get<std::string>("key"));
+            record->set_key_name(v.second.get<std::string>("key_name"));
+        }
+    } catch (boost::property_tree::ptree_error& e) {}
+    return;
+}
+
+void ParseJsonToRequest(const std::string& flagfile, mdt::LogSchedulerService::RpcMonitorRequest* req) {
+    try {
+        boost::property_tree::ptree ptree;
+        boost::property_tree::read_json(flagfile, ptree);
+        std::string db_name = ptree.get<std::string>("db_name");
+        std::string table_name = ptree.get<std::string>("table_name");
+        // set db and table
+        req->set_db_name(db_name);
+        req->set_table_name(table_name);
+
+        // parse mail list
+        std::vector<std::string> mail_list;
+        BOOST_FOREACH(boost::property_tree::ptree::value_type &v, ptree.get_child("mail_list")) {
+            std::string* owner = req->add_moduler_owner();
+            *owner = v.second.get<std::string>("owner");
+        }
+
+        // parse result
+        boost::property_tree::ptree rule_result = ptree.get_child("rule_set.result");
+        mdt::LogSchedulerService::Rule* rule = req->mutable_rule_set()->mutable_result();
+        ParseJsonRule(rule_result, rule);
+
+        // parse rule list
+        BOOST_FOREACH(boost::property_tree::ptree::value_type &v1, ptree.get_child("rule_set.rule_list")) {
+            mdt::LogSchedulerService::Rule* rule_v = req->mutable_rule_set()->add_rule_list();
+            ParseJsonRule(v1.second, rule_v);
+        }
+        std::cout << req->DebugString() << std::endl;
+    } catch (boost::property_tree::ptree_error& e) {}
+    return;
+}
+
+int SetMonitor(std::vector<std::string>& cmd_vec) {
+    std::string jsonfile = cmd_vec[1];
+
+    std::string scheduler_addr = FLAGS_scheduler_addr;
+    mdt::RpcClient* rpc_client = new mdt::RpcClient;
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client->GetMethodList(scheduler_addr, &service);
+
+    mdt::LogSchedulerService::RpcMonitorRequest* req = new mdt::LogSchedulerService::RpcMonitorRequest();
+    mdt::LogSchedulerService::RpcMonitorResponse* resp = new mdt::LogSchedulerService::RpcMonitorResponse();
+    ParseJsonToRequest(jsonfile, req);
+
+    rpc_client->SyncCall(service, &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcMonitor, req, resp);
+    delete req;
+    delete resp;
+    delete service;
+    return 0;
+}
+
 int main(int ac, char* av[]) {
     /*
     if (DupNfsSterr() < 0) {
@@ -1443,6 +1523,10 @@ int main(int ac, char* av[]) {
         } else if (FLAGS_cmd == "ShowCollector") {
             non_interactive_cmd_vec.push_back(FLAGS_cmd);
             ShowCollector(non_interactive_cmd_vec);
+        } else if (FLAGS_cmd == "SetMonitor") {
+            non_interactive_cmd_vec.push_back(FLAGS_cmd);
+            non_interactive_cmd_vec.push_back(FLAGS_cmd_monitor_flagfile);
+            SetMonitor(non_interactive_cmd_vec);
         } else if (FLAGS_cmd == "GetByTime") {
             // cmd: GetByTime <dbname> <tablename> start(year-month-day-hour:min:sec) end(year-month-day-hour:min:sec) <limit>
             // key1,>=,value1,key2,==,value2
@@ -1465,6 +1549,7 @@ int main(int ac, char* av[]) {
             GetByTimeOp(non_interactive_cmd_vec);
         } else {
             std::cout << "interactive mode, cmd " << FLAGS_cmd << " not know\n";
+            HelpManue();
             exit(-1);
         }
         return 0;

@@ -70,6 +70,11 @@ public:
                            mdt::LogAgentService::RpcTraceGalaxyAppResponse* response,
                            ::google::protobuf::Closure* done);
 
+    void RpcMonitor(::google::protobuf::RpcController* controller,
+                    const mdt::LogAgentService::RpcMonitorRequest* request,
+                    mdt::LogAgentService::RpcMonitorResponse* response,
+                    ::google::protobuf::Closure* done);
+
 private:
     void ParseLogDir(std::vector<std::string>& log_vec);
     void ParseModuleName(const std::string& filename, std::string* module_name);
@@ -89,6 +94,9 @@ private:
                                mdt::LogSchedulerService::GetNodeListResponse* resp,
                                bool failed, int error,
                                mdt::LogSchedulerService::LogSchedulerService_Stub* service);
+
+    // add monitor
+    int AddMonitor(const mdt::LogAgentService::RpcMonitorRequest* request);
 
 private:
     pthread_spinlock_t lock_;

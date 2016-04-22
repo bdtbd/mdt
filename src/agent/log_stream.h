@@ -8,6 +8,8 @@
 #include "leveldb/db.h"
 #include "agent/options.h"
 #include "proto/query.pb.h"
+#include "proto/agent.pb.h"
+#include "proto/scheduler.pb.h"
 #include "rpc/rpc_client.h"
 #include <sys/time.h>
 #include "utils/event.h"
@@ -102,13 +104,17 @@ public:
     int DeleteWatchEvent(std::string filename, uint64_t ino, bool need_wakeup);
     void Run();
 
+    // support monitor
+    int AddMonitor(const mdt::LogAgentService::RpcMonitorRequest* request);
+
 private:
     void GetTableName(std::string file_name, std::string* table_name);
     uint64_t ParseTime(const std::string& time_str);
     std::string TimeToString(struct timeval* filetime);
     int ParseMdtRequest(const std::string table_name,
                         std::vector<std::string>& line_vec,
-                        std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec);
+                        std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec,
+                        std::vector<std::string>* monitor_vec);
     void ApplyRedoList(FileStream* file_stream);
     int AsyncPush(std::vector<mdt::SearchEngine::RpcStoreRequest*>& req_vec, DBKey* key);
     void AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
@@ -117,6 +123,17 @@ private:
                            mdt::SearchEngine::SearchEngineService_Stub* service,
                            DBKey* key);
     void HandleDelayFailTask(DBKey* key);
+
+    // support monitor
+    void AsyncPushMonitorCallback(const mdt::LogSchedulerService::RpcMonitorStreamRequest* req,
+                                  mdt::LogSchedulerService::RpcMonitorStreamResponse* resp,
+                                  bool failed, int error,
+                                  mdt::LogSchedulerService::LogSchedulerService_Stub* service);
+    int AsyncPushMonitor(const std::string& table_name, const std::vector<std::string>& monitor_vec);
+    bool MonitorHasEvent(const std::string& table_name, const std::string& line);
+    bool CheckJson(const std::string& line, const mdt::LogAgentService::Rule& rule);
+    bool CheckRegex(const std::string& line, const mdt::LogAgentService::Rule& rule);
+    bool CheckRecord(const std::string& key, const mdt::LogAgentService::Record& record);
 
 private:
     std::string module_name_;
@@ -173,6 +190,11 @@ private:
 
     // collector info
     int64_t last_update_time_;
+
+    // monitor relatively
+    pthread_spinlock_t monitor_lock_;
+    // <table name, monitor>
+    std::map<std::string, mdt::LogAgentService::RpcMonitorRequest> monitor_handler_set_;
 };
 
 }

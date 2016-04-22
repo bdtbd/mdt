@@ -31,6 +31,49 @@ message RpcAddWatchModuleStreamResponse {
 }
 
 //////////////////////////////////////////
+//  monitor req && resp
+//////////////////////////////////////////
+message Record {
+    optional string op = 1;
+    optional string type = 2;
+    optional string key = 3;
+    optional string key_name = 4; // use only for json
+}
+
+// only support regex or json type
+message Expression {
+    optional string type = 1; // regex, json,
+    
+    // regex type
+    optional string expr = 2; 
+
+    // json type
+    optional string column_delim = 3; // like || 
+    optional int32 column_idx = 4;
+}
+
+message Rule {
+    optional Expression expr = 1;
+    repeated Record record_vec = 2;
+}
+
+message RuleInfo {
+    repeated Rule rule_list = 2;
+    optional Rule result = 3;
+}
+
+message RpcMonitorRequest {
+    optional string db_name = 1;
+    optional string table_name = 3;
+    repeated string moduler_owner = 4;
+    optional RuleInfo rule_set = 5;
+}
+
+message RpcMonitorResponse {
+    optional RpcResponseStatus status = 1; 
+}
+
+//////////////////////////////////////////
 //  galaxy app log trace 
 //////////////////////////////////////////
 message RpcTraceGalaxyAppRequest {
@@ -115,6 +158,7 @@ service LogAgentService {
     rpc Store(RpcStoreRequest) returns(RpcStoreResponse);
     rpc RpcStoreSpan(RpcStoreSpanRequest) returns(RpcStoreSpanResponse);
     rpc RpcTraceGalaxyApp(RpcTraceGalaxyAppRequest) returns(RpcTraceGalaxyAppResponse);
+    rpc RpcMonitor(RpcMonitorRequest) returns(RpcMonitorResponse);
 }
 option py_generic_services = true;
 option cc_generic_services = true;

@@ -1,3 +1,11 @@
+#include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/foreach.hpp>
+#include <boost/regex.hpp>
+
+#include "proto/scheduler.pb.h"
 #include "agent/log_stream.h"
 #include <glog/logging.h>
 #include <gflags/gflags.h>
@@ -14,6 +22,7 @@
 #include "leveldb/status.h"
 #include "proto/query.pb.h"
 
+DECLARE_string(scheduler_addr);
 DECLARE_int32(file_stream_max_pending_request);
 DECLARE_string(db_name);
 DECLARE_string(table_name);
@@ -58,6 +67,7 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
     stop_(false),
     fail_delay_thread_(1) {
     pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
+    pthread_spin_init(&monitor_lock_, PTHREAD_PROCESS_PRIVATE);
     db_name_ = FLAGS_db_name;
     table_name_ = FLAGS_table_name;
 
@@ -239,9 +249,11 @@ void LogStream::Run() {
                             if (file_stream->CheckPointRead(&line_vec, &rkey, offset, size) >= 0) {
                                 std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
                                 std::string table_name;
+                                std::vector<std::string> monitor_vec;
                                 GetTableName(file_stream->GetFileName(), &table_name);
-                                ParseMdtRequest(table_name, line_vec, &req_vec);
+                                ParseMdtRequest(table_name, line_vec, &req_vec, &monitor_vec);
                                 AsyncPush(req_vec, rkey);
+                                AsyncPushMonitor(table_name, monitor_vec);
                             } else {
                                 file_stream->ReSetFileStreamCheckPoint();
                             }
@@ -296,9 +308,11 @@ void LogStream::Run() {
             if (file_stream->Read(&line_vec, &key) > 0) {
                 std::vector<mdt::SearchEngine::RpcStoreRequest*> req_vec;
                 std::string table_name;
+                std::vector<std::string> monitor_vec;
                 GetTableName(file_stream->GetFileName(), &table_name);
-                ParseMdtRequest(table_name, line_vec, &req_vec);
+                ParseMdtRequest(table_name, line_vec, &req_vec, &monitor_vec);
                 AsyncPush(req_vec, key);
+                AsyncPushMonitor(table_name, monitor_vec);
 
                 // read next offset
                 AddWriteEvent(filename, ino);
@@ -535,7 +549,8 @@ uint64_t LogStream::ParseTime(const std::string& time_str) {
 // case 3: key1 001, key2 002, key3 003, key4 004, key5 005, key6 006
 int LogStream::ParseMdtRequest(const std::string table_name,
                                std::vector<std::string>& line_vec,
-                               std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec) {
+                               std::vector<mdt::SearchEngine::RpcStoreRequest* >* req_vec,
+                               std::vector<std::string>* monitor_vec) {
     for (uint32_t i = 0; i < line_vec.size(); i++) {
         int res = 0;
         std::string& line  = line_vec[i];
@@ -554,12 +569,17 @@ int LogStream::ParseMdtRequest(const std::string table_name,
             }
         }
 
-        mdt::SearchEngine::RpcStoreRequest* req = NULL;
+        // support monitor
+        if (MonitorHasEvent(table_name, line)) {
+            monitor_vec->push_back(line);
+        }
 
+        // support index
+        mdt::SearchEngine::RpcStoreRequest* req = NULL;
         LogRecord log;
         if (log.SplitLogItem(line, string_delims_) < 0) {
             res = -1;
-            LOG(WARNING) << "parse mdt request split by string fail: " << line;
+            VLOG(30) << "parse mdt request split by string fail: " << line;
         } else {
             LogTailerSpan kv;
             for (int col_idx = 0; col_idx < (int)log.columns.size(); col_idx++) {
@@ -629,9 +649,11 @@ void LogStream::ApplyRedoList(FileStream* file_stream) {
         // agent restart, check log file rename
         if (file_stream->CheckPointRead(&line_vec, &key, redo_it->first, redo_it->second) >= 0) {
             std::string table_name;
+            std::vector<std::string> monitor_vec;
             GetTableName(file_stream->GetFileName(), &table_name);
-            ParseMdtRequest(table_name, line_vec, &req_vec);
+            ParseMdtRequest(table_name, line_vec, &req_vec, &monitor_vec);
             AsyncPush(req_vec, key);
+            AsyncPushMonitor(table_name, monitor_vec);
         } else {
             file_rename = true;
         }
@@ -727,6 +749,45 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
     delete resp;
 }
 
+void LogStream::AsyncPushMonitorCallback(const mdt::LogSchedulerService::RpcMonitorStreamRequest* req,
+                                         mdt::LogSchedulerService::RpcMonitorStreamResponse* resp,
+                                         bool failed, int error,
+                                         mdt::LogSchedulerService::LogSchedulerService_Stub* service) {
+    delete req;
+    delete service;
+    delete resp;
+}
+
+int LogStream::AsyncPushMonitor(const std::string& table_name, const std::vector<std::string>& monitor_vec) {
+    if (monitor_vec.size() == 0) {
+        return 0;
+    }
+    // push monitor event to scheduler
+    char hostname[256];
+    gethostname(hostname, 256);
+    std::string hname = hostname;
+
+    mdt::LogSchedulerService::LogSchedulerService_Stub* service;
+    rpc_client_->GetMethodList(FLAGS_scheduler_addr, &service);
+    mdt::LogSchedulerService::RpcMonitorStreamRequest* req = new mdt::LogSchedulerService::RpcMonitorStreamRequest();
+    mdt::LogSchedulerService::RpcMonitorStreamResponse* resp = new mdt::LogSchedulerService::RpcMonitorStreamResponse();
+    req->set_db_name(module_name_);
+    req->set_table_name(table_name);
+    req->set_hostname(hname);
+    for (uint32_t i = 0; i < monitor_vec.size(); i++) {
+        req->set_log_record(i, monitor_vec[i]);
+    }
+    boost::function<void (const mdt::LogSchedulerService::RpcMonitorStreamRequest*,
+                          mdt::LogSchedulerService::RpcMonitorStreamResponse*,
+                          bool, int)> callback =
+            boost::bind(&LogStream::AsyncPushMonitorCallback,
+                        this, _1, _2, _3, _4, service);
+    rpc_client_->AsyncCall(service,
+                           &mdt::LogSchedulerService::LogSchedulerService_Stub::RpcMonitorStream,
+                           req, resp, callback);
+    return 0;
+}
+
 int LogStream::AddWriteEvent(std::string filename) {
     struct stat stat_buf;
     if (lstat(filename.c_str(), &stat_buf) == -1) {
@@ -784,6 +845,142 @@ int LogStream::DeleteWatchEvent(std::string filename, uint64_t ino, bool need_wa
 int LogStream::AddTableName(const std::string& log_name) {
     log_name_prefix_.insert(log_name);
     return 0;
+}
+
+int LogStream::AddMonitor(const mdt::LogAgentService::RpcMonitorRequest* request) {
+    pthread_spin_lock(&monitor_lock_);
+    mdt::LogAgentService::RpcMonitorRequest& monitor = monitor_handler_set_[request->table_name()];
+    monitor.CopyFrom(*request);
+    pthread_spin_unlock(&monitor_lock_);
+    return 0;
+}
+
+// only support type: string, int64
+bool LogStream::CheckRecord(const std::string& key, const mdt::LogAgentService::Record& record) {
+    bool is_match = false;
+
+    if (record.op() == "==") {
+        if (record.type() == "string") {
+            is_match = (key == record.key());
+        } else if (record.type() == "int64") {
+            is_match = (atol(key.c_str()) == atol(record.key().c_str()));
+        }
+    } else if (record.op() == ">=") {
+        if (record.type() == "string") {
+            is_match = (key >= record.key());
+        } else if (record.type() == "int64") {
+            is_match = (atol(key.c_str()) >= atol(record.key().c_str()));
+        }
+    } else if (record.op() == ">") {
+        if (record.type() == "string") {
+            is_match = (key > record.key());
+        } else if (record.type() == "int64") {
+            is_match = (atol(key.c_str()) > atol(record.key().c_str()));
+        }
+    } else if (record.op() == "<=") {
+        if (record.type() == "string") {
+            is_match = (key <= record.key());
+        } else if (record.type() == "int64") {
+            is_match = (atol(key.c_str()) <= atol(record.key().c_str()));
+        }
+    } else if (record.op() == "<") {
+        if (record.type() == "string") {
+            is_match = (key < record.key());
+        } else if (record.type() == "int64") {
+            is_match = (atol(key.c_str()) < atol(record.key().c_str()));
+        }
+    }
+    return is_match;
+}
+
+bool LogStream::CheckRegex(const std::string& line, const mdt::LogAgentService::Rule& rule) {
+    bool is_match = false;
+    const mdt::LogAgentService::Expression& expr = rule.expr();
+
+    // only support regex
+    if (expr.type() == "regex") {
+        try {
+            std::string::const_iterator start, end;
+            start = line.begin();
+            end = line.end();
+
+            boost::regex expression(expr.expr());
+            boost::match_results<std::string::const_iterator> watch;
+            while (boost::regex_search(start, end, watch, expression)) {
+                // check log.y1, log.y2 {==, >=, >, <=, <} rule.x1, rule.x2
+                if (watch.size() >= (rule.record_vec_size() + 1)) {
+                    for (uint32_t result_idx = 1; result_idx < watch.size(); result_idx++) {
+                        if (!CheckRecord(watch[result_idx], rule.record_vec(result_idx))) {
+                            is_match = false;
+                            break;
+                        }
+                        is_match = true;
+                    }
+                }
+                start = watch[0].second;
+                if (is_match == true) {
+                    break;
+                }
+            }
+        } catch (const boost::bad_expression& e) {}
+    }
+    return is_match;
+}
+
+// not support nest json parse
+bool LogStream::CheckJson(const std::string& line, const mdt::LogAgentService::Rule& rule) {
+    bool is_match = false;
+    const mdt::LogAgentService::Expression& expr = rule.expr();
+
+    if (expr.type() == "Json") {
+        LogRecord log;
+        std::vector<std::string> str_delim_vec;
+        str_delim_vec.push_back(expr.column_delim());
+        if (log.SplitLogItem(line, str_delim_vec) >= 0 && log.columns.size() > expr.column_idx()) {
+            std::stringstream ss(log.columns[expr.column_idx()]);
+            try {
+                boost::property_tree::ptree ptree;
+                boost::property_tree::json_parser::read_json(ss, ptree);
+                for (uint32_t idx = 0; idx < rule.record_vec_size(); idx++) {
+                    std::string item = ptree.get<std::string>(rule.record_vec(idx).key_name());
+                    if (!CheckRecord(item, rule.record_vec(idx))) {
+                        is_match = false;
+                        break;
+                    }
+                    is_match = true;
+                }
+            } catch (boost::property_tree::ptree_error& e) {}
+        }
+    }
+    return is_match;
+}
+
+bool LogStream::MonitorHasEvent(const std::string& table_name, const std::string& line) {
+    bool is_match = false;
+
+    pthread_spin_lock(&monitor_lock_);
+    if (monitor_handler_set_.find(table_name) != monitor_handler_set_.end()) {
+        mdt::LogAgentService::RpcMonitorRequest& monitor = monitor_handler_set_[table_name];
+        if (monitor.has_rule_set()) {
+            const mdt::LogAgentService::RuleInfo& rule_info = monitor.rule_set();
+
+            // 1. parse and check rule
+            for (uint32_t idx = 0; idx < rule_info.rule_list_size(); idx++) {
+                const mdt::LogAgentService::Rule& rule = rule_info.rule_list(idx);
+                if (CheckRegex(line, rule)) {
+                    is_match = true;
+                    break;
+                }
+            }
+
+            // 2. parse and check result
+            const mdt::LogAgentService::Rule& result = rule_info.result();
+            is_match = is_match && CheckJson(line, result);
+        }
+    }
+    pthread_spin_unlock(&monitor_lock_);
+
+    return is_match;
 }
 
 //////////////////////////////////////////
@@ -1021,7 +1218,7 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         // check mem cp pending request
         pthread_spin_lock(&lock_);
         if (mem_checkpoint_list_.size() > (uint32_t)FLAGS_file_stream_max_pending_request) {
-            LOG(WARNING) << "pending overflow, max queue size " << FLAGS_file_stream_max_pending_request << ", cp list size " << mem_checkpoint_list_.size();
+            VLOG(30) << "pending overflow, max queue size " << FLAGS_file_stream_max_pending_request << ", cp list size " << mem_checkpoint_list_.size();
             pthread_spin_unlock(&lock_);
             return -1;
         }

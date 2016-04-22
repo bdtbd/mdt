@@ -1,7 +1,7 @@
 #include <gflags/gflags.h>
 
 DEFINE_string(agent_service_port, "33331", "agent port");
-DEFINE_int32(file_stream_max_pending_request, 1000, "max pending write req");
+DEFINE_int32(file_stream_max_pending_request, 5000, "max pending write req");
 //DEFINE_string(scheduler_addr, "0.0.0.0:11111", "scheduler server addr");
 DEFINE_string(db_dir, "../leveldb_dir/", "leveldb dir for cp");
 DEFINE_string(watch_log_dir, "../watch_log_dir/", "log dir");
@@ -47,6 +47,8 @@ DEFINE_int32(collector_timeout, 8000000, "collector info will be delete after x 
 DEFINE_int32(collector_max_error, 1, "max error can occur in collector");
 
 DEFINE_int64(scheduler_galaxy_app_trace_period, 300000, "in (ms) update task trace path info");
+DEFINE_int64(scheduler_mail_max_queue_size, 30, "max mail queue size");
+DEFINE_int64(scheduler_mail_delay, 5000, "delay (ms) time in send mail");
 
 ///////////////////////////////////////////
 // scheduler flags

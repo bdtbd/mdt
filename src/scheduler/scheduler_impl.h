@@ -9,6 +9,8 @@
 #include "utils/thread_pool.h"
 #include "utils/counter.h"
 #include "rpc/rpc_client.h"
+#include "mail/mail.h"
+#include "leveldb/db.h"
 #include "proto/agent.pb.h"
 #include <boost/shared_ptr.hpp>
 #include <galaxy.h>
@@ -134,6 +136,16 @@ public:
                           mdt::LogSchedulerService::RpcTraceGalaxyAppResponse* response,
                           ::google::protobuf::Closure* done);
 
+    // suport monitor
+    void RpcMonitor(::google::protobuf::RpcController* controller,
+                    const mdt::LogSchedulerService::RpcMonitorRequest* request,
+                    mdt::LogSchedulerService::RpcMonitorResponse* response,
+                    ::google::protobuf::Closure* done);
+    void RpcMonitorStream(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcMonitorStreamRequest* request,
+                          mdt::LogSchedulerService::RpcMonitorStreamResponse* response,
+                          ::google::protobuf::Closure* done);
+
 private:
     void AsyncTraceGalaxyAppCallback(const mdt::LogAgentService::RpcTraceGalaxyAppRequest* req,
                 mdt::LogAgentService::RpcTraceGalaxyAppResponse* resp,
@@ -172,6 +184,30 @@ private:
                           const mdt::LogSchedulerService::RpcShowCollectorInfoRequest* request,
                           mdt::LogSchedulerService::RpcShowCollectorInfoResponse* response,
                           ::google::protobuf::Closure* done);
+
+    // support monitor
+    void GetMonitorName(const std::string& db_name, const std::string& table_name, std::string* monitor_name);
+    void PackMail(const std::string& to, const mdt::LogSchedulerService::RpcMonitorStreamRequest* request);
+    void DelaySendMail(std::string to);
+    void InternalSendMail(const std::string& to, std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest>& local_queue);
+    void DoRpcMonitorStream(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcMonitorStreamRequest* request,
+                          mdt::LogSchedulerService::RpcMonitorStreamResponse* response,
+                          ::google::protobuf::Closure* done);
+
+    void AsyncPushMonitorCallback(const mdt::LogAgentService::RpcMonitorRequest* req,
+                                  mdt::LogAgentService::RpcMonitorResponse* resp,
+                                  bool failed, int error,
+                                  mdt::LogAgentService::LogAgentService_Stub* service);
+    void CopyRule(const mdt::LogSchedulerService::Rule& r2, mdt::LogAgentService::Rule* r);
+    void TranslateMonitorRequest(const mdt::LogSchedulerService::RpcMonitorRequest* request,
+                                 mdt::LogAgentService::RpcMonitorRequest* req);
+    void DoRpcMonitor(::google::protobuf::RpcController* controller,
+                    const mdt::LogSchedulerService::RpcMonitorRequest* request,
+                    mdt::LogSchedulerService::RpcMonitorResponse* response,
+                    ::google::protobuf::Closure* done);
+
+
 private:
     RpcClient* rpc_client_;
 
@@ -196,6 +232,15 @@ private:
     ThreadPool galaxy_trace_pool_;
     pthread_spinlock_t galaxy_trace_lock_;
     std::map<std::string, boost::shared_ptr<TraceInfo> > galaxy_trace_rule_;
+
+    // use for monitor send mail
+    pthread_spinlock_t monitor_lock_;
+    // <db_name.table_name, monitor>
+    std::map<std::string, mdt::LogSchedulerService::RpcMonitorRequest> monitor_handler_set_;
+
+    ThreadPool monitor_thread_;
+    Mail mail_;
+    std::map<std::string, std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest> > mail_queue_;
 };
 
 }

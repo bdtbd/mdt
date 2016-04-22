@@ -1,10 +1,15 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/foreach.hpp>
+#include <boost/regex.hpp>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdint.h>
 #include <stdio.h>
+#include <errno.h>
 #include <string>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -12,6 +17,7 @@
 #include <vector>
 #include <set>
 
+#include "mail/mail.h"
 #include "sdk/db.h"
 #include "sdk/sdk.h"
 #include "sdk/table.h"
@@ -172,11 +178,144 @@ struct LogTailerSpan {
     }
 };
 
+int ParseJson() {
+    std::string str = "{\"code\":0,\"images\":[{\"url\":\"fmn057/20111221/1130/head_kJoO_05d9000251de125c.jpg\"},{\"url\":\"fmn057/20111221/1130/original_kJoO_05d9000251de125c.jpg\"}]}";
+    using namespace boost::property_tree;
+
+    std::stringstream ss(str);
+    ptree pt;
+    try{
+        read_json(ss, pt);
+    }
+    catch(ptree_error & e) {
+        return 1;
+    }
+
+    try{
+        int code = pt.get<int>("code");   // 得到"code"的value
+        std::cout << code << std::endl;
+        ptree image_array = pt.get_child("images");  // get_child得到数组对象
+
+        // 遍历数组
+        BOOST_FOREACH(boost::property_tree::ptree::value_type &v, image_array) {
+            std::stringstream s;
+            write_json(s, v.second);
+            std::string image_item = s.str();
+
+            ptree& child = v.second;
+            std::string url = child.get<std::string>("url");
+            std::cout << url << std::endl;
+        }
+    }
+    catch (ptree_error & e) {
+        return 2;
+    }
+
+    return 0;
+}
+
+int ParseNuomiJson() {
+    //std::string result = "{\"errno\":-1,\"state\":0}";
+    std::string result = "{\"isBlackUser\":0,\"leftDealNums\":{\"10192999\":6,\"10450500\":6},\"leftOrderNum\":8,\"totalDealNum\":6,\"totalOrderNum\":8}";
+    std::stringstream nuomi_ss(result);
+    boost::property_tree::ptree nuomi_ptree;
+    boost::property_tree::json_parser::read_json(nuomi_ss, nuomi_ptree);
+    std::string key_errno = "isBlackUser";
+    std::string key_state = "totalOrderNum";
+    int err;
+    int state;
+    try {
+        err = nuomi_ptree.get<int>(key_errno);
+        state = nuomi_ptree.get<int>(key_state);
+
+        std::cout << "[]errno " << err << ", state " << state
+            << std::endl;
+        boost::property_tree::ptree dealnum = nuomi_ptree.get_child("leftDealNums");
+        int nr1 = dealnum.get<int>("10192999");
+
+        std::cout << "nr1 " << nr1 << std::endl;
+    } catch (boost::property_tree::ptree_error& e) {}
+
+    return 0;
+}
+
+int Regex() {
+    std::cout << "#####################\n";
+    std::string s = "Boost Libraries";
+    std::string expr_str = "(\\w+)\\s(\\w+)";
+    boost::regex expr(expr_str, boost::regex::icase);
+    boost::smatch what;
+    if (boost::regex_search(s, what, expr)) {
+        std::cout << what[0] << '\n';
+        std::cout << what[1] << "_" << what[2] << '\n';
+    }
+
+    try {
+        std::string log = "NOTICE: 04-14 15:01:47: [IsHandler.php:124] qid[77777] errno[0] ip[10.48.45.36] logId[2777884466] uri[/s?ie=utf-8&csq=1&pstg=20&mod=2&isbd=1&cqid=ffbe06aa0000b1f5&istc=873&ver=Qw5hSQEJ_bLaje7b5_OGy39X1bB-XSqKCIO&chk=570f405b&isid=6DC6BC0C18623253&ie=utf-8&f=8&rsv_bp=1&tn=baidu&wd=3DM%E4%B8%8B%E6%B8%B8%E6%88%8F%E9%82%A3%E4%B8%AA4MB%E7%9A%84%E6%98%AF%E5%95%A5%E5%95%8A&oq=%26lt%3B&rsv_pq=c50f9e69000090ff&rsv_t=53d7kH3LQki7rZDG6DcXcN5oL4%2Bz7hMNYk%2FB97kliXoueXjgOA8%2FtdZbhTY&rsv_enter=1&rsv_sug3=30&rsv_sug1=22&rsv_sug7=100&rsv_sug2=0&inputT=16427&rsv_sug4=16427&bs=3&f4s=1&_ck=231668.0.-1.-1.-1.-1.-1&isnop=1&rsv_stat=-2&rsv_bp=1] time_used[384.23] qid[cb86d84d0000335b] HHVM[1] time_pre_init[0.2] time_require_init[1.74] time_load_conf[0.09] time_InitProcessor[1.86] ui_query[3DM下游戏那个4MB的是啥啊] time_InputParser[0.46] tpl_sel[1] time_TplSelector[0.54] templateType[baidu] templateName[baidu] tnGroupName[organic] language[zh-CN] platform[pc] cook_enable[0] chunked_flag[0] split_tpl_flag[0] time_us_ready[0.01] time_unpack[0.15] us_cost[379.96] us_ret[11] sids[1425_19554_18241_19690_17942_19559_15159_11590] word[3DM下游戏那个4MB的是啥啊] is_mod[2] is_isbd[1] is_cqid[ffbe06aa0000b1f5] is_isid[6DC6BC0C18623253] is_chk[570f405b] is_ver[ffbe06aa0000b1f51460617306] is_f4s[0] is_predict_status[0] is_csq[1] is_pstg[20] is_querysign[] is_predict_module[0] login[0] baiduId[6DC6BC8E449486201AC89CC41340C186] ua[Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/31.0.1650.63 Safari/537.36] is_status[0] is_rd[0] is_swtime[0] time_used_self[384.13] hsug[0_0.01] time_ReqUsProcessor[380.23] processing request is ok";
+        std::string expr2 = "\\sqid\\[([a-z|0-9|A-Z]+)\\]\\s";
+        boost::regex qid_reg(expr2);
+        boost::smatch swatch;
+        if (boost::regex_search(log, swatch, qid_reg)) {
+            if (swatch.size()) {
+                std::cout << "size " << swatch.size() << swatch[0] << '\n';
+                std::cout << swatch[1] << ", " << swatch[2] << '\n';
+            }
+        }
+
+        std::string::const_iterator start, end;
+        start = log.begin();
+        end = log.end();
+        boost::match_results<std::string::const_iterator> result_it;
+        while (boost::regex_search(start, end, result_it, qid_reg)) {
+            for (uint32_t i = 1; i < result_it.size(); i++) {
+                std::cout << "result: " << result_it[i] << '\n';
+            }
+            start = result_it[0].second;
+        }
+
+    } catch (const boost::bad_expression& e) {
+
+    }
+
+    std::cout << "#####################\n";
+    return 0;
+}
+
+int SendMail(const char *to, const char *from, const char *subject, const char *message) {
+    int retval = -1;
+    FILE *mailpipe = popen("/usr/sbin/sendmail -t ", "w");
+    if (mailpipe != NULL) {
+        fprintf(mailpipe, "To: %s\n", to);
+        //fprintf(mailpipe, "From: %s\n", from);
+        fprintf(mailpipe, "Subject: %s\n\n", subject);
+        fwrite(message, 1, strlen(message), mailpipe);
+        fwrite(".\n", 1, 2, mailpipe);
+        pclose(mailpipe);
+        retval = 0;
+    }
+    else {
+        perror("Failed to invoke sendmail");
+    }
+    return retval;
+}
+
 // ./dump_file --flagfile=../conf/mdt.flag --op=create --index_list=passuid,mobile --dbname=TEST_db --tablename=TEST_table001
 // ./dump_file --flagfile=../conf/mdt.flag --op=dumpfile --primary_key=id --index_list=passuid,mobile --dbname=TEST_db --tablename=TEST_table001 --logfile=xxxx.dat
 // ./dump_file --flagfile=../conf/mdt.flag --op=get_index --logfile=xxxx.dat
 int main(int ac, char* av[])
 {
+    ParseNuomiJson();
+    ParseJson();
+    Regex();
+
+    // send mail
+    std::string to = "caijieming@baidu.com";
+    std::string from = "caijieming@baidu.com";
+    std::string subject = "test";
+    std::string message = "hi all:\n\tcaijieming.\n";
+    ::mdt::Mail mail;
+    mail.SendMail(to, from, subject, message);
+
     // parse mdt.flag
     ::google::ParseCommandLineFlags(&ac, &av, true);
     std::string db_name = FLAGS_dbname;

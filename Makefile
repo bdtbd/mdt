@@ -1,7 +1,8 @@
 include depends.mk
 
 # OPT ?= -O2 -DNDEBUG       # (A) Production use (optimized mode)
-OPT ?= -g2 -Wall -Werror      # (B) Debug mode, w/ full line-level debugging symbols
+#OPT ?= -g2 -Wall -Werror      # (B) Debug mode, w/ full line-level debugging symbols
+OPT ?= -g2       # (B) Debug mode, w/ full line-level debugging symbols
 # OPT ?= -O2 -g2 -DNDEBUG   # (C) Profiling mode: opt, but w/debugging symbols
 
 CC = gcc
@@ -38,6 +39,7 @@ UTIL_SRC := $(wildcard src/utils/*.cc)
 PROTO_SRC := $(filter-out %.pb.cc, $(wildcard src/proto/*.cc)) $(PROTO_OUT_CC)
 VERSION_SRC := src/version.cc
 MDTTOOL_SRC := $(wildcard src/mdt-tool/mdt-tool.cc)
+MAIL_SRC := $(wildcard src/mail/mail.cc)
 UPDATESCHEMA_SRC := $(wildcard src/mdt-tool/test_update_schema.cc)
 SAMPLE_SRC := $(wildcard src/sample/mdt_test.cc)
 WRITE_TEST_SRC := $(wildcard src/benchmark/write_test.cc)
@@ -63,6 +65,7 @@ PROTO_OBJ := $(PROTO_SRC:.cc=.o)
 VERSION_OBJ := $(VERSION_SRC:.cc=.o)
 SAMPLE_OBJ := $(SAMPLE_SRC:.cc=.o)
 MDTTOOL_OBJ := $(MDTTOOL_SRC:.cc=.o)
+MAIL_OBJ := $(MAIL_SRC:.cc=.o)
 UPDATESCHEMA_OBJ := $(UPDATESCHEMA_SRC:.cc=.o)
 WRITE_TEST_OBJ := $(WRITE_TEST_SRC:.cc=.o)
 DUMPFILE_OBJ := $(DUMPFILE_SRC:.cc=.o)
@@ -78,9 +81,9 @@ COLLECTOR_OBJ := $(COLLECTOR_SRC:.cc=.o)
 SCHEDULER_OBJ := $(SCHEDULER_SRC:.cc=.o)
 
 CXX_OBJ := $(SDK_OBJ) $(COMMON_OBJ) $(UTIL_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) \
-           $(SAMPLE_OBJ) $(MDTTOOL_OBJ) $(WRITE_TEST_OBJ) $(MULWRITE_TEST_OBJ) \
+           $(SAMPLE_OBJ) $(MDTTOOL_OBJ) $(MAIL_OBJ) $(WRITE_TEST_OBJ) $(MULWRITE_TEST_OBJ) \
            $(SCAN_TEST_OBJ) $(SYNC_WRITE_TEST_OBJ) $(UPDATESCHEMA_OBJ) $(DUMPFILE_OBJ) \
-	   $(COLLECTOR_OBJ) $(SCHEDULER_OBJ)
+	   $(COLLECTOR_OBJ) $(SCHEDULER_OBJ) 
 C_OBJ := $(C_SAMPLE_OBJ)
 LEVELDB_LIB := src/leveldb/libleveldb.a
 
@@ -138,8 +141,8 @@ test_update_schema: $(UPDATESCHEMA_OBJ) $(LIBRARY) $(LEVELDB_LIB)
 write_test: $(WRITE_TEST_OBJ) $(LIBRARY) $(LEVELDB_LIB)
 	$(CXX) -o $@ $(WRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB) 
 
-dumpfile: $(DUMPFILE_OBJ) $(LIBRARY) $(LEVELDB_LIB)
-	$(CXX) -o $@ $(DUMPFILE_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB) 
+dumpfile: $(DUMPFILE_OBJ) $(LIBRARY) $(LEVELDB_LIB) $(MAIL_OBJ)
+	$(CXX) -o $@ $(DUMPFILE_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB) $(MAIL_OBJ) 
 
 sync_write_test: $(SYNC_WRITE_TEST_OBJ) $(LIBRARY) $(LEVELDB_LIB)
 	$(CXX) -o $@ $(SYNC_WRITE_TEST_OBJ) $(LIBRARY) $(LDFLAGS) $(LEVELDB_LIB)
@@ -168,8 +171,8 @@ agent_main: $(AGENT_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(LEVELDB_LIB) $(OTHER_OBJ)
 collector_main: $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LEVELDB_LIB)
 	$(CXX) -o collector_main $(COLLECTOR_OBJ) $(LIBRARY) $(OTHER_OBJ) $(LDFLAGS) $(LEVELDB_LIB)
 
-scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LEVELDB_LIB)
-	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LDFLAGS) $(LEVELDB_LIB)
+scheduler_main: $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LEVELDB_LIB) $(MAIL_OBJ)
+	$(CXX) -o scheduler_main $(SCHEDULER_OBJ) $(PROTO_OBJ) $(VERSION_OBJ) $(OTHER_OBJ) $(LDFLAGS) $(LEVELDB_LIB) $(MAIL_OBJ)
 
 $(CXX_OBJ): %.o: %.cc $(PROTO_OUT_H) $(LEVELDB_LIB) 
 	$(CXX) $(CXXFLAGS)  -c $< -o $@ $(LEVELDB_LIB) 

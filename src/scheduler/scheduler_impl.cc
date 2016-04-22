@@ -7,6 +7,8 @@
 #include <boost/bind.hpp>
 #include "proto/agent.pb.h"
 
+#include "mail/mail.h"
+#include "leveldb/db.h"
 #include <boost/shared_ptr.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
@@ -29,6 +31,10 @@ DECLARE_int32(collector_timeout);
 DECLARE_int32(collector_max_error);
 DECLARE_int64(scheduler_galaxy_app_trace_period);
 
+// mail
+DECLARE_int64(scheduler_mail_max_queue_size);
+DECLARE_int64(scheduler_mail_delay);
+
 namespace mdt {
 namespace scheduler {
 
@@ -48,7 +54,8 @@ SchedulerImpl::SchedulerImpl()
     : agent_thread_(50),
     collector_thread_(4),
     ctrl_thread_(10),
-    galaxy_trace_pool_(30) {
+    galaxy_trace_pool_(30),
+    monitor_thread_(3) {
 
     rpc_client_ = new RpcClient();
 
@@ -56,6 +63,7 @@ SchedulerImpl::SchedulerImpl()
     pthread_spin_init(&agent_lock_, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&collector_lock_, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&galaxy_trace_lock_, PTHREAD_PROCESS_PRIVATE);
+    pthread_spin_init(&monitor_lock_, PTHREAD_PROCESS_PRIVATE);
 
     agent_thread_stop_ = false;
     pthread_create(&collector_tid_, NULL, BgHandleAgentInfoWrapper, this);
@@ -670,6 +678,200 @@ void SchedulerImpl::DoRpcShowCollectorInfo(::google::protobuf::RpcController* co
 
     int64_t end_ts = mdt::timer::get_micros();
     VLOG(20) << "query collector info, cost time " << end_ts - begin_ts;
+}
+
+/////////////////////////////////////
+// support monitor
+/////////////////////////////////////
+void SchedulerImpl::AsyncPushMonitorCallback(const mdt::LogAgentService::RpcMonitorRequest* req,
+                                             mdt::LogAgentService::RpcMonitorResponse* resp,
+                                             bool failed, int error,
+                                             mdt::LogAgentService::LogAgentService_Stub* service) {
+    delete resp;
+    delete req;
+    delete service;
+}
+
+void SchedulerImpl::CopyRule(const mdt::LogSchedulerService::Rule& r2, mdt::LogAgentService::Rule* r) {
+    mdt::LogAgentService::Expression* expr = r->mutable_expr();
+    const mdt::LogSchedulerService::Expression& expr2 = r2.expr();
+    expr->set_type(expr2.type());
+    expr->set_expr(expr2.expr());
+    expr->set_column_delim(expr2.column_delim());
+    expr->set_column_idx(expr2.column_idx());
+
+    for (uint32_t i = 0; i < r2.record_vec_size(); i++) {
+        mdt::LogAgentService::Record* record = r->add_record_vec();
+        const mdt::LogSchedulerService::Record& record2 = r2.record_vec(i);
+        record->set_op(record2.op());
+        record->set_type(record2.type());
+        record->set_key(record2.key());
+        record->set_key_name(record2.key_name());
+    }
+}
+
+void SchedulerImpl::TranslateMonitorRequest(const mdt::LogSchedulerService::RpcMonitorRequest* request,
+                                            mdt::LogAgentService::RpcMonitorRequest* req) {
+    req->set_db_name(request->db_name());
+    req->set_table_name(request->table_name());
+    for (uint32_t i = 0; i < request->moduler_owner_size(); i++) {
+        req->set_moduler_owner(i, request->moduler_owner(i));
+    }
+
+    mdt::LogAgentService::RuleInfo* rule_info = req->mutable_rule_set();
+    mdt::LogAgentService::Rule* rule = rule_info->mutable_result();
+    const mdt::LogSchedulerService::RuleInfo& rule_info2 = request->rule_set();
+    const mdt::LogSchedulerService::Rule& rule2 =rule_info2.result();
+    CopyRule(rule2, rule);
+
+    for (uint32_t j = 0; j < rule_info2.rule_list_size(); j++) {
+        mdt::LogAgentService::Rule* r = rule_info->add_rule_list();
+        const mdt::LogSchedulerService::Rule& r2 = rule_info2.rule_list(j);
+        CopyRule(r2, r);
+    }
+    return;
+}
+
+void SchedulerImpl::DoRpcMonitor(::google::protobuf::RpcController* controller,
+                    const mdt::LogSchedulerService::RpcMonitorRequest* request,
+                    mdt::LogSchedulerService::RpcMonitorResponse* response,
+                    ::google::protobuf::Closure* done) {
+    // send monitor info to all agent
+    // TODO: support label
+    std::vector<std::string> addr_vec;
+    pthread_spin_lock(&agent_lock_);
+    std::map<std::string, AgentInfo>::iterator it = agent_map_.begin();
+    for (; it != agent_map_.end(); ++it) {
+        const std::string& addr = it->first;
+        addr_vec.push_back(addr);
+    }
+    pthread_spin_unlock(&agent_lock_);
+
+    for (uint32_t i = 0; i < addr_vec.size(); i++) {
+        mdt::LogAgentService::LogAgentService_Stub* service;
+        rpc_client_->GetMethodList(addr_vec[i], &service);
+        mdt::LogAgentService::RpcMonitorRequest* req = new mdt::LogAgentService::RpcMonitorRequest();
+        mdt::LogAgentService::RpcMonitorResponse* resp = new mdt::LogAgentService::RpcMonitorResponse();
+        TranslateMonitorRequest(request, req);
+
+        boost::function<void (const mdt::LogAgentService::RpcMonitorRequest*,
+                mdt::LogAgentService::RpcMonitorResponse*,
+                bool, int)> callback =
+            boost::bind(&SchedulerImpl::AsyncPushMonitorCallback,
+                    this, _1, _2, _3, _4, service);
+        rpc_client_->AsyncCall(service,
+                &mdt::LogAgentService::LogAgentService_Stub::RpcMonitor,
+                req, resp, callback);
+    }
+
+    done->Run();
+    return;
+}
+
+void SchedulerImpl::RpcMonitor(::google::protobuf::RpcController* controller,
+                    const mdt::LogSchedulerService::RpcMonitorRequest* request,
+                    mdt::LogSchedulerService::RpcMonitorResponse* response,
+                    ::google::protobuf::Closure* done) {
+    // re-send to agent
+    response->set_status(::mdt::LogSchedulerService::kRpcOk);
+    ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcMonitor, this, controller, request, response, done);
+    monitor_thread_.AddTask(task);
+}
+
+void SchedulerImpl::GetMonitorName(const std::string& db_name, const std::string& table_name, std::string* monitor_name) {
+    *monitor_name = db_name + "#" + table_name;
+    return;
+}
+
+void SchedulerImpl::PackMail(const std::string& to, const mdt::LogSchedulerService::RpcMonitorStreamRequest* request) {
+    mdt::LogSchedulerService::RpcMonitorStreamRequest req;
+    req.CopyFrom(*request);
+    std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest> local_queue;
+
+    pthread_spin_lock(&monitor_lock_);
+    std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest>& queue = mail_queue_[to];
+    queue.push_back(req);
+
+    if (queue.size() > FLAGS_scheduler_mail_max_queue_size) {
+        swap(local_queue, queue);
+    }
+    pthread_spin_unlock(&monitor_lock_);
+
+    InternalSendMail(to, local_queue);
+    if (local_queue.size() == 0) {
+        // delay send mail
+        ThreadPool::Task task = boost::bind(&SchedulerImpl::DelaySendMail, this, to);
+        monitor_thread_.DelayTask(FLAGS_scheduler_mail_delay, task);
+    }
+    return;
+}
+
+void SchedulerImpl::DelaySendMail(std::string to) {
+    std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest> local_queue;
+
+    pthread_spin_lock(&monitor_lock_);
+    std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest>& queue = mail_queue_[to];
+    swap(local_queue, queue);
+    pthread_spin_unlock(&monitor_lock_);
+
+    InternalSendMail(to, local_queue);
+    return;
+}
+
+void SchedulerImpl::InternalSendMail(const std::string& to, std::vector<mdt::LogSchedulerService::RpcMonitorStreamRequest>& local_queue) {
+    if (local_queue.size() == 0 || to.size() == 0) {
+        return;
+    }
+    std::string subject = "[Trace monitor].trace_event";
+    std::string message = "hi all:\n\n";
+
+    // construct message
+    for (uint32_t i = 0; i < local_queue.size(); i++) {
+        const mdt::LogSchedulerService::RpcMonitorStreamRequest& req = local_queue[i];
+        for (uint32_t j = 0; j < req.log_record_size(); j++) {
+            std::string log_record = req.hostname() + ": " + req.db_name() + "#" + req.table_name() + ": " + req.log_record(j);
+            message.append("\t\t");
+            message.append(log_record);
+            message.append("\n");
+        }
+    }
+
+    mail_.SendMail(to, "", subject, message);
+    return;
+}
+
+void SchedulerImpl::DoRpcMonitorStream(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcMonitorStreamRequest* request,
+                          mdt::LogSchedulerService::RpcMonitorStreamResponse* response,
+                          ::google::protobuf::Closure* done) {
+    std::string mname;
+    GetMonitorName(request->db_name(), request->table_name(), &mname);
+    pthread_spin_lock(&monitor_lock_);
+    if (monitor_handler_set_.find(mname) != monitor_handler_set_.end()) {
+        const mdt::LogSchedulerService::RpcMonitorRequest& monitor = monitor_handler_set_[mname];
+        for (uint32_t i = 0; i < monitor.moduler_owner_size(); i++) {
+            std::string to = monitor.moduler_owner(i);
+            pthread_spin_unlock(&monitor_lock_);
+
+            // may send mail
+            PackMail(to, request);
+
+            pthread_spin_lock(&monitor_lock_);
+        }
+    }
+    pthread_spin_unlock(&monitor_lock_);
+    done->Run();
+    return;
+}
+
+void SchedulerImpl::RpcMonitorStream(::google::protobuf::RpcController* controller,
+                          const mdt::LogSchedulerService::RpcMonitorStreamRequest* request,
+                          mdt::LogSchedulerService::RpcMonitorStreamResponse* response,
+                          ::google::protobuf::Closure* done) {
+    response->set_status(::mdt::LogSchedulerService::kRpcOk);
+    ThreadPool::Task task = boost::bind(&SchedulerImpl::DoRpcMonitorStream, this, controller, request, response, done);
+    monitor_thread_.AddTask(task);
+    return;
 }
 
 }
