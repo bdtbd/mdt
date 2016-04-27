@@ -406,7 +406,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
     // batch write file system
     FileLocation location;
     DataWriter* writer = GetDataWriter(write_handle);
-    writer->AddRecord(wb.rep_, &location);
+    int res = writer->AddRecord(wb.rep_, &location);
 
     // write index table
     std::vector<WriteContext*>::iterator it = wb.context_list_.begin();
@@ -415,8 +415,11 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
         FileLocation data_location = location;
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
-        VLOG(20) << "put record: offset " << data_location.offset_ << ", size " << data_location.size_
-                << ", pri key " << ctx->req_->primary_key;
+        if (res < 0) {
+            LOG(WARNING) << "FS.error: pri_key " << ctx->req_->primary_key
+                << ", offset " << data_location.offset_
+                << ", size " << data_location.size_;
+        }
         WriteIndexTable(ctx->req_, ctx->resp_, ctx->callback_, ctx->callback_param_, data_location);
     }
 
@@ -536,6 +539,12 @@ void ReleasePutContext(PutContext* context) {
 }
 
 void PutCallback(tera::RowMutation* row) {
+    // dump tera put error
+    ::tera::ErrorCode error = row->GetError();
+    if (error.GetType() != ::tera::ErrorCode::kOK) {
+        LOG(WARNING) << "Tera_write_error " << error.GetReason() << ", rowkey " << row->RowKey();
+    }
+
     PutContext* context = (PutContext*)row->GetContext();
     ReleasePutContext(context);
     delete row;
@@ -2157,8 +2166,12 @@ TableImpl::WriteHandle* TableImpl::GetWriteHandle() {
 // fail tolerant filesystem error, and small span write tera
 int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     Status s;
+    int res = 0;
+    int64_t start_ts, end_ts;
+    start_ts = timer::get_micros();
     s = file_->Append(data);
     if (!s.ok()) {
+        LOG(WARNING) << "add_record: fs_write error " << s.ToString();
         return -1;
     }
     location->size_ = data.size();
@@ -2168,12 +2181,18 @@ int DataWriter::AddRecord(const std::string& data, FileLocation* location) {
     // per 256KB, trigger sync
     assert(offset_ >= cur_sync_offset_);
     if ((offset_ - cur_sync_offset_) > (int32_t)FLAGS_data_size_per_sync) {
-        file_->Sync();
+        s = file_->Sync();
+        if (!s.ok()) {
+            res = -1;
+            LOG(WARNING) << "add_record: fs_sync error " << s.ToString();
+        }
         cur_sync_offset_ = offset_;
     }
-    LOG(INFO) << "add record, offset " << location->offset_
+    end_ts = timer::get_micros();
+    LOG(INFO) << "add_record: cost_time " << end_ts - start_ts
+        << ", offset " << location->offset_
         << ", size " << location->size_;
-    return 0;
+    return res;
 }
 
 // file > 1G or has been create 1 hour, create an new file
