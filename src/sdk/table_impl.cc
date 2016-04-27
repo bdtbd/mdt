@@ -40,6 +40,10 @@ DECLARE_bool(delete_unknow_file);
 
 namespace mdt {
 
+static ThreadPool GLOBAL_read_row_data_threads(FLAGS_read_file_thread_num);
+static ThreadPool GLOBAL_cleaner_thread(FLAGS_cleaner_thread_num);
+static ThreadPool GLOBAL_read_cell_data_threads(FLAGS_async_read_thread_num);
+
 std::ostream& operator << (std::ostream& o, const FileLocation& location) {
     o << "file: " << location.fname_
       << " offset: " << location.offset_
@@ -162,9 +166,9 @@ TableImpl::TableImpl(const TableDescription& table_desc,
     : table_desc_(table_desc),
     tera_(tera_adapter),
     fs_(fs_adapter),
-    read_row_data_threads_(FLAGS_read_file_thread_num),
-    cleaner_thread_(FLAGS_cleaner_thread_num),
-    read_cell_data_threads_(FLAGS_async_read_thread_num),
+    read_row_data_threads_(&GLOBAL_read_row_data_threads),
+    cleaner_thread_(&GLOBAL_cleaner_thread),
+    read_cell_data_threads_(&GLOBAL_read_cell_data_threads),
     queue_timer_stop_(false),
     queue_timer_cv_(&queue_timer_mu_) {
     // create timer
@@ -182,9 +186,10 @@ TableImpl::~TableImpl() {
     //ReleaseDataWriter();
     // TODO: write queue release
 
-    cleaner_thread_.Stop(false);
-    read_cell_data_threads_.Stop(false);
-    read_row_data_threads_.Stop(false);
+    // use static thread pool
+    //cleaner_thread_.Stop(false);
+    //read_cell_data_threads_.Stop(false);
+    //read_row_data_threads_.Stop(false);
     FreeTeraTable();
 
     // stop timer, flush request
@@ -1180,7 +1185,7 @@ void TableImpl::GetByFilterIndex(tera::Table* index_table, bool is_ts_table,
     }
     // batch scan must wait other rpc callback
     //delete stream;
-    cleaner_thread_.AddTask(boost::bind(&TableImpl::CleanerThread, this, stream));
+    cleaner_thread_->AddTask(boost::bind(&TableImpl::CleanerThread, this, stream));
 
     {
         multi_param->mutex.Lock();
@@ -1484,7 +1489,7 @@ void TableImpl::ReadPrimaryTableCallback(tera::RowReader* reader) {
     VLOG(12) << "finish read primary table: " <<  param->table->table_desc_.table_name
              << ", primary key: " << DebugString(primary_key);
     // parallelly process row results in same rpc
-    param->table->read_row_data_threads_.AddTask(boost::bind(&TableImpl::ReadData, param->table, reader));
+    param->table->read_row_data_threads_->AddTask(boost::bind(&TableImpl::ReadData, param->table, reader));
 }
 
 struct AsyncReadParam {
@@ -1604,7 +1609,7 @@ void TableImpl::ReadData(tera::RowReader* reader) {
                     async_read_param->nr_record = &nr_record;
                     async_read_param->nr_reader = &nr_reader;
                     async_read_param->location = &location;
-                    read_cell_data_threads_.AddTask(boost::bind(&TableImpl::AsyncRead, this, async_read_param));
+                    read_cell_data_threads_->AddTask(boost::bind(&TableImpl::AsyncRead, this, async_read_param));
                 }
                 {
                     MutexLock l(&lock);

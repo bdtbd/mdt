@@ -292,10 +292,10 @@ private:
     TableDescription table_desc_;
     TeraAdapter tera_;
     FilesystemAdapter fs_;
-    ThreadPool read_row_data_threads_;
+    ThreadPool *read_row_data_threads_;
     // async cleaner
-    ThreadPool cleaner_thread_;
-    ThreadPool read_cell_data_threads_;
+    ThreadPool *cleaner_thread_;
+    ThreadPool *read_cell_data_threads_;
 
     // file handle cache relative
     mutable Mutex file_mutex_;
