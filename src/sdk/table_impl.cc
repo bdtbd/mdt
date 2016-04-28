@@ -2137,7 +2137,10 @@ DataWriter* TableImpl::GetDataWriter(WriteHandle* write_handle) {
     if (write_handle->writer_ == NULL) {
         std::string fname = fs_.root_path_ + "/" + TimeToString(&filetime) + ".data";
         WritableFile* file;
-        fs_.env_->NewWritableFile(fname, &file);
+        Status s = fs_.env_->NewWritableFile(fname, &file);
+        if (!s.ok()) {
+            LOG(WARNING) << "fs_create_error " << s.ToString();
+        }
         write_handle->writer_ = new DataWriter(fname, file);
         write_handle->writer_->SetFileTime(filetime);
         LOG(INFO) << "nowts " << timer::get_micros() << ", filetime " << write_handle->writer_->GetFileTime();
