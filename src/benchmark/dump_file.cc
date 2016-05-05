@@ -299,11 +299,22 @@ int SendMail(const char *to, const char *from, const char *subject, const char *
     return retval;
 }
 
+void LineDelim() {
+    std::string linedelims = " \t";
+    std::string line = "abc def\tijk ubj\tkfc\tgg";
+    std::vector<std::string> kvpairs;
+    boost::split(kvpairs, line, boost::is_any_of(linedelims));
+    for (uint32_t i = 0; i < kvpairs.size(); i++) {
+        std::cout << kvpairs[i] << std::endl;
+    }
+}
+
 // ./dump_file --flagfile=../conf/mdt.flag --op=create --index_list=passuid,mobile --dbname=TEST_db --tablename=TEST_table001
 // ./dump_file --flagfile=../conf/mdt.flag --op=dumpfile --primary_key=id --index_list=passuid,mobile --dbname=TEST_db --tablename=TEST_table001 --logfile=xxxx.dat
 // ./dump_file --flagfile=../conf/mdt.flag --op=get_index --logfile=xxxx.dat
 int main(int ac, char* av[])
 {
+    LineDelim();
     ParseNuomiJson();
     ParseJson();
     Regex();

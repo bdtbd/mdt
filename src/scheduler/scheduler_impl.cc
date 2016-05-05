@@ -715,7 +715,8 @@ void SchedulerImpl::TranslateMonitorRequest(const mdt::LogSchedulerService::RpcM
     req->set_db_name(request->db_name());
     req->set_table_name(request->table_name());
     for (uint32_t i = 0; i < request->moduler_owner_size(); i++) {
-        req->set_moduler_owner(i, request->moduler_owner(i));
+        std::string* mail = req->add_moduler_owner();
+        *mail = request->moduler_owner(i);
     }
 
     mdt::LogAgentService::RuleInfo* rule_info = req->mutable_rule_set();
@@ -736,6 +737,14 @@ void SchedulerImpl::DoRpcMonitor(::google::protobuf::RpcController* controller,
                     const mdt::LogSchedulerService::RpcMonitorRequest* request,
                     mdt::LogSchedulerService::RpcMonitorResponse* response,
                     ::google::protobuf::Closure* done) {
+    // add monitor info
+    std::string mname;
+    GetMonitorName(request->db_name(), request->table_name(), &mname);
+    pthread_spin_lock(&monitor_lock_);
+    mdt::LogSchedulerService::RpcMonitorRequest& monitor = monitor_handler_set_[mname];
+    monitor.CopyFrom(*request);
+    pthread_spin_unlock(&monitor_lock_);
+
     // send monitor info to all agent
     // TODO: support label
     std::vector<std::string> addr_vec;
@@ -747,13 +756,17 @@ void SchedulerImpl::DoRpcMonitor(::google::protobuf::RpcController* controller,
     }
     pthread_spin_unlock(&agent_lock_);
 
+    mdt::LogAgentService::RpcMonitorRequest temp_req;
+    TranslateMonitorRequest(request, &temp_req);
+    LOG(INFO) << mname << ", " << temp_req.DebugString() << std::endl;
+
     for (uint32_t i = 0; i < addr_vec.size(); i++) {
         mdt::LogAgentService::LogAgentService_Stub* service;
         rpc_client_->GetMethodList(addr_vec[i], &service);
         mdt::LogAgentService::RpcMonitorRequest* req = new mdt::LogAgentService::RpcMonitorRequest();
         mdt::LogAgentService::RpcMonitorResponse* resp = new mdt::LogAgentService::RpcMonitorResponse();
-        TranslateMonitorRequest(request, req);
 
+        req->CopyFrom(temp_req);
         boost::function<void (const mdt::LogAgentService::RpcMonitorRequest*,
                 mdt::LogAgentService::RpcMonitorResponse*,
                 bool, int)> callback =

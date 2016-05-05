@@ -1,0 +1,119 @@
+<html lang='en'>
+<head>
+</head>
+
+<body>
+<div>
+    <nav class="navbar navbar-default lumia-nav">
+        <div class="container-fluid">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="#">Trace-e</a>
+            </div>
+            <ul class="nav navbar-nav">
+                <li class="active"><a href="#">Home</a></li>
+                <li><a href="#/monitor">Monitor</a></li>
+            </ul>
+        </div>
+    </nav>
+    
+    <div class="container lumia-view">
+        <div style="border:1px solid #ccc; margin:10px">
+            <div class="input-group">
+                <span class="input-group-addon">DB</span>
+                <input type="text" class="form-control" placeholder="nuomi" ng-model="conf.db_name" />
+                <span class="input-group-addon">Table</span>
+                <input type="text" class="form-control" placeholder="user_state" ng-model="conf.table_name" />
+            </div>
+        </div>
+
+        <div style="border:1px solid #ccc; margin:10px">
+            <div class="input-group">
+                <span class="input-group-addon">Mail</span>
+                <input type="text" class="form-control" placeholder="xxx@baidu.com" ng-model="mailer" />
+            </div>
+            <button type="button" class="btn btn-default" ng-click="AddOwner()">Add Mail</button>
+        </div>
+
+        <div style="border:1px solid #ccc; margin:10px">
+            <div ng-repeat="rule in conf.rule_set.rule_list"> 
+                <div style="border:1px solid #ccc; margin:10px;">
+                
+                <div class="input-group">
+                    <span class="input-group-addon">Type</span>
+                    <input type="text" class="form-control" placeholder="regex" ng-model="rule.expression.type" />
+                    
+                    <span class="input-group-addon">Expr</span>
+                    <input type="text" class="form-control" placeholder="id: ([0-9])" ng-model="rule.expression.expr" />
+                    
+                    <span class="input-group-addon">Col delim</span>
+                    <input type="text" class="form-control" placeholder="||" ng-model="rule.expression.col_delim" />
+                    
+                    <span class="input-group-addon">Col idx</span>
+                    <input type="text" class="form-control" placeholder="3" ng-model="rule.expression.col_idx" />
+                </div>
+                
+                <div class="input-group" ng-repeat="record in rule.record">
+                    <span class="input-group-addon">Key</span>
+                    <input type="text" class="form-control" placeholder="passuid" ng-model="record.key_name" />
+                    
+                    <span class="input-group-addon">Value</span>
+                    <input type="text" class="form-control" placeholder="0" ng-model="record.key" />
+                    
+                    <span class="input-group-addon">Type</span>
+                    <input type="text" class="form-control" placeholder="int64;string" ng-model="record.type" />
+                    
+                    <span class="input-group-addon">Op</span>
+                    <input type="text" class="form-control" placeholder="==,>=,>,<,<=" ng-model="record.op" />
+                </div>
+                <button type="button" class="btn btn-default" ng-click="AddRecord($index)">Add Recod</button>
+
+                </div>
+            </div> 
+            <button type="button" class="btn btn-default" ng-click="AddRule()">Add Rule</button>
+        </div>
+        
+        <div style="border:1px solid #ccc; margin:10px;">
+            <div class="input-group">
+                <span class="input-group-addon">Type</span>
+                <input type="text" class="form-control" placeholder="json" ng-model="conf.rule_set.result.expression.type" />
+                
+                <span class="input-group-addon">Expr</span>
+                <input type="text" class="form-control" placeholder="no" ng-model="conf.rule_set.result.expression.expr" />
+                
+                <span class="input-group-addon">Col delim</span>
+                <input type="text" class="form-control" placeholder="||" ng-model="conf.rule_set.result.expression.col_delim" />
+                
+                <span class="input-group-addon">Col idx</span>
+                <input type="text" class="form-control" placeholder="3" ng-model="conf.rule_set.result.expression.col_idx" />
+            </div>
+        
+            <div ng-repeat="record in conf.rule_set.result.record">
+                <div class="input-group">
+                    <span class="input-group-addon">Key</span>
+                    <input type="text" class="form-control" placeholder="errno" ng-model="record.key_name" />
+                    
+                    <span class="input-group-addon">Value</span>
+                    <input type="text" class="form-control" placeholder="0" ng-model="record.key" />
+                    
+                    <span class="input-group-addon">Type</span>
+                    <input type="text" class="form-control" placeholder="int64;string" ng-model="record.type" />
+                    
+                    <span class="input-group-addon">Op</span>
+                    <input type="text" class="form-control" placeholder="==,>,>=,<,<=" ng-model="record.op" />
+                </div>
+            </div>
+            <button type="button" class="btn btn-default" ng-click="AddResultRecord($index)">Add Result</button>
+        </div>
+
+        <button type="button" class="btn btn-default"  ng-click="SubmitConf()">Submit</button>
+    </div> 
+   
+    <div style="border:1px solid #ccc; margin:10px;">
+        <p> configure: {{conf}} </p>
+        <p> status: {{submit_res}} </p>
+    </div>
+</div>
+</body>
+</html>
+
+                                                                                                                                        </table>

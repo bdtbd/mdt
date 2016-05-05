@@ -49,6 +49,8 @@ DECLARE_int64(agent_max_fd_num);
 namespace mdt {
 namespace agent {
 
+static int64_t kLastLogWarningTime;
+
 void* LogStreamWrapper(void* arg) {
     LogStream* stream = (LogStream*)arg;
     stream->Run();
@@ -70,6 +72,8 @@ LogStream::LogStream(std::string module_name, LogOptions log_options,
     pthread_spin_init(&monitor_lock_, PTHREAD_PROCESS_PRIVATE);
     db_name_ = FLAGS_db_name;
     table_name_ = FLAGS_table_name;
+
+    kLastLogWarningTime = timer::get_micros();
 
     // support line filter
     if (FLAGS_string_line_filter_list.size() > 0) {
@@ -727,8 +731,11 @@ void LogStream::AsyncPushCallback(const mdt::SearchEngine::RpcStoreRequest* req,
                                   DBKey* key) {
     // handle data push error
     if (failed || (resp->status() != mdt::SearchEngine::RpcOK)) {
-        LOG(WARNING) << "async write error " << error << ", key " << (uint64_t)key << ", file " << key->filename << " add to failed event queue"
-            << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get() << ", offset " << key->offset;
+        if (kLastLogWarningTime + 1000000 < timer::get_micros()) {
+            kLastLogWarningTime = timer::get_micros();
+            LOG(WARNING) << "async write error " << error << ", key " << (uint64_t)key << ", file " << key->filename << " add to failed event queue"
+                << ", req " << (uint64_t)req << ", resp " << (uint64_t)resp << ", key.ref " << key->ref.Get() << ", offset " << key->offset;
+        }
         pthread_spin_lock(server_addr_lock_);
         info_->error_nr++;
         pthread_spin_unlock(server_addr_lock_);
@@ -775,7 +782,8 @@ int LogStream::AsyncPushMonitor(const std::string& table_name, const std::vector
     req->set_table_name(table_name);
     req->set_hostname(hname);
     for (uint32_t i = 0; i < monitor_vec.size(); i++) {
-        req->set_log_record(i, monitor_vec[i]);
+        std::string* tmp_record = req->add_log_record();
+        *tmp_record = monitor_vec[i];
     }
     boost::function<void (const mdt::LogSchedulerService::RpcMonitorStreamRequest*,
                           mdt::LogSchedulerService::RpcMonitorStreamResponse*,
@@ -852,6 +860,7 @@ int LogStream::AddMonitor(const mdt::LogAgentService::RpcMonitorRequest* request
     mdt::LogAgentService::RpcMonitorRequest& monitor = monitor_handler_set_[request->table_name()];
     monitor.CopyFrom(*request);
     pthread_spin_unlock(&monitor_lock_);
+    VLOG(10) << "Add Monitor: " << request->DebugString();
     return 0;
 }
 
@@ -909,12 +918,14 @@ bool LogStream::CheckRegex(const std::string& line, const mdt::LogAgentService::
             while (boost::regex_search(start, end, watch, expression)) {
                 // check log.y1, log.y2 {==, >=, >, <=, <} rule.x1, rule.x2
                 if (watch.size() >= (rule.record_vec_size() + 1)) {
+                    LOG(INFO) << line << ", watch " << watch[0];
                     for (uint32_t result_idx = 1; result_idx < watch.size(); result_idx++) {
-                        if (!CheckRecord(watch[result_idx], rule.record_vec(result_idx))) {
+                        if (!CheckRecord(watch[result_idx], rule.record_vec(result_idx - 1))) {
                             is_match = false;
                             break;
                         }
                         is_match = true;
+                        LOG(INFO) << "log.key " << watch[result_idx] << ", expect.key " << rule.record_vec(result_idx - 1).key();
                     }
                 }
                 start = watch[0].second;
@@ -932,11 +943,13 @@ bool LogStream::CheckJson(const std::string& line, const mdt::LogAgentService::R
     bool is_match = false;
     const mdt::LogAgentService::Expression& expr = rule.expr();
 
-    if (expr.type() == "Json") {
+    LOG(INFO) << line << ", rule " << rule.DebugString();
+    if (expr.type() == "json") {
         LogRecord log;
         std::vector<std::string> str_delim_vec;
         str_delim_vec.push_back(expr.column_delim());
         if (log.SplitLogItem(line, str_delim_vec) >= 0 && log.columns.size() > expr.column_idx()) {
+            LOG(INFO) << line << ", json " << log.columns[expr.column_idx()];
             std::stringstream ss(log.columns[expr.column_idx()]);
             try {
                 boost::property_tree::ptree ptree;
@@ -948,6 +961,7 @@ bool LogStream::CheckJson(const std::string& line, const mdt::LogAgentService::R
                         break;
                     }
                     is_match = true;
+                    LOG(INFO) << "json.key " << item << ", expect.key " << rule.record_vec(idx).key();
                 }
             } catch (boost::property_tree::ptree_error& e) {}
         }
@@ -975,7 +989,8 @@ bool LogStream::MonitorHasEvent(const std::string& table_name, const std::string
 
             // 2. parse and check result
             const mdt::LogAgentService::Rule& result = rule_info.result();
-            is_match = is_match && CheckJson(line, result);
+            LOG(INFO) << "is_match " << is_match;
+            is_match = is_match && !CheckJson(line, result);
         }
     }
     pthread_spin_unlock(&monitor_lock_);
@@ -1229,7 +1244,10 @@ int FileStream::Read(std::vector<std::string>* line_vec, DBKey** key) {
         char* buf = new char[size];
         ssize_t res = pread(fd_, buf, size, offset);
         if (res < 0) {
-            LOG(WARNING) << "redo cp, read file error, offset " << offset << ", size " << size << ", res " << res;
+            if (kLastLogWarningTime + 1000000 < timer::get_micros()) {
+                kLastLogWarningTime = timer::get_micros();
+                LOG(WARNING) << "redo cp, read file error, offset " << offset << ", size " << size << ", res " << res;
+            }
             ret = -1;
         } else if (res == 0) {
            VLOG(30) << "file " << filename_ << ", read size 0";
@@ -1275,7 +1293,7 @@ int FileStream::LogCheckPoint(uint64_t offset, uint64_t size) {
             mem_checkpoint_list_.erase(it);
         }
         pthread_spin_unlock(&lock_);
-        LOG(WARNING) << "log cp into leveldb error, file " << filename_ << ", offset " << offset << ", size " << size;
+        LOG(WARNING) << "log cp into leveldb error, file " << filename_ << ", offset " << offset << ", size " << size << ", err " << s.ToString();
         ret = -1;
     } else {
         // write db success

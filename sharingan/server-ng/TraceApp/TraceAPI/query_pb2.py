@@ -16,13 +16,15 @@ from google.protobuf import descriptor_pb2
 _sym_db = _symbol_database.Default()
 
 
+import sofa.pbrpc.rpc_option_pb2
 
 
 DESCRIPTOR = _descriptor.FileDescriptor(
   name='query.proto',
   package='mdt.SearchEngine',
-  serialized_pb=_b('\n\x0bquery.proto\x12\x10mdt.SearchEngine\"l\n\x11RpcIndexCondition\x12\x18\n\x10index_table_name\x18\x01 \x01(\t\x12,\n\x03\x63mp\x18\x02 \x01(\x0e\x32\x1f.mdt.SearchEngine.RpcComparator\x12\x0f\n\x07\x63mp_key\x18\x03 \x01(\t\"\xc3\x01\n\x10RpcSearchRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\x12\x12\n\ntable_name\x18\x02 \x01(\t\x12\x13\n\x0bprimary_key\x18\x03 \x01(\t\x12\x36\n\tcondition\x18\x04 \x03(\x0b\x32#.mdt.SearchEngine.RpcIndexCondition\x12\x17\n\x0fstart_timestamp\x18\x05 \x01(\x04\x12\x15\n\rend_timestamp\x18\x06 \x01(\x04\x12\r\n\x05limit\x18\x07 \x01(\x05\"9\n\x0fRpcResultStream\x12\x13\n\x0bprimary_key\x18\x01 \x01(\t\x12\x11\n\tdata_list\x18\x02 \x03(\x0c\"K\n\x11RpcSearchResponse\x12\x36\n\x0bresult_list\x18\x01 \x03(\x0b\x32!.mdt.SearchEngine.RpcResultStream\":\n\x13RpcOpenTableRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\x12\x12\n\ntable_name\x18\x02 \x01(\t\"K\n\x14RpcOpenTableResponse\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.mdt.SearchEngine.RpcResponseStatus\")\n\x16RpcOpenDatabaseRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\"N\n\x17RpcOpenDatabaseResponse\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.mdt.SearchEngine.RpcResponseStatus*G\n\x11RpcResponseStatus\x12\t\n\x05RpcOK\x10\x01\x12\x14\n\x10RpcTableNotFound\x10\x02\x12\x11\n\rRpcNotSupport\x10\x03*v\n\rRpcComparator\x12\x0e\n\nRpcEqualTo\x10\x00\x12\x11\n\rRpcNotEqualTo\x10\x01\x12\x0b\n\x07RpcLess\x10\x02\x12\x10\n\x0cRpcLessEqual\x10\x03\x12\x0e\n\nRpcGreater\x10\x04\x12\x13\n\x0fRpcGreaterEqual\x10\x05\x32\xa9\x02\n\x13SearchEngineService\x12Q\n\x06Search\x12\".mdt.SearchEngine.RpcSearchRequest\x1a#.mdt.SearchEngine.RpcSearchResponse\x12Z\n\tOpenTable\x12%.mdt.SearchEngine.RpcOpenTableRequest\x1a&.mdt.SearchEngine.RpcOpenTableResponse\x12\x63\n\x0cOpenDatabase\x12(.mdt.SearchEngine.RpcOpenDatabaseRequest\x1a).mdt.SearchEngine.RpcOpenDatabaseResponseB\x06\x80\x01\x01\x90\x01\x01')
-)
+  serialized_pb=_b('\n\x0bquery.proto\x12\x10mdt.SearchEngine\x1a\x1bsofa/pbrpc/rpc_option.proto\"l\n\x11RpcIndexCondition\x12\x18\n\x10index_table_name\x18\x01 \x01(\t\x12,\n\x03\x63mp\x18\x02 \x01(\x0e\x32\x1f.mdt.SearchEngine.RpcComparator\x12\x0f\n\x07\x63mp_key\x18\x03 \x01(\t\"\xc3\x01\n\x10RpcSearchRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\x12\x12\n\ntable_name\x18\x02 \x01(\t\x12\x13\n\x0bprimary_key\x18\x03 \x01(\t\x12\x36\n\tcondition\x18\x04 \x03(\x0b\x32#.mdt.SearchEngine.RpcIndexCondition\x12\x17\n\x0fstart_timestamp\x18\x05 \x01(\x04\x12\x15\n\rend_timestamp\x18\x06 \x01(\x04\x12\r\n\x05limit\x18\x07 \x01(\x05\"9\n\x0fRpcResultStream\x12\x13\n\x0bprimary_key\x18\x01 \x01(\t\x12\x11\n\tdata_list\x18\x02 \x03(\x0c\"K\n\x11RpcSearchResponse\x12\x36\n\x0bresult_list\x18\x01 \x03(\x0b\x32!.mdt.SearchEngine.RpcResultStream\":\n\x13RpcOpenTableRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\x12\x12\n\ntable_name\x18\x02 \x01(\t\"K\n\x14RpcOpenTableResponse\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.mdt.SearchEngine.RpcResponseStatus\")\n\x16RpcOpenDatabaseRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\"N\n\x17RpcOpenDatabaseResponse\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.mdt.SearchEngine.RpcResponseStatus\"1\n\rRpcStoreIndex\x12\x13\n\x0bindex_table\x18\x01 \x01(\t\x12\x0b\n\x03key\x18\x02 \x01(\x0c\"\xa1\x01\n\x0fRpcStoreRequest\x12\x0f\n\x07\x64\x62_name\x18\x01 \x01(\t\x12\x12\n\ntable_name\x18\x02 \x01(\t\x12\x13\n\x0bprimary_key\x18\x03 \x01(\t\x12\x33\n\nindex_list\x18\x04 \x03(\x0b\x32\x1f.mdt.SearchEngine.RpcStoreIndex\x12\x11\n\ttimestamp\x18\x05 \x01(\x04\x12\x0c\n\x04\x64\x61ta\x18\x06 \x01(\x0c\"G\n\x10RpcStoreResponse\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.mdt.SearchEngine.RpcResponseStatus*W\n\x11RpcResponseStatus\x12\t\n\x05RpcOK\x10\x01\x12\x14\n\x10RpcTableNotFound\x10\x02\x12\x11\n\rRpcNotSupport\x10\x03\x12\x0e\n\nServerBusy\x10\x04*v\n\rRpcComparator\x12\x0e\n\nRpcEqualTo\x10\x00\x12\x11\n\rRpcNotEqualTo\x10\x01\x12\x0b\n\x07RpcLess\x10\x02\x12\x10\n\x0cRpcLessEqual\x10\x03\x12\x0e\n\nRpcGreater\x10\x04\x12\x13\n\x0fRpcGreaterEqual\x10\x05\x32\xf9\x02\n\x13SearchEngineService\x12Q\n\x06Search\x12\".mdt.SearchEngine.RpcSearchRequest\x1a#.mdt.SearchEngine.RpcSearchResponse\x12N\n\x05Store\x12!.mdt.SearchEngine.RpcStoreRequest\x1a\".mdt.SearchEngine.RpcStoreResponse\x12Z\n\tOpenTable\x12%.mdt.SearchEngine.RpcOpenTableRequest\x1a&.mdt.SearchEngine.RpcOpenTableResponse\x12\x63\n\x0cOpenDatabase\x12(.mdt.SearchEngine.RpcOpenDatabaseRequest\x1a).mdt.SearchEngine.RpcOpenDatabaseResponseB\x06\x80\x01\x01\x90\x01\x01')
+  ,
+  dependencies=[sofa.pbrpc.rpc_option_pb2.DESCRIPTOR,])
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 _RPCRESPONSESTATUS = _descriptor.EnumDescriptor(
@@ -43,11 +45,15 @@ _RPCRESPONSESTATUS = _descriptor.EnumDescriptor(
       name='RpcNotSupport', index=2, number=3,
       options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='ServerBusy', index=3, number=4,
+      options=None,
+      type=None),
   ],
   containing_type=None,
   options=None,
-  serialized_start=737,
-  serialized_end=808,
+  serialized_start=1054,
+  serialized_end=1141,
 )
 _sym_db.RegisterEnumDescriptor(_RPCRESPONSESTATUS)
 
@@ -85,8 +91,8 @@ _RPCCOMPARATOR = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=810,
-  serialized_end=928,
+  serialized_start=1143,
+  serialized_end=1261,
 )
 _sym_db.RegisterEnumDescriptor(_RPCCOMPARATOR)
 
@@ -94,6 +100,7 @@ RpcComparator = enum_type_wrapper.EnumTypeWrapper(_RPCCOMPARATOR)
 RpcOK = 1
 RpcTableNotFound = 2
 RpcNotSupport = 3
+ServerBusy = 4
 RpcEqualTo = 0
 RpcNotEqualTo = 1
 RpcLess = 2
@@ -142,8 +149,8 @@ _RPCINDEXCONDITION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=33,
-  serialized_end=141,
+  serialized_start=62,
+  serialized_end=170,
 )
 
 
@@ -214,8 +221,8 @@ _RPCSEARCHREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=144,
-  serialized_end=339,
+  serialized_start=173,
+  serialized_end=368,
 )
 
 
@@ -251,8 +258,8 @@ _RPCRESULTSTREAM = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=341,
-  serialized_end=398,
+  serialized_start=370,
+  serialized_end=427,
 )
 
 
@@ -281,8 +288,8 @@ _RPCSEARCHRESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=400,
-  serialized_end=475,
+  serialized_start=429,
+  serialized_end=504,
 )
 
 
@@ -318,8 +325,8 @@ _RPCOPENTABLEREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=477,
-  serialized_end=535,
+  serialized_start=506,
+  serialized_end=564,
 )
 
 
@@ -348,8 +355,8 @@ _RPCOPENTABLERESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=537,
-  serialized_end=612,
+  serialized_start=566,
+  serialized_end=641,
 )
 
 
@@ -378,8 +385,8 @@ _RPCOPENDATABASEREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=614,
-  serialized_end=655,
+  serialized_start=643,
+  serialized_end=684,
 )
 
 
@@ -408,8 +415,140 @@ _RPCOPENDATABASERESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=657,
-  serialized_end=735,
+  serialized_start=686,
+  serialized_end=764,
+)
+
+
+_RPCSTOREINDEX = _descriptor.Descriptor(
+  name='RpcStoreIndex',
+  full_name='mdt.SearchEngine.RpcStoreIndex',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='index_table', full_name='mdt.SearchEngine.RpcStoreIndex.index_table', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='key', full_name='mdt.SearchEngine.RpcStoreIndex.key', index=1,
+      number=2, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b(""),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=766,
+  serialized_end=815,
+)
+
+
+_RPCSTOREREQUEST = _descriptor.Descriptor(
+  name='RpcStoreRequest',
+  full_name='mdt.SearchEngine.RpcStoreRequest',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='db_name', full_name='mdt.SearchEngine.RpcStoreRequest.db_name', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='table_name', full_name='mdt.SearchEngine.RpcStoreRequest.table_name', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='primary_key', full_name='mdt.SearchEngine.RpcStoreRequest.primary_key', index=2,
+      number=3, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='index_list', full_name='mdt.SearchEngine.RpcStoreRequest.index_list', index=3,
+      number=4, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='timestamp', full_name='mdt.SearchEngine.RpcStoreRequest.timestamp', index=4,
+      number=5, type=4, cpp_type=4, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='data', full_name='mdt.SearchEngine.RpcStoreRequest.data', index=5,
+      number=6, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b(""),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=818,
+  serialized_end=979,
+)
+
+
+_RPCSTORERESPONSE = _descriptor.Descriptor(
+  name='RpcStoreResponse',
+  full_name='mdt.SearchEngine.RpcStoreResponse',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='status', full_name='mdt.SearchEngine.RpcStoreResponse.status', index=0,
+      number=1, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=1,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=981,
+  serialized_end=1052,
 )
 
 _RPCINDEXCONDITION.fields_by_name['cmp'].enum_type = _RPCCOMPARATOR
@@ -417,6 +556,8 @@ _RPCSEARCHREQUEST.fields_by_name['condition'].message_type = _RPCINDEXCONDITION
 _RPCSEARCHRESPONSE.fields_by_name['result_list'].message_type = _RPCRESULTSTREAM
 _RPCOPENTABLERESPONSE.fields_by_name['status'].enum_type = _RPCRESPONSESTATUS
 _RPCOPENDATABASERESPONSE.fields_by_name['status'].enum_type = _RPCRESPONSESTATUS
+_RPCSTOREREQUEST.fields_by_name['index_list'].message_type = _RPCSTOREINDEX
+_RPCSTORERESPONSE.fields_by_name['status'].enum_type = _RPCRESPONSESTATUS
 DESCRIPTOR.message_types_by_name['RpcIndexCondition'] = _RPCINDEXCONDITION
 DESCRIPTOR.message_types_by_name['RpcSearchRequest'] = _RPCSEARCHREQUEST
 DESCRIPTOR.message_types_by_name['RpcResultStream'] = _RPCRESULTSTREAM
@@ -425,6 +566,9 @@ DESCRIPTOR.message_types_by_name['RpcOpenTableRequest'] = _RPCOPENTABLEREQUEST
 DESCRIPTOR.message_types_by_name['RpcOpenTableResponse'] = _RPCOPENTABLERESPONSE
 DESCRIPTOR.message_types_by_name['RpcOpenDatabaseRequest'] = _RPCOPENDATABASEREQUEST
 DESCRIPTOR.message_types_by_name['RpcOpenDatabaseResponse'] = _RPCOPENDATABASERESPONSE
+DESCRIPTOR.message_types_by_name['RpcStoreIndex'] = _RPCSTOREINDEX
+DESCRIPTOR.message_types_by_name['RpcStoreRequest'] = _RPCSTOREREQUEST
+DESCRIPTOR.message_types_by_name['RpcStoreResponse'] = _RPCSTORERESPONSE
 DESCRIPTOR.enum_types_by_name['RpcResponseStatus'] = _RPCRESPONSESTATUS
 DESCRIPTOR.enum_types_by_name['RpcComparator'] = _RPCCOMPARATOR
 
@@ -484,6 +628,27 @@ RpcOpenDatabaseResponse = _reflection.GeneratedProtocolMessageType('RpcOpenDatab
   ))
 _sym_db.RegisterMessage(RpcOpenDatabaseResponse)
 
+RpcStoreIndex = _reflection.GeneratedProtocolMessageType('RpcStoreIndex', (_message.Message,), dict(
+  DESCRIPTOR = _RPCSTOREINDEX,
+  __module__ = 'query_pb2'
+  # @@protoc_insertion_point(class_scope:mdt.SearchEngine.RpcStoreIndex)
+  ))
+_sym_db.RegisterMessage(RpcStoreIndex)
+
+RpcStoreRequest = _reflection.GeneratedProtocolMessageType('RpcStoreRequest', (_message.Message,), dict(
+  DESCRIPTOR = _RPCSTOREREQUEST,
+  __module__ = 'query_pb2'
+  # @@protoc_insertion_point(class_scope:mdt.SearchEngine.RpcStoreRequest)
+  ))
+_sym_db.RegisterMessage(RpcStoreRequest)
+
+RpcStoreResponse = _reflection.GeneratedProtocolMessageType('RpcStoreResponse', (_message.Message,), dict(
+  DESCRIPTOR = _RPCSTORERESPONSE,
+  __module__ = 'query_pb2'
+  # @@protoc_insertion_point(class_scope:mdt.SearchEngine.RpcStoreResponse)
+  ))
+_sym_db.RegisterMessage(RpcStoreResponse)
+
 
 DESCRIPTOR.has_options = True
 DESCRIPTOR._options = _descriptor._ParseOptions(descriptor_pb2.FileOptions(), _b('\200\001\001\220\001\001'))
@@ -494,8 +659,8 @@ _SEARCHENGINESERVICE = _descriptor.ServiceDescriptor(
   file=DESCRIPTOR,
   index=0,
   options=None,
-  serialized_start=931,
-  serialized_end=1228,
+  serialized_start=1264,
+  serialized_end=1641,
   methods=[
   _descriptor.MethodDescriptor(
     name='Search',
@@ -507,9 +672,18 @@ _SEARCHENGINESERVICE = _descriptor.ServiceDescriptor(
     options=None,
   ),
   _descriptor.MethodDescriptor(
+    name='Store',
+    full_name='mdt.SearchEngine.SearchEngineService.Store',
+    index=1,
+    containing_service=None,
+    input_type=_RPCSTOREREQUEST,
+    output_type=_RPCSTORERESPONSE,
+    options=None,
+  ),
+  _descriptor.MethodDescriptor(
     name='OpenTable',
     full_name='mdt.SearchEngine.SearchEngineService.OpenTable',
-    index=1,
+    index=2,
     containing_service=None,
     input_type=_RPCOPENTABLEREQUEST,
     output_type=_RPCOPENTABLERESPONSE,
@@ -518,7 +692,7 @@ _SEARCHENGINESERVICE = _descriptor.ServiceDescriptor(
   _descriptor.MethodDescriptor(
     name='OpenDatabase',
     full_name='mdt.SearchEngine.SearchEngineService.OpenDatabase',
-    index=2,
+    index=3,
     containing_service=None,
     input_type=_RPCOPENDATABASEREQUEST,
     output_type=_RPCOPENDATABASERESPONSE,

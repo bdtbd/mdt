@@ -1,0 +1,117 @@
+/**
+ * @file lumia common css
+ * @author wanghaitao01
+ * @date 2016/03/08
+ */
+body {
+    font-family: Arial, sans-serif;
+    overflow-y: scroll;
+    height: 100%;
+    display: block;
+    margin: auto;
+    position: absolute;
+    width: 100%;
+    background-color: #f7f7f7;
+}
+thead {
+    background-color: #F1F1F1;
+    color: #000;
+}
+.user {
+    color: #15c !important;
+}
+.lumia-nav {
+    border: none;
+    border-bottom: 1px solid #dedede;
+}
+.lumia-view {
+    border: 1px dashed #CCC;
+    background-color: #fff;
+    border-radius: 2px;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+    min-height: calc(100vh - 100px);
+}
+.input-group {
+    margin-bottom: 10px;
+}
+.navbar-toolbar.navbar-default .navbar-nav>.active>a,
+.navbar-toolbar.navbar-default .navbar-nav>.active>a:hover,
+.navbar-toolbar.navbar-default .navbar-nav>.active>a:focus {
+    color: #333;
+    background-color: #d2d2d2;
+}
+.navbar-toolbar.navbar-default .navbar-nav>.active>a:after {
+    border-bottom: 7px solid #F3F3F3;
+}
+.navbar-toolbar {
+    margin-bottom: 12px;
+}
+.nav-tabs {
+    border-bottom: 1px solid #1155CC;
+}
+.th-checkbox {
+    padding: 3px 5px !important;
+}
+.th-number {
+    max-width: 50px;
+    min-width: 30px;
+}
+.th-datetime {
+    width: 135px;
+}
+.th-fix-icon {
+    width: 25px;
+    text-align: center;
+}
+.td-fix-icon {
+    width: 25px;
+    text-align: center;
+    color: #666;
+}
+.fix-icon {
+    cursor: pointer;
+    color: #1155cc;
+}
+.disable {
+    cursor: not-allowed;
+    color: #ddd;
+}
+.th-operate {
+    width: 80px;
+}
+.operate-dropdown-menu {
+    min-width: 80px;
+}
+.float-left {
+    float: left;
+}
+.float-right {
+    float: right;
+}
+.clear {
+    clear: both;
+    height: 0;
+}
+.alert {
+    padding: 4px 28px 4px 8px !important;
+}
+
+.default {
+    background-color: #999;
+}
+.primary {
+    background-color: #4d90fe;
+}
+.success {
+    background-color: #35aa47;
+}
+.info {
+    background-color: #5bc0de;
+}
+.warning {
+    background-color: #faa937;
+}
+.danger {
+    background-color: #d84a38;
+}
