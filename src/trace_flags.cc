@@ -22,7 +22,7 @@ DEFINE_string(string_line_filter_list, "", "support line filter, like: cn_garbag
 DEFINE_string(string_delims, "", "split string by substring");
 
 // split string by char
-DEFINE_string(line_delims, " ", "log tailer's line delim");
+DEFINE_string(line_delims, " \t", "log tailer's line delim");
 DEFINE_string(kv_delims, "=", "log tailer's kv delim");
 DEFINE_bool(enable_index_filter, false, "do not filter log line by index list in agent");
 DEFINE_string(index_list, "", "index table name list");
