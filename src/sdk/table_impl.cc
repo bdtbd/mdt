@@ -572,6 +572,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         const std::string& index_key = it->index_key;
         if (index_name == "" || index_key == "") {
             LOG(WARNING) << "invalid index : " << index_name << " : " << index_key;
+            ReleasePutContext(context);
             continue;
         }
         index_map[index_name] = index_key;
