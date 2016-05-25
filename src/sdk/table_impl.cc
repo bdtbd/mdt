@@ -907,33 +907,35 @@ Status TableImpl::GetByExtendIndex(const std::vector<IndexConditionExtend>& inde
     std::vector<tera::Table*> index_table_vec;
     std::vector<tera::ScanDescriptor*> scan_desc_vec;
 
-    char buf[8];
-    EncodeBigEndian(buf, start_timestamp);
-    std::string start_ts_key(buf, sizeof(buf));
-    EncodeBigEndian(buf, end_timestamp);
-    std::string end_ts_key(buf, sizeof(buf));
-    VLOG(10) << "timestamp range: " << DebugString(start_ts_key) << " ~ "
-             << DebugString(end_ts_key);
+    // if use index search, donot use time table search
     std::vector<tera::Table*> ts_table_list;
-    GetAllTimestampTables(&ts_table_list);
-    for (size_t i = 0; i < ts_table_list.size(); i++) {
-        tera::Table* ts_table = ts_table_list[i];
+    if (index_condition_ex_list.size() == 0) {
+        char buf[8];
+        EncodeBigEndian(buf, start_timestamp);
+        std::string start_ts_key(buf, sizeof(buf));
+        EncodeBigEndian(buf, end_timestamp);
+        std::string end_ts_key(buf, sizeof(buf));
+        VLOG(10) << "timestamp range: " << DebugString(start_ts_key) << " ~ "
+            << DebugString(end_ts_key);
+        GetAllTimestampTables(&ts_table_list);
+        for (size_t i = 0; i < ts_table_list.size(); i++) {
+            tera::Table* ts_table = ts_table_list[i];
 
-        VLOG(10) << "select op, create scan stream of timestamp table " << i;
-        tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
-        scan_desc->SetEnd(end_ts_key + '\0');
+            VLOG(10) << "select op, create scan stream of timestamp table " << i;
+            tera::ScanDescriptor* scan_desc = new tera::ScanDescriptor(start_ts_key);
+            scan_desc->SetEnd(end_ts_key + '\0');
 
-        scan_desc->AddColumnFamily(kIndexTableColumnFamily);
-        if (FLAGS_enable_number_limit) {
-            scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
+            scan_desc->AddColumnFamily(kIndexTableColumnFamily);
+            if (FLAGS_enable_number_limit) {
+                scan_desc->SetNumberLimit(FLAGS_scan_number_limit);
+            }
+            scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
+            scan_desc->SetPackInterval(FLAGS_tera_scan_pack_interval);
+
+            index_table_vec.push_back(ts_table);
+            scan_desc_vec.push_back(scan_desc);
         }
-        scan_desc->SetBufferSize(FLAGS_batch_scan_buffer_size);
-        scan_desc->SetPackInterval(FLAGS_tera_scan_pack_interval);
-
-        index_table_vec.push_back(ts_table);
-        scan_desc_vec.push_back(scan_desc);
     }
-
 
     for (size_t i = 0; i < index_condition_ex_list.size(); i++) {
         bool skip_scan = false;
