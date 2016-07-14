@@ -528,6 +528,7 @@ class PosixEnv : public Env {
     int fd = open(fname.c_str(), O_RDONLY);
     if (fd < 0) {
       s = IOError(fname, errno);
+#if 0
     } else if (mmap_limit_.Acquire()) {
       uint64_t size;
       s = GetFileSize(fname, &size);
@@ -543,6 +544,7 @@ class PosixEnv : public Env {
       if (!s.ok()) {
         mmap_limit_.Release();
       }
+#endif
     } else {
       *result = new PosixRandomAccessFile(fname, fd);
     }
