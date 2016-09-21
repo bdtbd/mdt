@@ -421,7 +421,7 @@ int TableImpl::InternalBatchWrite(WriteContext* context, std::vector<WriteContex
         data_location.size_ = ctx->req_->data.size();
         data_location.offset_ += ctx->offset_;
         if (res < 0) {
-            LOG(WARNING) << "FS.error: pri_key " << ctx->req_->primary_key
+            VLOG(6) << "FS.error: pri_key " << ctx->req_->primary_key
                 << ", offset " << data_location.offset_
                 << ", size " << data_location.size_;
         }
@@ -547,7 +547,7 @@ void PutCallback(tera::RowMutation* row) {
     // dump tera put error
     ::tera::ErrorCode error = row->GetError();
     if (error.GetType() != ::tera::ErrorCode::kOK) {
-        VLOG(5) << "Tera_write_error " << error.GetReason() << ", rowkey " << row->RowKey();
+        VLOG(6) << "Tera_write_error " << error.GetReason() << ", rowkey " << row->RowKey();
     }
 
     PutContext* context = (PutContext*)row->GetContext();
@@ -571,7 +571,7 @@ int TableImpl::WriteIndexTable(const StoreRequest* req, StoreResponse* resp,
         const std::string& index_name = it->index_name;
         const std::string& index_key = it->index_key;
         if (index_name == "" || index_key == "") {
-            LOG(WARNING) << "invalid index : " << index_name << " : " << index_key;
+            VLOG(6) << "invalid index : " << index_name << " : " << index_key;
             ReleasePutContext(context);
             continue;
         }
