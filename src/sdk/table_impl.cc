@@ -547,7 +547,7 @@ void PutCallback(tera::RowMutation* row) {
     // dump tera put error
     ::tera::ErrorCode error = row->GetError();
     if (error.GetType() != ::tera::ErrorCode::kOK) {
-        LOG(WARNING) << "Tera_write_error " << error.GetReason() << ", rowkey " << row->RowKey();
+        VLOG(5) << "Tera_write_error " << error.GetReason() << ", rowkey " << row->RowKey();
     }
 
     PutContext* context = (PutContext*)row->GetContext();
