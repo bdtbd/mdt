@@ -68,10 +68,12 @@ void Nfs::LoadSymbol(const char* lib_path) {
   void* dl = NULL;
 
   fprintf(stderr, "libnfs.so path %s\n", lib_path);
-  (lib_path != NULL) && (dl = dlopen(lib_path, RTLD_NOW | RTLD_GLOBAL));
-  (dl == NULL) && (dl = dlopen("./libnfs.so", RTLD_NOW | RTLD_GLOBAL));
-  (dl == NULL) && (dl = dlopen("../lib/libnfs.so", RTLD_NOW | RTLD_GLOBAL));
-  (dl == NULL) && (dl = dlopen("libnfs.so", RTLD_NOW | RTLD_GLOBAL));
+  // change from RTLD_NOW | RTLD_GLOBAL to the following to avoid export symbol in so liduo04
+  int flag = RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND;
+  (lib_path != NULL) && (dl = dlopen(lib_path, flag));
+  (dl == NULL) && (dl = dlopen("./libnfs.so", flag));
+  (dl == NULL) && (dl = dlopen("../lib/libnfs.so", flag));
+  (dl == NULL) && (dl = dlopen("libnfs.so", flag));
   if (dl == NULL) {
     fprintf(stderr, "dlopen libnfs.so error: %s\n", dlerror());
     abort();
